@@ -31,7 +31,7 @@ app.get('/gate', (req, res) => {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CC Estimating Calendar</title>
+  <title>Liberty Estimating Calendar</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { background: #0f1117; color: #e2e8f0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
@@ -49,7 +49,7 @@ app.get('/gate', (req, res) => {
 <body>
   <div class="gate-card">
     <div class="gate-logo">📋</div>
-    <h1>CC Estimating Calendar</h1>
+    <h1>Liberty Estimating Calendar</h1>
     <p>Enter the access code to continue</p>
     <div class="error" id="err">Incorrect access code. Try again.</div>
     <form method="POST" action="/api/auth/access">
@@ -214,7 +214,7 @@ mongoose.connect(MONGODB_URI)
     const PORT = process.env.PORT || 3000;
     app.listen(PORT, '0.0.0.0', () => {
       console.log('\n========================================');
-      console.log('  CC Estimating Calendar');
+      console.log('  Liberty Estimating Calendar');
       console.log(`  http://localhost:${PORT}`);
       console.log('========================================\n');
     });

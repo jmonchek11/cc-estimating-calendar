@@ -1,7 +1,7 @@
 {
   "name": "cc-estimating-calendar",
   "version": "1.0.0",
-  "description": "CC Estimating Calendar - Bid & Follow-up Tracker",
+  "description": "Liberty Estimating Calendar - Bid & Follow-up Tracker",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
