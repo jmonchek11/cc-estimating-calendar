@@ -22,6 +22,67 @@ app.use(session({
   cookie: { maxAge: 8 * 60 * 60 * 1000 }
 }));
 
+// ── Access Gate ───────────────────────────────────────────────────────────────
+const ACCESS_CODE = process.env.ACCESS_CODE || '';
+
+app.get('/gate', (req, res) => {
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CC Estimating Calendar</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0f1117; color: #e2e8f0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+    .gate-card { background: #1a1d2e; border: 1px solid #2d3148; border-radius: 12px; padding: 48px 40px; width: 100%; max-width: 400px; text-align: center; box-shadow: 0 20px 60px rgba(0,0,0,0.4); }
+    .gate-logo { font-size: 2.5rem; margin-bottom: 12px; }
+    h1 { font-size: 1.4rem; font-weight: 600; margin-bottom: 6px; color: #f1f5f9; }
+    p { color: #94a3b8; font-size: 0.9rem; margin-bottom: 32px; }
+    input { width: 100%; padding: 12px 16px; background: #0f1117; border: 1px solid #2d3148; border-radius: 8px; color: #f1f5f9; font-size: 1rem; margin-bottom: 12px; outline: none; transition: border-color 0.2s; }
+    input:focus { border-color: #6366f1; }
+    button { width: 100%; padding: 12px; background: #6366f1; color: #fff; border: none; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+    button:hover { background: #4f46e5; }
+    .error { color: #f87171; font-size: 0.85rem; margin-bottom: 12px; display: none; }
+  </style>
+</head>
+<body>
+  <div class="gate-card">
+    <div class="gate-logo">📋</div>
+    <h1>CC Estimating Calendar</h1>
+    <p>Enter the access code to continue</p>
+    <div class="error" id="err">Incorrect access code. Try again.</div>
+    <form method="POST" action="/api/auth/access">
+      <input type="password" name="code" placeholder="Access code" autofocus autocomplete="off">
+      <button type="submit">Continue</button>
+    </form>
+  </div>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('err')) document.getElementById('err').style.display = 'block';
+  </script>
+</body>
+</html>`);
+});
+
+app.post('/api/auth/access', express.urlencoded({ extended: false }), (req, res) => {
+  if (req.body.code === ACCESS_CODE) {
+    req.session.accessGranted = true;
+    res.redirect('/');
+  } else {
+    res.redirect('/gate?err=1');
+  }
+});
+
+// Gate middleware — intercepts the main app page
+app.use((req, res, next) => {
+  if (!ACCESS_CODE) return next(); // skip gate if no code set
+  if (req.path === '/' || req.path === '/index.html') {
+    if (!req.session.accessGranted) return res.redirect('/gate');
+  }
+  next();
+});
+
 // Serve static files before auth middleware
 app.use(express.static(path.join(__dirname, 'public')));
 
