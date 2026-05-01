@@ -861,7 +861,7 @@ async function renderDigest(main) {
 
     <div class="card" style="max-width:860px">
       <div class="digest-header">
-        <h1 style="font-size:20px;font-weight:700">CC Estimating — Weekly Digest</h1>
+        <h1 style="font-size:20px;font-weight:700">Liberty Estimating — Weekly Digest</h1>
         <div class="digest-date">Week of ${weekRange} &nbsp;·&nbsp; Generated ${new Date().toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'})}</div>
       </div>
 
