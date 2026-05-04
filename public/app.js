@@ -405,6 +405,7 @@ async function renderBidTable(main, stage, title, icon) {
           <small>${b.bid_number ? '#' + esc(b.bid_number) : ''} ${b.job_number ? '· ' + esc(b.job_number) : ''}</small>
         </td>
         <td class="td-customer">${esc(b.customer) || '—'}</td>
+        <td class="td-date">${fmt(b.date_received, 'date')}</td>
         <td class="td-amount">${fmt(b.estimate_amount, 'currency')}</td>
         <td>
           <div class="progress-bar"><div class="progress-fill ${pctWidth >= 100 ? 'complete' : ''}" style="width:${pctWidth}%"></div></div>
@@ -454,6 +455,7 @@ async function renderBidTable(main, stage, title, icon) {
           <tr>
             <th>Project</th>
             <th>Customer</th>
+            <th>Received</th>
             <th>Amount</th>
             <th>Progress</th>
             <th>Due Date</th>
@@ -522,6 +524,7 @@ async function renderBidTableWithFilters(main, stage, title, icon) {
       <tr class="${rowClass} clickable-row" data-id="${b.id}" onclick="openJobPanel(${b.id})">
         <td class="td-project">${esc(b.project_name)}<small>${b.bid_number ? '#' + esc(b.bid_number) : ''} ${b.job_number ? '· ' + esc(b.job_number) : ''}</small></td>
         <td class="td-customer">${esc(b.customer) || '—'}</td>
+        <td class="td-date">${fmt(b.date_received, 'date')}</td>
         <td class="td-amount">${fmt(b.estimate_amount, 'currency')}</td>
         <td><div class="progress-bar"><div class="progress-fill ${pctWidth >= 100 ? 'complete' : ''}" style="width:${pctWidth}%"></div></div><small style="color:var(--text-muted);font-size:11px">${pctWidth}%</small></td>
         <td class="td-date ${dueDateClass}">${fmt(b.estimate_due_date, 'date')}</td>
@@ -680,6 +683,7 @@ async function renderFollowUps(main) {
       <tr class="${rowClass} clickable-row" onclick="openJobPanel(${b.id})">
         <td class="td-project">${esc(b.project_name)}<small>${b.bid_number ? '#' + esc(b.bid_number) : ''}</small></td>
         <td class="td-customer">${esc(b.customer) || '—'}</td>
+        <td class="td-date">${fmt(b.date_received, 'date')}</td>
         <td class="td-amount">${fmt(b.estimate_amount, 'currency')}</td>
         <td><span class="badge badge-stage">${stageName(b.stage)}</span></td>
         <td>${ownerCell(b)}</td>
@@ -738,7 +742,7 @@ async function renderFollowUps(main) {
       <table>
         <thead>
           <tr>
-            <th>Project</th><th>Customer</th><th>Amount</th><th>Stage</th>
+            <th>Project</th><th>Customer</th><th>Received</th><th>Amount</th><th>Stage</th>
             <th>Owner</th><th>Follow-up Due</th><th>Actions</th>
           </tr>
         </thead>
