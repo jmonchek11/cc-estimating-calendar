@@ -13,6 +13,7 @@ const State = {
   analyticsPeriod: 'all',
   analyticsSort: 'volume',
   globalSearch: '',
+  cleanupFilters: { issue: '', search: '', person: '', stage: '', sort: 'issues', mineOnly: false },
 };
 
 // ─────────────────────────────────────────────
@@ -58,6 +59,45 @@ function followupUrgency(bid) {
   if (diff === 0) return 'today';
   if (diff <= 7) return 'this-week';
   return 'upcoming';
+}
+
+// Compute an array of data-quality issues for a bid
+function getBidIssues(bid) {
+  const issues = [];
+  const ACTIVE = ['opportunity', 'active_bid', 'active_co', 'follow_up'];
+  const isActive = ACTIVE.includes(bid.stage);
+
+  if (!bid.estimate_amount)
+    issues.push({ key: 'no_price',       label: 'No Price',         color: '#dc2626' });
+  if (!bid.customer)
+    issues.push({ key: 'no_customer',    label: 'No Customer',      color: '#9333ea' });
+  if (!bid.estimator_id)
+    issues.push({ key: 'no_estimator',   label: 'No Estimator',     color: '#2563eb' });
+  if (!bid.salesperson_id)
+    issues.push({ key: 'no_salesperson', label: 'No Salesperson',   color: '#059669' });
+
+  if (isActive) {
+    if (!bid.estimate_due_date)
+      issues.push({ key: 'no_due_date',  label: 'No Due Date',      color: '#d97706' });
+
+    if (!bid.next_followup_date) {
+      issues.push({ key: 'no_followup',  label: 'No Follow-up Set', color: '#ea580c' });
+    } else {
+      const overdueDays = Math.floor(-daysDiff(bid.next_followup_date)); // positive = days overdue
+      if (overdueDays > 30)
+        issues.push({ key: 'stale_followup', label: overdueDays + 'd Overdue', color: '#b91c1c' });
+    }
+
+    if (bid.date_received) {
+      const ageDays = Math.floor(-daysDiff(bid.date_received));
+      if (ageDays > 365)
+        issues.push({ key: 'very_stale', label: '1yr+ Old',         color: '#78716c' });
+      else if (ageDays > 180)
+        issues.push({ key: 'stale',      label: '6mo+ Old',         color: '#a78bfa' });
+    }
+  }
+
+  return issues;
 }
 
 function stageName(stage) {
@@ -173,6 +213,7 @@ async function renderPage(page) {
       case 'digest':        return await renderDigest(main);
       case 'analytics':     return await renderAnalytics(main);
       case 'history':       return await renderHistory(main);
+      case 'cleanup':       return await renderCleanup(main);
       case 'settings':      return await renderSettings(main);
       default:              return await renderDashboard(main);
     }
@@ -1432,6 +1473,239 @@ async function renderDigest(main) {
         </div>
       </div>
     </div>`;
+}
+
+// ─────────────────────────────────────────────
+// DATA CLEANUP PAGE
+// ─────────────────────────────────────────────
+let cleanupSearchTimer;
+
+function setCleanupFilter(key, value) {
+  State.cleanupFilters[key] = value;
+  renderPage('cleanup');
+}
+
+function refreshCleanup() {
+  State.cleanupFilters.stage  = document.getElementById('cu-stage-filter')?.value  || '';
+  State.cleanupFilters.person = document.getElementById('cu-person-filter')?.value || '';
+  State.cleanupFilters.sort   = document.getElementById('cu-sort-filter')?.value   || 'issues';
+  renderPage('cleanup');
+}
+
+function debounceCleanup() {
+  clearTimeout(cleanupSearchTimer);
+  State.cleanupFilters.search = document.getElementById('cu-search')?.value || '';
+  cleanupSearchTimer = setTimeout(() => renderPage('cleanup'), 280);
+}
+
+function toggleCleanupMine() {
+  State.cleanupFilters.mineOnly = !State.cleanupFilters.mineOnly;
+  renderPage('cleanup');
+}
+
+function clearCleanupFilters() {
+  State.cleanupFilters = { issue: '', search: '', person: '', stage: '', sort: 'issues', mineOnly: false };
+  renderPage('cleanup');
+}
+
+async function renderCleanup(main) {
+  main.innerHTML = '<div class="loading-screen"><div class="spinner"></div><p>Loading…</p></div>';
+
+  // Fetch all non-deleted bids across every stage
+  const allBids = await api.get('/api/bids?stage=opportunity,active_bid,active_co,follow_up,awarded,not_awarded,closed');
+
+  // Tag every bid with its issues
+  const tagged = allBids.map(b => ({ ...b, _issues: getBidIssues(b) }));
+  const withIssues = tagged.filter(b => b._issues.length > 0);
+
+  // Compute per-issue counts (across all bids, before filtering)
+  const issueCounts = {};
+  withIssues.forEach(b => b._issues.forEach(i => { issueCounts[i.key] = (issueCounts[i.key] || 0) + 1; }));
+
+  // Issue chip definitions (only show chips that have data)
+  const CHIP_DEFS = [
+    { key: 'no_price',       label: 'No Price',         color: '#dc2626' },
+    { key: 'no_customer',    label: 'No Customer',      color: '#9333ea' },
+    { key: 'no_estimator',   label: 'No Estimator',     color: '#2563eb' },
+    { key: 'no_salesperson', label: 'No Salesperson',   color: '#059669' },
+    { key: 'no_due_date',    label: 'No Due Date',      color: '#d97706' },
+    { key: 'no_followup',    label: 'No Follow-up',     color: '#ea580c' },
+    { key: 'stale_followup', label: 'Follow-up 30d+',   color: '#b91c1c' },
+    { key: 'stale',          label: '6mo+ Old',         color: '#a78bfa' },
+    { key: 'very_stale',     label: '1yr+ Old',         color: '#78716c' },
+  ].filter(c => issueCounts[c.key]);
+
+  const { issue, search, person, stage, sort, mineOnly } = State.cleanupFilters;
+
+  // Apply filters
+  let filtered = withIssues;
+
+  if (issue)  filtered = filtered.filter(b => b._issues.some(i => i.key === issue));
+  if (stage)  filtered = filtered.filter(b => b.stage === stage);
+  if (person) {
+    const pid = Number(person);
+    filtered = filtered.filter(b => b.estimator_id === pid || b.salesperson_id === pid);
+  }
+  if (mineOnly && State.currentUser) {
+    const uid = State.currentUser.id;
+    filtered = filtered.filter(b => b.estimator_id === uid || b.salesperson_id === uid);
+  }
+  if (search) {
+    const re = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    filtered = filtered.filter(b =>
+      re.test(b.project_name) || re.test(b.bid_number || '') ||
+      re.test(b.customer || '') || re.test(b.job_number || '')
+    );
+  }
+
+  // Sort
+  if (sort === 'issues') {
+    filtered.sort((a, b) => b._issues.length - a._issues.length || a.project_name.localeCompare(b.project_name));
+  } else if (sort === 'oldest') {
+    filtered.sort((a, b) => {
+      if (!a.date_received && !b.date_received) return 0;
+      if (!a.date_received) return 1;
+      if (!b.date_received) return -1;
+      return a.date_received.localeCompare(b.date_received);
+    });
+  } else if (sort === 'stage') {
+    const so = ['active_bid','active_co','follow_up','opportunity','awarded','not_awarded','closed'];
+    filtered.sort((a, b) => so.indexOf(a.stage) - so.indexOf(b.stage));
+  } else if (sort === 'name') {
+    filtered.sort((a, b) => a.project_name.localeCompare(b.project_name));
+  }
+
+  // ── Build chips ────────────────────────────────────────────────────────────
+  const activeFilter = issue;
+  const chipsHtml = `
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px">
+      <button class="cleanup-chip${!activeFilter ? ' active' : ''}"
+              onclick="setCleanupFilter('issue','')"
+              style="border-color:#64748b;${!activeFilter ? 'background:#64748b;color:#fff' : 'color:#64748b'}">
+        All Issues <span class="chip-count">${withIssues.length}</span>
+      </button>
+      ${CHIP_DEFS.map(c => `
+        <button class="cleanup-chip${activeFilter===c.key ? ' active' : ''}"
+                onclick="setCleanupFilter('issue','${c.key}')"
+                style="border-color:${c.color};${activeFilter===c.key ? `background:${c.color};color:#fff` : `color:${c.color}`}">
+          ${c.label} <span class="chip-count">${issueCounts[c.key]}</span>
+        </button>`).join('')}
+    </div>`;
+
+  // ── Filter bar ─────────────────────────────────────────────────────────────
+  const allPeople = State.team.filter(m => m.active);
+  const personOptions = allPeople
+    .map(m => `<option value="${m.id}" ${person==m.id?'selected':''}>${esc(m.initials)} – ${esc(m.name)}</option>`)
+    .join('');
+
+  // ── Progress bar (% of all bids that are clean) ────────────────────────────
+  const totalBids = allBids.length;
+  const cleanPct  = totalBids > 0 ? Math.round((totalBids - withIssues.length) / totalBids * 100) : 100;
+  const progressHtml = `
+    <div style="margin-bottom:16px;background:var(--card-bg);border-radius:8px;padding:14px 16px;border:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <span style="font-size:13px;font-weight:600;color:var(--text)">Data Quality Progress</span>
+        <span style="font-size:13px;color:${cleanPct===100?'#16a34a':'var(--text-muted)'};font-weight:700">${cleanPct}% complete</span>
+      </div>
+      <div style="height:8px;background:#e2e8f0;border-radius:4px;overflow:hidden">
+        <div style="height:100%;width:${cleanPct}%;background:${cleanPct>=80?'#16a34a':cleanPct>=50?'#d97706':'#dc2626'};border-radius:4px;transition:width 0.4s"></div>
+      </div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:6px">
+        ${totalBids - withIssues.length} of ${totalBids} bids fully complete · ${withIssues.length} need attention
+      </div>
+    </div>`;
+
+  // ── Table rows ─────────────────────────────────────────────────────────────
+  function missingCell(val, label) {
+    return val
+      ? `<span>${esc(String(val))}</span>`
+      : `<span style="color:#dc2626;font-size:11px;font-style:italic">${label}</span>`;
+  }
+
+  const rows = filtered.map(b => {
+    const issueTags = b._issues.map(i =>
+      `<span class="issue-tag" style="color:${i.color};background:${i.color}18;border-color:${i.color}40">${i.label}</span>`
+    ).join('');
+
+    return `
+      <tr class="clickable-row" onclick="openJobPanel(${b.id})">
+        <td class="td-project">${esc(b.project_name)}<small>${b.bid_number ? ' #' + esc(b.bid_number) : ''}</small></td>
+        <td><span class="badge badge-stage">${stageName(b.stage)}</span></td>
+        <td style="min-width:160px">${issueTags}</td>
+        <td>${missingCell(b.customer, 'Missing')}</td>
+        <td class="td-amount">${b.estimate_amount ? fmt(b.estimate_amount, 'currency') : '<span style="color:#dc2626;font-style:italic;font-size:12px">Missing</span>'}</td>
+        <td>${b.estimator_initials   ? `<span class="initials-pill">${esc(b.estimator_initials)}</span>`   : '<span style="color:#dc2626;font-size:12px">—</span>'}</td>
+        <td>${b.salesperson_initials ? `<span class="initials-pill" style="background:#dcfce7;color:#166534">${esc(b.salesperson_initials)}</span>` : '<span style="color:#dc2626;font-size:12px">—</span>'}</td>
+        <td class="td-date">${fmt(b.date_received, 'date')}</td>
+        <td onclick="event.stopPropagation()">
+          <button class="btn btn-primary btn-sm" onclick="openBidModal(${b.id})" title="Edit & fix this bid">✏️ Fix</button>
+        </td>
+      </tr>`;
+  }).join('');
+
+  // ── Assemble page ──────────────────────────────────────────────────────────
+  main.innerHTML = `
+    <div class="page-header">
+      <div>
+        <div class="page-title">🧹 Data Cleanup</div>
+        <div class="page-subtitle">
+          ${withIssues.length} bids with missing data · ${filtered.length} shown
+          ${(issue||stage||person||mineOnly||search) ? ' <em style="color:var(--text-muted)">(filtered)</em>' : ''}
+        </div>
+      </div>
+      <button class="btn btn-secondary" onclick="clearCleanupFilters()">Reset Filters</button>
+    </div>
+
+    ${progressHtml}
+    ${chipsHtml}
+
+    <div class="filter-bar">
+      <input type="text" id="cu-search"
+             placeholder="Search project, bid #, customer…"
+             value="${esc(search)}" oninput="debounceCleanup()" />
+      <select id="cu-person-filter" onchange="refreshCleanup()">
+        <option value="">All People</option>
+        ${personOptions}
+      </select>
+      <select id="cu-stage-filter" onchange="refreshCleanup()">
+        <option value="">All Stages</option>
+        <option value="opportunity">Opportunity</option>
+        <option value="active_bid">Active Bid</option>
+        <option value="active_co">Change Order</option>
+        <option value="follow_up">Follow Up</option>
+        <option value="awarded">Awarded</option>
+        <option value="not_awarded">Not Awarded</option>
+        <option value="closed">Closed</option>
+      </select>
+      <select id="cu-sort-filter" onchange="refreshCleanup()">
+        <option value="issues">Sort: Most Issues</option>
+        <option value="oldest">Sort: Oldest First</option>
+        <option value="stage">Sort: By Stage</option>
+        <option value="name">Sort: A–Z</option>
+      </select>
+      ${State.currentUser ? `<button class="mine-toggle ${mineOnly ? 'active' : ''}" onclick="toggleCleanupMine()"><span class="toggle-dot"></span> Mine Only</button>` : ''}
+    </div>
+
+    <div class="table-wrapper">
+      ${filtered.length ? `
+      <table>
+        <thead><tr>
+          <th>Project</th><th>Stage</th><th>Issues</th><th>Customer</th>
+          <th>Amount</th><th>Est.</th><th>Sales</th><th>Received</th><th></th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>` : `
+      <div class="empty-state">
+        <div class="empty-state-icon">${withIssues.length === 0 ? '🏆' : '🔍'}</div>
+        <div class="empty-state-title">${withIssues.length === 0 ? 'All bids are complete!' : 'No bids match your filters'}</div>
+        <div class="empty-state-desc">${withIssues.length === 0 ? 'Great work — no missing data found.' : 'Try adjusting the filters above.'}</div>
+      </div>`}
+    </div>`;
+
+  // Restore select values after render
+  if (stage)  document.getElementById('cu-stage-filter').value  = stage;
+  if (person) document.getElementById('cu-person-filter').value = person;
+  if (sort !== 'issues') document.getElementById('cu-sort-filter').value = sort;
 }
 
 // ─────────────────────────────────────────────

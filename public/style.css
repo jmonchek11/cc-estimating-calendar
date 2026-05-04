@@ -949,4 +949,39 @@ tbody td {
   z-index: 1;
 }
 .sidebar-search-clear:hover { color: #94a3b8; background: #334155; }
+
+/* ── DATA CLEANUP ── */
+.cleanup-chip {
+  padding: 5px 11px;
+  border-radius: 16px;
+  border: 1px solid;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  transition: all 0.15s;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+.cleanup-chip:hover { opacity: 0.8; }
+.cleanup-chip .chip-count {
+  background: rgba(0,0,0,0.12);
+  border-radius: 8px;
+  padding: 0 6px;
+  margin-left: 5px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.cleanup-chip.active .chip-count { background: rgba(255,255,255,0.25); }
+.issue-tag {
+  display: inline-block;
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+  margin: 1px 2px 1px 0;
+  border: 1px solid;
+}
 #pw-requirements div.met { color: #4ade80; }
