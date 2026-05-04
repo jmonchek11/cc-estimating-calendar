@@ -48,8 +48,7 @@ app.get('/gate', (req, res) => {
 </head>
 <body>
   <div class="gate-card">
-    <div class="gate-logo">📋</div>
-    <h1>Liberty Estimating Calendar</h1>
+    <img src="/logo.png" alt="Liberty Integrated Solutions" style="width:200px;object-fit:contain;margin-bottom:20px" />
     <p>Enter the access code to continue</p>
     <div class="error" id="err">Incorrect access code. Try again.</div>
     <form method="POST" action="/api/auth/access">
