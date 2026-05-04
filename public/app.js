@@ -297,7 +297,7 @@ async function renderDashboard(main) {
     <div class="activity-item" style="cursor:pointer" onclick="openJobPanel(${b.id})">
       <span class="badge badge-stage">${stageName(b.stage)}</span>
       <span class="activity-name">${esc(b.project_name)}</span>
-      <span class="activity-time">${relativeTime(b.updated_at?.split('T')[0])}</span>
+      <span class="activity-time">${relativeTime(b.updated_at?.substring(0, 10))}</span>
     </div>`).join('');
 
   const scopeLabel = isMine ? `${esc(firstName(State.currentUser.name))}'s` : 'Global';
