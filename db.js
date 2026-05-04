@@ -537,6 +537,162 @@ async function logFollowup(bidId, { followup_date, contacted_by, contact_method,
   return formatFollowup(doc);
 }
 
+// ── Analytics ─────────────────────────────────────────────────────────────────
+
+async function getAnalytics(since) {
+  const DECIDED = ['awarded', 'not_awarded'];
+  const ACTIVE   = ['opportunity', 'active_bid', 'active_co', 'follow_up'];
+
+  // Base match for decided bids (optionally filtered by date_received)
+  const baseDecided = { is_deleted: 0, stage: { $in: DECIDED } };
+  if (since) baseDecided.date_received = { $gte: since };
+
+  // Fill last 24 months for volume chart
+  const volumeMonths = [];
+  for (let i = 23; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(1);
+    d.setMonth(d.getMonth() - i);
+    volumeMonths.push(d.toISOString().substring(0, 7)); // YYYY-MM
+  }
+  const volumeStart = volumeMonths[0] + '-01';
+
+  const [
+    overallResult,
+    byCustomerRaw,
+    byEstimatorRaw,
+    bySalespersonRaw,
+    rawVolume,
+    topActivePipeline,
+  ] = await Promise.all([
+
+    // Overall win/loss totals
+    Bid.aggregate([
+      { $match: baseDecided },
+      { $group: {
+        _id: null,
+        awarded:       { $sum: { $cond: [{ $eq: ['$stage', 'awarded'] }, 1, 0] } },
+        not_awarded:   { $sum: { $cond: [{ $eq: ['$stage', 'not_awarded'] }, 1, 0] } },
+        awarded_value: { $sum: { $cond: [{ $eq: ['$stage', 'awarded'] }, { $ifNull: ['$estimate_amount', 0] }, 0] } },
+        total_value:   { $sum: { $ifNull: ['$estimate_amount', 0] } },
+      }}
+    ]),
+
+    // Win rate by customer (primary customer field)
+    Bid.aggregate([
+      { $match: Object.assign({}, baseDecided, { customer: { $nin: [null, ''] } }) },
+      { $group: {
+        _id: '$customer',
+        awarded:       { $sum: { $cond: [{ $eq: ['$stage', 'awarded'] }, 1, 0] } },
+        not_awarded:   { $sum: { $cond: [{ $eq: ['$stage', 'not_awarded'] }, 1, 0] } },
+        awarded_value: { $sum: { $cond: [{ $eq: ['$stage', 'awarded'] }, { $ifNull: ['$estimate_amount', 0] }, 0] } },
+        total_value:   { $sum: { $ifNull: ['$estimate_amount', 0] } },
+      }},
+      { $addFields: { total: { $add: ['$awarded', '$not_awarded'] } } },
+      { $sort: { total: -1 } },
+      { $limit: 50 },
+    ]),
+
+    // Win rate by estimator
+    Bid.aggregate([
+      { $match: Object.assign({}, baseDecided, { estimator_id: { $ne: null } }) },
+      { $group: {
+        _id: '$estimator_id',
+        awarded:       { $sum: { $cond: [{ $eq: ['$stage', 'awarded'] }, 1, 0] } },
+        not_awarded:   { $sum: { $cond: [{ $eq: ['$stage', 'not_awarded'] }, 1, 0] } },
+        awarded_value: { $sum: { $cond: [{ $eq: ['$stage', 'awarded'] }, { $ifNull: ['$estimate_amount', 0] }, 0] } },
+      }},
+    ]),
+
+    // Win rate by salesperson
+    Bid.aggregate([
+      { $match: Object.assign({}, baseDecided, { salesperson_id: { $ne: null } }) },
+      { $group: {
+        _id: '$salesperson_id',
+        awarded:       { $sum: { $cond: [{ $eq: ['$stage', 'awarded'] }, 1, 0] } },
+        not_awarded:   { $sum: { $cond: [{ $eq: ['$stage', 'not_awarded'] }, 1, 0] } },
+        awarded_value: { $sum: { $cond: [{ $eq: ['$stage', 'awarded'] }, { $ifNull: ['$estimate_amount', 0] }, 0] } },
+      }},
+    ]),
+
+    // Monthly bid volume (last 24 months by date_received)
+    Bid.aggregate([
+      { $match: { is_deleted: 0, date_received: { $type: 'string', $gte: volumeStart } } },
+      { $group: {
+        _id:           { $substr: ['$date_received', 0, 7] },
+        count:         { $sum: 1 },
+        awarded:       { $sum: { $cond: [{ $eq: ['$stage', 'awarded'] }, 1, 0] } },
+        awarded_value: { $sum: { $cond: [{ $eq: ['$stage', 'awarded'] }, { $ifNull: ['$estimate_amount', 0] }, 0] } },
+      }},
+      { $sort: { _id: 1 } },
+    ]),
+
+    // Top active pipeline customers (no date filter — always current)
+    Bid.aggregate([
+      { $match: { is_deleted: 0, stage: { $in: ACTIVE }, customer: { $nin: [null, ''] } } },
+      { $group: {
+        _id: '$customer',
+        count:          { $sum: 1 },
+        pipeline_value: { $sum: { $ifNull: ['$estimate_amount', 0] } },
+      }},
+      { $sort: { pipeline_value: -1 } },
+      { $limit: 10 },
+    ]),
+  ]);
+
+  // Resolve team members for estimator/salesperson lookups
+  const allTeam = await TeamMember.find({}).lean();
+  const teamMap = {};
+  allTeam.forEach(m => { teamMap[m._id] = m; });
+
+  function formatPersonRates(rows) {
+    return rows
+      .map(r => {
+        const m = teamMap[r._id] || {};
+        const total = r.awarded + r.not_awarded;
+        return {
+          id: r._id, name: m.name || 'Unknown', initials: m.initials || '?',
+          awarded: r.awarded, not_awarded: r.not_awarded, total,
+          win_rate: total > 0 ? r.awarded / total : 0,
+          awarded_value: r.awarded_value,
+        };
+      })
+      .filter(r => r.total > 0)
+      .sort((a, b) => b.total - a.total);
+  }
+
+  // Fill month gaps with zeroes
+  const volMap = {};
+  rawVolume.forEach(m => { volMap[m._id] = m; });
+  const monthlyVolume = volumeMonths.map(ym =>
+    volMap[ym] || { _id: ym, count: 0, awarded: 0, awarded_value: 0 }
+  );
+
+  const overall = overallResult[0] || { awarded: 0, not_awarded: 0, awarded_value: 0, total_value: 0 };
+  const overallTotal = overall.awarded + overall.not_awarded;
+
+  return {
+    overall: {
+      awarded: overall.awarded,
+      not_awarded: overall.not_awarded,
+      total: overallTotal,
+      win_rate: overallTotal > 0 ? overall.awarded / overallTotal : 0,
+      awarded_value: overall.awarded_value,
+      total_value: overall.total_value,
+    },
+    byCustomer: byCustomerRaw.map(r => ({
+      customer: r._id,
+      awarded: r.awarded, not_awarded: r.not_awarded, total: r.total,
+      win_rate: r.total > 0 ? r.awarded / r.total : 0,
+      awarded_value: r.awarded_value, total_value: r.total_value,
+    })),
+    byEstimator:   formatPersonRates(byEstimatorRaw),
+    bySalesperson: formatPersonRates(bySalespersonRaw),
+    monthlyVolume,
+    topActivePipeline,
+  };
+}
+
 // ── Seed ──────────────────────────────────────────────────────────────────────
 
 const TEAM_NAMES = [
@@ -585,6 +741,6 @@ module.exports = {
   loginUser, getMember, setPassword, adminSetTempPassword, getMyStats,
   getBids, getBid, createBid, updateBid, deleteBid,
   getFollowups, logFollowup,
-  getStats, getDigest,
+  getStats, getDigest, getAnalytics,
   seedTeamData,
 };

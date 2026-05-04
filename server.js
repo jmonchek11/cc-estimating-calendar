@@ -168,6 +168,12 @@ app.get('/api/my-stats', async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── ANALYTICS ─────────────────────────────────────────────────────────────────
+app.get('/api/analytics', async (req, res) => {
+  try { res.json(await db.getAnalytics(req.query.since || null)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── Start ─────────────────────────────────────────────────────────────────────
 const MONGODB_URI = process.env.MONGODB_URI;
 if (!MONGODB_URI) {

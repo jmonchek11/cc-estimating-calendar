@@ -10,6 +10,8 @@ const State = {
   currentPanelBidId: null,
   dashboardView: 'mine',
   quickLogBidId: null,
+  analyticsPeriod: 'all',
+  analyticsSort: 'volume',
 };
 
 // ─────────────────────────────────────────────
@@ -167,6 +169,7 @@ async function renderPage(page) {
       case 'change-orders': return await renderBidTable(main, 'active_co', 'Change Orders', '🟠');
       case 'follow-ups':    return await renderFollowUps(main);
       case 'digest':        return await renderDigest(main);
+      case 'analytics':     return await renderAnalytics(main);
       case 'history':       return await renderHistory(main);
       case 'settings':      return await renderSettings(main);
       default:              return await renderDashboard(main);
@@ -764,6 +767,238 @@ async function renderFollowUps(main) {
   if (urgencyVal) document.getElementById('fu-urgency-filter').value = urgencyVal;
   if (ownerVal)   document.getElementById('fu-owner-filter').value = ownerVal;
   if (sortVal !== 'urgency') document.getElementById('fu-sort-filter').value = sortVal;
+}
+
+// ─────────────────────────────────────────────
+// ANALYTICS PAGE
+// ─────────────────────────────────────────────
+function analyticsSinceDate(period) {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  if (period === '3m')  { d.setMonth(d.getMonth() - 3); }
+  else if (period === '6m')  { d.setMonth(d.getMonth() - 6); }
+  else if (period === '1y')  { d.setFullYear(d.getFullYear() - 1); }
+  else if (period === 'ytd') { d.setMonth(0); d.setDate(1); }
+  else return null;
+  return d.toISOString().split('T')[0];
+}
+
+async function renderAnalytics(main) {
+  main.innerHTML = '<div class="loading-screen"><div class="spinner"></div><p>Loading analytics…</p></div>';
+
+  const period  = State.analyticsPeriod || 'all';
+  const sortBy  = State.analyticsSort   || 'volume';
+  const since   = analyticsSinceDate(period);
+  const url     = '/api/analytics' + (since ? `?since=${encodeURIComponent(since)}` : '');
+
+  const d = await api.get(url);
+  const { overall, byCustomer, byEstimator, bySalesperson, monthlyVolume, topActivePipeline } = d;
+
+  const periodLabels = { all: 'All Time', '3m': 'Last 3 Months', '6m': 'Last 6 Months', '1y': 'Last 12 Months', ytd: 'Year to Date' };
+
+  // ── KPI values ─────────────────────────────────────────────
+  const winRatePct  = Math.round((overall.win_rate || 0) * 100);
+  const avgDealSize = overall.awarded > 0 ? overall.awarded_value / overall.awarded : 0;
+  const winColor    = winRatePct >= 50 ? '#16a34a' : '#dc2626';
+
+  // ── Customer win rate table ────────────────────────────────
+  let customers = [...byCustomer];
+  if (sortBy === 'rate')  customers.sort((a, b) => b.win_rate - a.win_rate || b.total - a.total);
+  else if (sortBy === 'value') customers.sort((a, b) => b.awarded_value - a.awarded_value);
+  // default 'volume' already sorted by server
+
+  function winRateBar(rate, height = 8) {
+    const color = rate >= 60 ? '#16a34a' : rate >= 40 ? '#d97706' : '#dc2626';
+    return `<div style="display:flex;align-items:center;gap:8px">
+      <div style="flex:1;height:${height}px;background:#e2e8f0;border-radius:4px;overflow:hidden;min-width:50px">
+        <div style="height:100%;width:${rate}%;background:${color};border-radius:4px"></div>
+      </div>
+      <span style="font-weight:700;color:${color};min-width:34px;text-align:right;font-size:12px">${rate}%</span>
+    </div>`;
+  }
+
+  const customerRows = customers.slice(0, 30).map(c => {
+    const rate = Math.round(c.win_rate * 100);
+    return `<tr>
+      <td style="font-weight:500;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(c.customer)}">${esc(c.customer)}</td>
+      <td style="text-align:center;color:#16a34a;font-weight:700">${c.awarded}</td>
+      <td style="text-align:center;color:#dc2626;font-weight:700">${c.not_awarded}</td>
+      <td style="min-width:130px">${winRateBar(rate)}</td>
+      <td style="text-align:right">${fmt(c.awarded_value, 'currency')}</td>
+      <td style="text-align:right;color:var(--text-muted)">${fmt(c.total_value, 'currency')}</td>
+      <td style="text-align:center;color:var(--text-muted)">${c.total}</td>
+    </tr>`;
+  }).join('');
+
+  // ── Person win rate rows ───────────────────────────────────
+  function personRows(people) {
+    if (!people.length) return '<tr><td colspan="5" class="no-data" style="padding:10px">No data for this period</td></tr>';
+    return people.map(p => {
+      const rate = Math.round(p.win_rate * 100);
+      return `<tr>
+        <td><span class="initials-pill" style="margin-right:4px">${esc(p.initials)}</span>${esc(p.name)}</td>
+        <td style="text-align:center;color:#16a34a;font-weight:700">${p.awarded}</td>
+        <td style="text-align:center;color:#dc2626;font-weight:700">${p.not_awarded}</td>
+        <td style="min-width:110px">${winRateBar(rate, 6)}</td>
+        <td style="text-align:right;font-size:12px">${fmt(p.awarded_value, 'currency')}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  // ── Monthly volume bar chart ────────────────────────────────
+  const maxCount = Math.max(...monthlyVolume.map(m => m.count), 1);
+  const monthBars = monthlyVolume.map(m => {
+    const barPct = Math.max(4, Math.round((m.count / maxCount) * 100));
+    const label  = new Date(m._id + '-15T12:00:00').toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+    const hasData = m.count > 0;
+    return `<div style="display:flex;flex-direction:column;align-items:center;gap:2px;flex:1;min-width:0">
+      <div style="font-size:9px;font-weight:600;color:${hasData ? 'var(--text)' : 'transparent'}">${m.count || ''}</div>
+      <div style="width:100%;height:80px;display:flex;flex-direction:column;justify-content:flex-end">
+        <div style="width:100%;height:${barPct}%;background:${hasData ? '#3b82f6' : '#e2e8f0'};border-radius:3px 3px 0 0;min-height:2px" title="${m.count} bids in ${m._id}"></div>
+      </div>
+      <div style="font-size:8px;color:var(--text-muted);text-align:center;line-height:1.1;writing-mode:initial">${label}</div>
+    </div>`;
+  }).join('');
+
+  // ── Top active pipeline customers ──────────────────────────
+  const maxPipe = Math.max(...topActivePipeline.map(c => c.pipeline_value || 0), 1);
+  const pipeRows = topActivePipeline.map(c => {
+    const pct = Math.max(6, Math.round((c.pipeline_value / maxPipe) * 100));
+    return `<div class="pipeline-bar-row">
+      <div class="pipeline-bar-label" style="min-width:130px;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(c._id)}">${esc(c._id)}</div>
+      <div class="pipeline-bar-track">
+        <div class="pipeline-bar-fill" style="width:${pct}%;background:#6366f1">
+          <span class="pipeline-bar-count">${c.count}</span>
+        </div>
+      </div>
+      <div class="pipeline-bar-value">${fmt(c.pipeline_value, 'currency')}</div>
+    </div>`;
+  }).join('') || '<div class="no-data" style="padding:8px 0">No active pipeline data</div>';
+
+  // ── Period selector (shared HTML) ─────────────────────────
+  const periodSelect = `
+    <select onchange="State.analyticsPeriod=this.value;renderPage('analytics')"
+      style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:white;cursor:pointer">
+      <option value="all" ${period==='all'?'selected':''}>All Time</option>
+      <option value="ytd" ${period==='ytd'?'selected':''}>Year to Date</option>
+      <option value="1y"  ${period==='1y' ?'selected':''}>Last 12 Months</option>
+      <option value="6m"  ${period==='6m' ?'selected':''}>Last 6 Months</option>
+      <option value="3m"  ${period==='3m' ?'selected':''}>Last 3 Months</option>
+    </select>`;
+
+  main.innerHTML = `
+    <div class="page-header">
+      <div>
+        <div class="page-title">📈 Analytics</div>
+        <div class="page-subtitle">Win rates, customer trends & pipeline intelligence · ${periodLabels[period]}</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">${periodSelect}</div>
+    </div>
+
+    <!-- KPI cards -->
+    <div class="stat-grid" style="margin-bottom:20px">
+      <div class="stat-card" style="border-top:3px solid ${winColor}">
+        <div class="stat-label">Overall Win Rate</div>
+        <div class="stat-value" style="color:${winColor}">${winRatePct}%</div>
+        <div class="stat-sub">${overall.awarded} won · ${overall.not_awarded} lost · ${overall.total} decided</div>
+      </div>
+      <div class="stat-card" style="border-top:3px solid #16a34a">
+        <div class="stat-label">Total Won Value</div>
+        <div class="stat-value" style="color:#16a34a">${fmt(overall.awarded_value, 'currency')}</div>
+        <div class="stat-sub">${overall.awarded} awarded bids</div>
+      </div>
+      <div class="stat-card" style="border-top:3px solid #dc2626">
+        <div class="stat-label">Total Bids Lost</div>
+        <div class="stat-value" style="color:#dc2626">${overall.not_awarded}</div>
+        <div class="stat-sub">${fmt(overall.total_value - overall.awarded_value, 'currency')} in lost bids</div>
+      </div>
+      <div class="stat-card" style="border-top:3px solid #6366f1">
+        <div class="stat-label">Avg Won Deal Size</div>
+        <div class="stat-value" style="color:#6366f1">${fmt(avgDealSize, 'currency')}</div>
+        <div class="stat-sub">${periodLabels[period]}</div>
+      </div>
+    </div>
+
+    <!-- Customer Win Rate Table -->
+    <div class="card" style="margin-bottom:20px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+        <div class="section-title">🏢 Win Rate by Customer / GC</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          ${periodSelect}
+          <select onchange="State.analyticsSort=this.value;renderPage('analytics')"
+            style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:white;cursor:pointer">
+            <option value="volume" ${sortBy==='volume'?'selected':''}>Sort: Most Bids</option>
+            <option value="rate"   ${sortBy==='rate'  ?'selected':''}>Sort: Best Win Rate</option>
+            <option value="value"  ${sortBy==='value' ?'selected':''}>Sort: Most Value Won</option>
+          </select>
+        </div>
+      </div>
+      ${customers.length ? `
+      <div class="table-wrapper" style="margin:0">
+        <table>
+          <thead><tr>
+            <th>Customer / GC</th>
+            <th style="text-align:center">Won</th>
+            <th style="text-align:center">Lost</th>
+            <th>Win Rate</th>
+            <th style="text-align:right">Value Won</th>
+            <th style="text-align:right">Total Value</th>
+            <th style="text-align:center">Bids</th>
+          </tr></thead>
+          <tbody>${customerRows}</tbody>
+        </table>
+      </div>` : `<div class="empty-state"><div class="empty-state-icon">📭</div><div class="empty-state-title">No decided bids for this period</div></div>`}
+    </div>
+
+    <!-- Salesperson & Estimator Win Rates -->
+    <div class="dashboard-grid" style="margin-bottom:20px">
+      <div class="card">
+        <div class="section-title" style="margin-bottom:12px">📞 Win Rate by Salesperson</div>
+        <div class="table-wrapper" style="margin:0">
+          <table>
+            <thead><tr>
+              <th>Salesperson</th>
+              <th style="text-align:center">W</th>
+              <th style="text-align:center">L</th>
+              <th>Rate</th>
+              <th style="text-align:right">Won $</th>
+            </tr></thead>
+            <tbody>${personRows(bySalesperson)}</tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card">
+        <div class="section-title" style="margin-bottom:12px">👷 Win Rate by Estimator</div>
+        <div class="table-wrapper" style="margin:0">
+          <table>
+            <thead><tr>
+              <th>Estimator</th>
+              <th style="text-align:center">W</th>
+              <th style="text-align:center">L</th>
+              <th>Rate</th>
+              <th style="text-align:right">Won $</th>
+            </tr></thead>
+            <tbody>${personRows(byEstimator)}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Charts Row -->
+    <div class="dashboard-grid">
+      <div class="card">
+        <div class="section-title" style="margin-bottom:4px">📅 Monthly Bid Volume (Last 24 Months)</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Bids received per month</div>
+        <div style="display:flex;align-items:flex-end;gap:2px;height:110px;padding-top:16px;overflow:hidden">
+          ${monthBars}
+        </div>
+      </div>
+      <div class="card">
+        <div class="section-title" style="margin-bottom:4px">🔵 Active Pipeline by Customer (Top 10)</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:12px">Current opportunities, active bids & change orders</div>
+        ${pipeRows}
+      </div>
+    </div>`;
 }
 
 // ─────────────────────────────────────────────
