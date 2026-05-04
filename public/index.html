@@ -12,33 +12,40 @@
   <!-- LOGIN OVERLAY -->
   <div id="login-overlay" style="display:none">
     <div class="login-card">
-      <img src="logo.png" alt="Liberty Integrated Solutions" style="width:220px;object-fit:contain;margin-bottom:16px" />
-      <p class="login-subtitle">Estimating Calendar — Select your name to continue</p>
-
-      <div class="login-section-label">SALES TEAM</div>
-      <div class="login-grid" id="login-grid-sales"></div>
-
-      <div class="login-section-label" style="margin-top:20px">ESTIMATORS</div>
-      <div class="login-grid" id="login-grid-estimators"></div>
-
-      <!-- PIN entry (shown when user has a PIN set) -->
-      <div id="login-pin-section" style="display:none">
-        <div class="login-selected-name" id="login-selected-name"></div>
-        <div class="pin-entry">
-          <label>Enter your PIN</label>
-          <div class="pin-inputs">
-            <input class="pin-digit" type="password" maxlength="1" inputmode="numeric" />
-            <input class="pin-digit" type="password" maxlength="1" inputmode="numeric" />
-            <input class="pin-digit" type="password" maxlength="1" inputmode="numeric" />
-            <input class="pin-digit" type="password" maxlength="1" inputmode="numeric" />
-          </div>
-          <div id="login-error" class="login-error" style="display:none"></div>
-          <div style="display:flex;gap:10px;justify-content:center;margin-top:12px">
-            <button class="btn btn-primary" onclick="submitPin()">Sign In</button>
-            <button class="btn btn-secondary" onclick="cancelPinEntry()">Back</button>
-          </div>
-        </div>
+      <img src="logo.png" alt="Liberty Integrated Solutions" style="width:220px;object-fit:contain;margin-bottom:20px" />
+      <p class="login-subtitle" style="margin-bottom:24px">Estimating Calendar</p>
+      <div class="login-form-group">
+        <input type="email" id="login-email" class="login-input" placeholder="Email address" autocomplete="email" onkeydown="if(event.key==='Enter')submitLogin()" />
       </div>
+      <div class="login-form-group">
+        <input type="password" id="login-password" class="login-input" placeholder="Password" autocomplete="current-password" onkeydown="if(event.key==='Enter')submitLogin()" />
+      </div>
+      <div id="login-error" class="login-error" style="display:none"></div>
+      <button class="login-submit-btn" onclick="submitLogin()">Sign In</button>
+    </div>
+  </div>
+
+  <!-- CHANGE PASSWORD OVERLAY -->
+  <div id="change-password-overlay" style="display:none;position:fixed;inset:0;background:#0f1117;z-index:2000;align-items:center;justify-content:center">
+    <div class="login-card">
+      <img src="logo.png" alt="Liberty Integrated Solutions" style="width:180px;object-fit:contain;margin-bottom:16px" />
+      <h2 style="font-size:1.2rem;font-weight:600;margin-bottom:8px;color:#f1f5f9">Set Your Password</h2>
+      <p style="color:#94a3b8;font-size:0.85rem;margin-bottom:20px">Welcome! Please create a secure password for your account.</p>
+      <div class="login-form-group">
+        <input type="password" id="new-password" class="login-input" placeholder="New password" oninput="checkPasswordStrength()" />
+      </div>
+      <div class="login-form-group">
+        <input type="password" id="confirm-password" class="login-input" placeholder="Confirm password" />
+      </div>
+      <div id="pw-requirements" style="text-align:left;font-size:12px;margin-bottom:16px;color:#64748b">
+        <div id="req-length">&#x2717; At least 8 characters</div>
+        <div id="req-upper">&#x2717; One uppercase letter</div>
+        <div id="req-lower">&#x2717; One lowercase letter</div>
+        <div id="req-number">&#x2717; One number</div>
+        <div id="req-special">&#x2717; One special character</div>
+      </div>
+      <div id="change-pw-error" class="login-error" style="display:none"></div>
+      <button class="login-submit-btn" onclick="submitNewPassword()">Set Password</button>
     </div>
   </div>
 

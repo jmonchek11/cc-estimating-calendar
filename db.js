@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const bcrypt = require('bcrypt');
 const Counter = require('./models/Counter');
 const TeamMember = require('./models/TeamMember');
 const Bid = require('./models/Bid');
@@ -22,7 +23,17 @@ function nowStr() {
 function formatMember(m) {
   if (!m) return null;
   const o = m.toObject ? m.toObject() : m;
-  return { id: o._id, name: o.name, initials: o.initials, role: o.role, active: o.active, pin: o.pin, created_at: o.created_at };
+  return {
+    id: o._id,
+    name: o.name,
+    initials: o.initials,
+    role: o.role,
+    active: o.active,
+    email: o.email || null,
+    is_admin: o.is_admin || false,
+    must_change_password: o.must_change_password !== false,
+    created_at: o.created_at
+  };
 }
 
 function formatBid(b) {
@@ -104,13 +115,19 @@ async function getAllTeam() {
   return members.map(formatMember);
 }
 
-async function createTeamMember({ name, initials, role = 'estimator' }) {
+async function createTeamMember({ name, initials, role = 'estimator', email, temp_password }) {
   const id = await nextId('team_members');
-  const m = await TeamMember.create({ _id: id, name, initials: initials.toUpperCase(), role, active: 1 });
+  const doc = { _id: id, name, initials: initials.toUpperCase(), role, active: 1 };
+  if (email) doc.email = email.toLowerCase().trim();
+  if (temp_password) {
+    doc.password_hash = await bcrypt.hash(temp_password, 12);
+    doc.must_change_password = true;
+  }
+  const m = await TeamMember.create(doc);
   return formatMember(m);
 }
 
-async function updateTeamMember(id, { name, initials, role, active, pin }) {
+async function updateTeamMember(id, { name, initials, role, active, pin, email, is_admin }) {
   const member = await TeamMember.findById(Number(id));
   if (!member) return null;
   const update = {
@@ -120,19 +137,34 @@ async function updateTeamMember(id, { name, initials, role, active, pin }) {
     active: active !== undefined ? active : member.active,
     pin: pin !== undefined ? (pin || null) : member.pin,
   };
+  if (email !== undefined) update.email = email ? email.toLowerCase().trim() : null;
+  if (is_admin !== undefined) update.is_admin = !!is_admin;
   const updated = await TeamMember.findByIdAndUpdate(Number(id), update, { new: true });
   return formatMember(updated);
 }
 
-async function loginUser(id, pin) {
-  const member = await TeamMember.findOne({ _id: Number(id), active: 1 });
+async function loginUser(email, password) {
+  const member = await TeamMember.findOne({ email: email.toLowerCase().trim(), active: 1 });
   if (!member) return null;
-  if (member.pin && member.pin !== String(pin)) return null;
+  if (!member.password_hash) return null;
+  const match = await bcrypt.compare(password, member.password_hash);
+  if (!match) return null;
   return formatMember(member);
 }
 
-async function updatePin(id, pin) {
-  await TeamMember.findByIdAndUpdate(Number(id), { pin: pin || null });
+async function setPassword(userId, newPassword) {
+  const hash = await bcrypt.hash(newPassword, 12);
+  await TeamMember.findByIdAndUpdate(Number(userId), { password_hash: hash, must_change_password: false });
+}
+
+async function adminSetTempPassword(userId, tempPassword) {
+  const hash = await bcrypt.hash(tempPassword, 12);
+  await TeamMember.findByIdAndUpdate(Number(userId), { password_hash: hash, must_change_password: true });
+}
+
+async function getMember(userId) {
+  const m = await TeamMember.findById(Number(userId));
+  return formatMember(m);
 }
 
 // ── Stats ─────────────────────────────────────────────────────────────────────
@@ -534,11 +566,23 @@ async function seedTeamData() {
       await TeamMember.create({ _id: id, name, initials, role, active: 1 });
     }
   }
+
+  // Seed Joe Monchek as admin
+  const jm = await TeamMember.findOne({ initials: 'JM' });
+  if (jm) {
+    const adminUpdate = { is_admin: true };
+    if (!jm.email) adminUpdate.email = 'jmonchek@libertyintegrated.com';
+    if (!jm.password_hash) {
+      adminUpdate.password_hash = await bcrypt.hash('Liberty@2026', 12);
+      adminUpdate.must_change_password = true;
+    }
+    await TeamMember.findByIdAndUpdate(jm._id, adminUpdate);
+  }
 }
 
 module.exports = {
   getTeam, getAllTeam, createTeamMember, updateTeamMember,
-  loginUser, updatePin, getMyStats,
+  loginUser, getMember, setPassword, adminSetTempPassword, getMyStats,
   getBids, getBid, createBid, updateBid, deleteBid,
   getFollowups, logFollowup,
   getStats, getDigest,

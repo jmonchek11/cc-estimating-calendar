@@ -195,6 +195,11 @@ async function renderDashboard(main) {
     State.currentUser ? api.get('/api/my-stats') : Promise.resolve(null),
   ]);
 
+  // Non-admins are always locked to "mine" view
+  if (State.currentUser && !State.currentUser.is_admin) {
+    State.dashboardView = 'mine';
+  }
+
   const isMine = State.currentUser && State.dashboardView === 'mine';
 
   // Build data maps
@@ -215,8 +220,8 @@ async function renderDashboard(main) {
   const overdueCount = isMine ? overdueList.length : (stats.overdueCount || 0);
   const dueThisWeek = isMine ? dueSoonList.length : (stats.dueThisWeek || 0);
 
-  // View toggle (only when logged in)
-  const viewToggle = State.currentUser ? `
+  // View toggle — only shown to admins
+  const viewToggle = (State.currentUser && State.currentUser.is_admin) ? `
     <div class="dash-view-toggle">
       <button class="dash-view-btn ${isMine ? 'active' : ''}" onclick="setDashboardView('mine')">My View</button>
       <button class="dash-view-btn ${!isMine ? 'active' : ''}" onclick="setDashboardView('all')">All Bids</button>
@@ -936,22 +941,24 @@ async function renderDigest(main) {
 // ─────────────────────────────────────────────
 async function renderSettings(main) {
   const team = await api.get('/api/team');
+  const isAdmin = State.currentUser?.is_admin;
 
   const rows = team.map(m => `
     <div class="team-row ${m.active ? '' : 'team-inactive'}">
       <div class="team-initials-circle" style="background:${m.role === 'salesperson' ? '#16a34a' : m.role === 'estimator/pm' ? '#7c3aed' : '#2563eb'}">${esc(m.initials)}</div>
       <div style="flex:1">
-        <div class="team-name">${esc(m.name)}</div>
-        <div class="team-role">${m.role} ${m.active ? '' : '· <em>Inactive</em>'}</div>
+        <div class="team-name">${esc(m.name)} ${m.is_admin ? '<span style="font-size:11px;background:#6366f1;color:#fff;padding:1px 6px;border-radius:4px;margin-left:4px">Admin</span>' : ''}</div>
+        <div class="team-role">${m.role}${m.email ? ' · ' + esc(m.email) : ''} ${m.active ? '' : '· <em>Inactive</em>'}</div>
       </div>
-      <button class="btn btn-ghost btn-sm" onclick="editTeamMember(${m.id})">Edit</button>
-      <button class="btn btn-ghost btn-sm" onclick="toggleTeamMember(${m.id}, ${m.active})">${m.active ? 'Deactivate' : 'Activate'}</button>
+      ${isAdmin ? `<button class="btn btn-ghost btn-sm" onclick="editTeamMember(${m.id})">Edit</button>` : ''}
+      ${isAdmin ? `<button class="btn btn-ghost btn-sm" onclick="resetMemberPassword(${m.id}, '${esc(m.name)}')">Reset PW</button>` : ''}
+      ${isAdmin ? `<button class="btn btn-ghost btn-sm" onclick="toggleTeamMember(${m.id}, ${m.active})">${m.active ? 'Deactivate' : 'Activate'}</button>` : ''}
     </div>`).join('');
 
   main.innerHTML = `
     <div class="page-header">
       <div><div class="page-title">⚙️ Team Settings</div><div class="page-subtitle">Manage estimators, salespeople, and PMs</div></div>
-      <button class="btn btn-primary" onclick="showAddTeamForm()">+ Add Member</button>
+      ${isAdmin ? '<button class="btn btn-primary" onclick="showAddTeamForm()">+ Add Member</button>' : ''}
     </div>
 
     <div class="card" style="max-width:640px;margin-bottom:20px;display:none" id="add-team-form">
@@ -963,7 +970,7 @@ async function renderSettings(main) {
     </div>`;
 }
 
-function showAddTeamForm(memberId, name, initials, role, active) {
+function showAddTeamForm(memberId, name, initials, role, active, email, is_admin) {
   const formCard = document.getElementById('add-team-form');
   const isEdit = !!memberId;
   formCard.style.display = 'block';
@@ -971,8 +978,8 @@ function showAddTeamForm(memberId, name, initials, role, active) {
     <div class="section-title">${isEdit ? 'Edit' : 'Add'} Team Member</div>
     <input type="hidden" id="tm-id" value="${memberId || ''}" />
     <div class="form-grid-3">
-      <div class="form-group"><label>Full Name</label><input type="text" id="tm-name" value="${name || ''}" placeholder="Full name" /></div>
-      <div class="form-group"><label>Initials</label><input type="text" id="tm-initials" value="${initials || ''}" placeholder="JO" maxlength="4" /></div>
+      <div class="form-group"><label>Full Name</label><input type="text" id="tm-name" value="${esc(name || '')}" placeholder="Full name" /></div>
+      <div class="form-group"><label>Initials</label><input type="text" id="tm-initials" value="${esc(initials || '')}" placeholder="JO" maxlength="4" /></div>
       <div class="form-group"><label>Role</label>
         <select id="tm-role">
           <option value="estimator" ${role === 'estimator' ? 'selected' : ''}>Estimator</option>
@@ -981,12 +988,20 @@ function showAddTeamForm(memberId, name, initials, role, active) {
         </select>
       </div>
     </div>
-    ${isEdit ? `
     <div class="form-group">
-      <label>Login PIN (optional, 4 digits)</label>
-      <input type="password" id="tm-pin" maxlength="4" inputmode="numeric" placeholder="Leave blank for no PIN" style="max-width:140px" />
-      <small class="field-hint">Set a PIN to secure this person's login. Leave blank to allow login by name only.</small>
+      <label>Email Address</label>
+      <input type="email" id="tm-email" value="${esc(email || '')}" placeholder="user@example.com" />
+    </div>
+    ${!isEdit ? `
+    <div class="form-group">
+      <label>Temporary Password <span class="optional">(optional)</span></label>
+      <input type="password" id="tm-temp-password" placeholder="Temp password — user must change on first login" />
+      <small class="field-hint">If set, user will be required to change password on first login.</small>
     </div>` : ''}
+    <div class="form-group" style="display:flex;align-items:center;gap:8px">
+      <input type="checkbox" id="tm-is-admin" ${is_admin ? 'checked' : ''} style="width:auto" />
+      <label for="tm-is-admin" style="margin:0">Admin (can manage team, see all bids)</label>
+    </div>
     <div style="display:flex;gap:8px">
       <button class="btn btn-primary" onclick="saveTeamMember()">Save</button>
       <button class="btn btn-secondary" onclick="document.getElementById('add-team-form').style.display='none'">Cancel</button>
@@ -996,7 +1011,7 @@ function showAddTeamForm(memberId, name, initials, role, active) {
 function editTeamMember(id) {
   const m = State.team.find(t => t.id === id);
   if (!m) return;
-  showAddTeamForm(m.id, m.name, m.initials, m.role, m.active);
+  showAddTeamForm(m.id, m.name, m.initials, m.role, m.active, m.email, m.is_admin);
   document.getElementById('add-team-form').scrollIntoView({ behavior: 'smooth' });
 }
 
@@ -1005,20 +1020,30 @@ async function saveTeamMember() {
   const name = document.getElementById('tm-name').value.trim();
   const initials = document.getElementById('tm-initials').value.trim().toUpperCase();
   const role = document.getElementById('tm-role').value;
-  const pinEl = document.getElementById('tm-pin');
-  const pin = pinEl ? pinEl.value.trim() : null;
+  const email = (document.getElementById('tm-email')?.value || '').trim();
+  const is_admin = document.getElementById('tm-is-admin')?.checked || false;
+  const temp_password = document.getElementById('tm-temp-password')?.value || '';
   if (!name || !initials) return alert('Name and initials are required.');
-  if (pin && !/^\d{4}$/.test(pin)) return alert('PIN must be exactly 4 digits.');
   try {
     if (id) {
-      const payload = { name, initials, role };
-      if (pin !== null) payload.pin = pin || null;
+      const payload = { name, initials, role, email: email || null, is_admin };
       await api.put(`/api/team/${id}`, payload);
     } else {
-      await api.post('/api/team', { name, initials, role });
+      const payload = { name, initials, role, email: email || null, is_admin };
+      if (temp_password) payload.temp_password = temp_password;
+      await api.post('/api/team', payload);
     }
     State.team = await api.get('/api/team');
     await renderSettings(document.getElementById('main'));
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function resetMemberPassword(id, name) {
+  const tempPw = prompt(`Enter a temporary password for ${name}:\n(They will be required to change it on next login)`);
+  if (!tempPw) return;
+  try {
+    await api.post(`/api/team/${id}/reset-password`, { temp_password: tempPw });
+    alert(`Temporary password set for ${name}. They will be prompted to change it on next login.`);
   } catch (e) { alert('Error: ' + e.message); }
 }
 
@@ -1332,7 +1357,6 @@ function firstName(name) {
 function showLoginOverlay() {
   document.getElementById('login-overlay').style.display = 'flex';
   document.getElementById('app').style.display = 'none';
-  renderLoginGrid();
 }
 
 function hideLoginOverlay() {
@@ -1340,76 +1364,65 @@ function hideLoginOverlay() {
   document.getElementById('app').style.display = 'flex';
 }
 
-function renderLoginGrid() {
-  const sales = State.team.filter(m => m.role === 'salesperson' && m.active);
-  const estimators = State.team.filter(m => m.role === 'estimator' && m.active);
-
-  function memberCard(m) {
-    const color = avatarColor(m.initials);
-    return `
-      <button class="login-member-btn" onclick="selectLoginMember(${m.id})" id="lm-${m.id}">
-        <div class="login-avatar" style="background:${color}">${esc(m.initials)}</div>
-        <div class="login-member-name">${esc(firstName(m.name))}</div>
-      </button>`;
-  }
-
-  document.getElementById('login-grid-sales').innerHTML = sales.map(memberCard).join('');
-  document.getElementById('login-grid-estimators').innerHTML = estimators.map(memberCard).join('');
-}
-
-function selectLoginMember(memberId) {
-  State.loginPendingId = memberId;
-  document.querySelectorAll('.login-member-btn').forEach(b => b.classList.remove('selected'));
-  document.getElementById(`lm-${memberId}`)?.classList.add('selected');
-
-  const member = State.team.find(m => m.id === memberId);
-  if (member?.pin) {
-    // Show PIN entry
-    document.getElementById('login-selected-name').textContent =
-      `Signing in as ${member.name}`;
-    document.getElementById('login-pin-section').style.display = 'block';
-    document.getElementById('login-error').style.display = 'none';
-    const digits = document.querySelectorAll('.pin-digit');
-    digits.forEach(d => d.value = '');
-    digits[0].focus();
-  } else {
-    // No PIN — log in directly
-    loginWithId(memberId, '');
-  }
-}
-
-async function loginWithId(memberId, pin) {
+async function submitLogin() {
+  const email = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
+  const errEl = document.getElementById('login-error');
+  errEl.style.display = 'none';
+  if (!email || !password) { errEl.textContent = 'Please enter your email and password.'; errEl.style.display = 'block'; return; }
   try {
-    const user = await api.post('/api/auth/login', { memberId, pin });
-    State.currentUser = user;
-    document.getElementById('login-pin-section').style.display = 'none';
-    updateSidebarUser(user);
+    const member = await api.post('/api/auth/login', { email, password });
+    State.currentUser = member;
+    State.team = await api.get('/api/team');
+    if (member.must_change_password) {
+      document.getElementById('login-overlay').style.display = 'none';
+      const cpOverlay = document.getElementById('change-password-overlay');
+      cpOverlay.style.display = 'flex';
+    } else {
+      hideLoginOverlay();
+      updateSidebarUser(member);
+      await onHashChange();
+    }
+  } catch(e) {
+    errEl.textContent = e.message || 'Invalid email or password.';
+    errEl.style.display = 'block';
+  }
+}
+
+function checkPasswordStrength() {
+  const pwd = document.getElementById('new-password')?.value || '';
+  const set = (id, met) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = (met ? '✓ ' : '✗ ') + el.textContent.slice(2);
+    el.className = met ? 'met' : '';
+  };
+  set('req-length',  pwd.length >= 8);
+  set('req-upper',   /[A-Z]/.test(pwd));
+  set('req-lower',   /[a-z]/.test(pwd));
+  set('req-number',  /[0-9]/.test(pwd));
+  set('req-special', /[^A-Za-z0-9]/.test(pwd));
+}
+
+async function submitNewPassword() {
+  const pwd = document.getElementById('new-password').value;
+  const confirm = document.getElementById('confirm-password').value;
+  const errEl = document.getElementById('change-pw-error');
+  errEl.style.display = 'none';
+  if (pwd !== confirm) { errEl.textContent = 'Passwords do not match.'; errEl.style.display = 'block'; return; }
+  const strong = pwd.length >= 8 && /[A-Z]/.test(pwd) && /[a-z]/.test(pwd) && /[0-9]/.test(pwd) && /[^A-Za-z0-9]/.test(pwd);
+  if (!strong) { errEl.textContent = 'Password does not meet all requirements.'; errEl.style.display = 'block'; return; }
+  try {
+    await api.post('/api/auth/set-password', { password: pwd });
+    State.currentUser.must_change_password = false;
+    document.getElementById('change-password-overlay').style.display = 'none';
     hideLoginOverlay();
+    updateSidebarUser(State.currentUser);
     await onHashChange();
-  } catch (e) {
-    const errEl = document.getElementById('login-error');
-    errEl.textContent = 'Incorrect PIN. Please try again.';
+  } catch(e) {
+    errEl.textContent = e.message || 'Failed to set password.';
     errEl.style.display = 'block';
-    document.querySelectorAll('.pin-digit').forEach(d => d.value = '');
-    document.querySelectorAll('.pin-digit')[0].focus();
   }
-}
-
-function submitPin() {
-  const pin = [...document.querySelectorAll('.pin-digit')].map(d => d.value).join('');
-  if (pin.length < 4) {
-    const errEl = document.getElementById('login-error');
-    errEl.textContent = 'Please enter all 4 digits.';
-    errEl.style.display = 'block';
-    return;
-  }
-  loginWithId(State.loginPendingId, pin);
-}
-
-function cancelPinEntry() {
-  document.getElementById('login-pin-section').style.display = 'none';
-  document.querySelectorAll('.login-member-btn').forEach(b => b.classList.remove('selected'));
-  State.loginPendingId = null;
 }
 
 async function logout() {
@@ -1418,6 +1431,7 @@ async function logout() {
   State.mineOnly = false;
   const fab = document.getElementById('quick-log-fab');
   if (fab) fab.style.display = 'none';
+  document.getElementById('app').style.display = 'none';
   showLoginOverlay();
 }
 
@@ -1433,17 +1447,7 @@ function updateSidebarUser(user) {
   if (fab) fab.style.display = 'flex';
 }
 
-// PIN input — auto-advance between digits
-document.querySelectorAll('.pin-digit').forEach((input, i, arr) => {
-  input.addEventListener('input', () => {
-    if (input.value && i < arr.length - 1) arr[i + 1].focus();
-    if (input.value && i === arr.length - 1) submitPin();
-  });
-  input.addEventListener('keydown', e => {
-    if (e.key === 'Backspace' && !input.value && i > 0) arr[i - 1].focus();
-    if (e.key === 'Enter') submitPin();
-  });
-});
+// (PIN input removed — now using email/password auth)
 
 // ─────────────────────────────────────────────
 // QUICK LOG
@@ -1704,18 +1708,23 @@ function openStageModalFromPanel() {
 // ─────────────────────────────────────────────
 async function init() {
   State.team = await api.get('/api/team');
+  window.addEventListener('hashchange', onHashChange);
 
   // Check existing session
   const me = await api.get('/api/auth/me').catch(() => null);
   if (me) {
     State.currentUser = me;
-    updateSidebarUser(me);
-    hideLoginOverlay();
-    window.addEventListener('hashchange', onHashChange);
-    await onHashChange();
+    if (me.must_change_password) {
+      document.getElementById('app').style.display = 'none';
+      const cpOverlay = document.getElementById('change-password-overlay');
+      cpOverlay.style.display = 'flex';
+    } else {
+      updateSidebarUser(me);
+      hideLoginOverlay();
+      await onHashChange();
+    }
   } else {
     showLoginOverlay();
-    window.addEventListener('hashchange', onHashChange);
   }
 }
 

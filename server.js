@@ -22,71 +22,11 @@ app.use(session({
   cookie: { maxAge: 8 * 60 * 60 * 1000 }
 }));
 
-// ── Access Gate ───────────────────────────────────────────────────────────────
-const ACCESS_CODE = process.env.ACCESS_CODE || '';
-
-app.get('/gate', (req, res) => {
-  res.send(`<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Liberty Estimating Calendar</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background: #0f1117; color: #e2e8f0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
-    .gate-card { background: #1a1d2e; border: 1px solid #2d3148; border-radius: 12px; padding: 48px 40px; width: 100%; max-width: 400px; text-align: center; box-shadow: 0 20px 60px rgba(0,0,0,0.4); }
-    .gate-logo { font-size: 2.5rem; margin-bottom: 12px; }
-    h1 { font-size: 1.4rem; font-weight: 600; margin-bottom: 6px; color: #f1f5f9; }
-    p { color: #94a3b8; font-size: 0.9rem; margin-bottom: 32px; }
-    input { width: 100%; padding: 12px 16px; background: #0f1117; border: 1px solid #2d3148; border-radius: 8px; color: #f1f5f9; font-size: 1rem; margin-bottom: 12px; outline: none; transition: border-color 0.2s; }
-    input:focus { border-color: #6366f1; }
-    button { width: 100%; padding: 12px; background: #6366f1; color: #fff; border: none; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer; transition: background 0.2s; }
-    button:hover { background: #4f46e5; }
-    .error { color: #f87171; font-size: 0.85rem; margin-bottom: 12px; display: none; }
-  </style>
-</head>
-<body>
-  <div class="gate-card">
-    <img src="/logo.png" alt="Liberty Integrated Solutions" style="width:200px;object-fit:contain;margin-bottom:20px" />
-    <p>Enter the access code to continue</p>
-    <div class="error" id="err">Incorrect access code. Try again.</div>
-    <form method="POST" action="/api/auth/access">
-      <input type="password" name="code" placeholder="Access code" autofocus autocomplete="off">
-      <button type="submit">Continue</button>
-    </form>
-  </div>
-  <script>
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('err')) document.getElementById('err').style.display = 'block';
-  </script>
-</body>
-</html>`);
-});
-
-app.post('/api/auth/access', express.urlencoded({ extended: false }), (req, res) => {
-  if (req.body.code === ACCESS_CODE) {
-    req.session.accessGranted = true;
-    res.redirect('/');
-  } else {
-    res.redirect('/gate?err=1');
-  }
-});
-
-// Gate middleware — intercepts the main app page
-app.use((req, res, next) => {
-  if (!ACCESS_CODE) return next(); // skip gate if no code set
-  if (req.path === '/' || req.path === '/index.html') {
-    if (!req.session.accessGranted) return res.redirect('/gate');
-  }
-  next();
-});
-
 // Serve static files before auth middleware
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Auth middleware — protects /api/ routes except public ones
-const PUBLIC_API = ['/api/auth/', '/api/team'];
+const PUBLIC_API = ['/api/auth/'];
 app.use((req, res, next) => {
   if (!req.path.startsWith('/api/')) return next();
   if (PUBLIC_API.some(p => req.path.startsWith(p))) return next();
@@ -94,21 +34,28 @@ app.use((req, res, next) => {
   next();
 });
 
+// ── Password strength helper ───────────────────────────────────────────────────
+function isStrongPassword(pwd) {
+  return typeof pwd === 'string' && pwd.length >= 8 &&
+    /[A-Z]/.test(pwd) && /[a-z]/.test(pwd) &&
+    /[0-9]/.test(pwd) && /[^A-Za-z0-9]/.test(pwd);
+}
+
 // ── AUTH ──────────────────────────────────────────────────────────────────────
 app.get('/api/auth/me', async (req, res) => {
   if (!req.session.userId) return res.json(null);
   try {
-    const members = await db.getAllTeam();
-    const member = members.find(m => m.id === req.session.userId);
+    const member = await db.getMember(req.session.userId);
     res.json(member || null);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/auth/login', async (req, res) => {
   try {
-    const { memberId, pin } = req.body;
-    const member = await db.loginUser(memberId, pin);
-    if (!member) return res.status(401).json({ error: 'Invalid PIN. Try again.' });
+    const { email, password } = req.body;
+    if (!email || !password) return res.status(400).json({ error: 'Email and password are required.' });
+    const member = await db.loginUser(email, password);
+    if (!member) return res.status(401).json({ error: 'Invalid email or password.' });
     req.session.userId = member.id;
     res.json(member);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -118,9 +65,14 @@ app.post('/api/auth/logout', (req, res) => {
   req.session.destroy(() => res.json({ ok: true }));
 });
 
-app.put('/api/auth/pin', async (req, res) => {
+app.post('/api/auth/set-password', async (req, res) => {
+  if (!req.session.userId) return res.status(401).json({ error: 'Not authenticated' });
   try {
-    await db.updatePin(req.session.userId, req.body.pin || null);
+    const { password } = req.body;
+    if (!isStrongPassword(password)) {
+      return res.status(400).json({ error: 'Password does not meet strength requirements.' });
+    }
+    await db.setPassword(req.session.userId, password);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -132,13 +84,30 @@ app.get('/api/team', async (req, res) => {
 });
 
 app.post('/api/team', async (req, res) => {
-  try { res.json(await db.createTeamMember(req.body)); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  try {
+    const admin = await db.getMember(req.session.userId);
+    if (!admin || !admin.is_admin) return res.status(403).json({ error: 'Admin only.' });
+    res.json(await db.createTeamMember(req.body));
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 app.put('/api/team/:id', async (req, res) => {
-  try { res.json(await db.updateTeamMember(req.params.id, req.body)); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  try {
+    const admin = await db.getMember(req.session.userId);
+    if (!admin || !admin.is_admin) return res.status(403).json({ error: 'Admin only.' });
+    res.json(await db.updateTeamMember(req.params.id, req.body));
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.post('/api/team/:id/reset-password', async (req, res) => {
+  try {
+    const admin = await db.getMember(req.session.userId);
+    if (!admin || !admin.is_admin) return res.status(403).json({ error: 'Admin only.' });
+    const { temp_password } = req.body;
+    if (!temp_password) return res.status(400).json({ error: 'temp_password is required.' });
+    await db.adminSetTempPassword(req.params.id, temp_password);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ── BIDS ──────────────────────────────────────────────────────────────────────
