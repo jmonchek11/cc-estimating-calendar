@@ -770,6 +770,122 @@ async function renderFollowUps(main) {
 }
 
 // ─────────────────────────────────────────────
+// ANALYTICS DETAIL MODAL
+// ─────────────────────────────────────────────
+function analyticsDetailClick(el) {
+  openAnalyticsDetail(el.dataset.type, el.dataset.value, el.dataset.name);
+}
+
+function closeAnalyticsModal() {
+  document.getElementById('analytics-modal').style.display = 'none';
+}
+
+async function openAnalyticsDetail(type, value, displayName) {
+  const modal = document.getElementById('analytics-modal');
+  const body  = document.getElementById('analytics-modal-body');
+  const title = document.getElementById('analytics-modal-title');
+
+  title.textContent = displayName;
+  body.innerHTML = '<div class="loading-screen" style="min-height:200px"><div class="spinner"></div><p>Loading…</p></div>';
+  modal.style.display = 'flex';
+
+  try {
+    let decidedUrl, activeUrl;
+
+    if (type === 'customer') {
+      const v = encodeURIComponent(value);
+      decidedUrl = `/api/bids?stage=awarded,not_awarded&customer_exact=${v}`;
+      activeUrl  = `/api/bids?stage=opportunity,active_bid,active_co,follow_up&customer_exact=${v}`;
+    } else if (type === 'estimator') {
+      decidedUrl = `/api/bids?stage=awarded,not_awarded&estimator_id=${value}`;
+      activeUrl  = `/api/bids?stage=opportunity,active_bid,active_co,follow_up&estimator_id=${value}`;
+    } else { // salesperson
+      decidedUrl = `/api/bids?stage=awarded,not_awarded&salesperson_id=${value}`;
+      activeUrl  = `/api/bids?stage=opportunity,active_bid,active_co,follow_up&salesperson_id=${value}`;
+    }
+
+    const [decidedBids, activeBids] = await Promise.all([
+      api.get(decidedUrl),
+      api.get(activeUrl),
+    ]);
+
+    const won  = decidedBids.filter(b => b.stage === 'awarded');
+    const lost = decidedBids.filter(b => b.stage === 'not_awarded');
+    const total = decidedBids.length;
+    const winRate   = total > 0 ? Math.round(won.length / total * 100) : 0;
+    const wonValue  = won.reduce((s, b) => s + (b.estimate_amount || 0), 0);
+    const lostValue = lost.reduce((s, b) => s + (b.estimate_amount || 0), 0);
+    const activeValue = activeBids.reduce((s, b) => s + (b.estimate_amount || 0), 0);
+    const winColor = winRate >= 50 ? '#16a34a' : '#dc2626';
+
+    function detailBidRow(b) {
+      const dateVal = b.award_date || b.date_estimate_sent || b.date_received;
+      return `<tr class="clickable-row" onclick="closeAnalyticsModal();setTimeout(()=>openJobPanel(${b.id}),80)">
+        <td class="td-project">${esc(b.project_name)}<small>${b.bid_number ? ' #' + esc(b.bid_number) : ''}</small></td>
+        <td class="td-customer" style="max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(b.customer) || '—'}</td>
+        <td class="td-amount">${fmt(b.estimate_amount, 'currency')}</td>
+        <td>${b.estimator_initials   ? `<span class="initials-pill">${esc(b.estimator_initials)}</span>` : '—'}</td>
+        <td>${b.salesperson_initials ? `<span class="initials-pill" style="background:#dcfce7;color:#166534">${esc(b.salesperson_initials)}</span>` : '—'}</td>
+        <td style="color:var(--text-muted);font-size:12px">${fmt(dateVal, 'date')}</td>
+      </tr>`;
+    }
+
+    function detailSection(sectionTitle, bids, color, emptyMsg) {
+      const sectionTotal = bids.reduce((s, b) => s + (b.estimate_amount || 0), 0);
+      return `
+        <div style="margin-bottom:22px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+            <div class="section-title" style="color:${color}">${sectionTitle} (${bids.length})</div>
+            ${bids.length ? `<div style="font-size:12px;color:var(--text-muted)">${fmt(sectionTotal, 'currency')}</div>` : ''}
+          </div>
+          ${bids.length ? `
+          <div class="table-wrapper" style="margin:0">
+            <table>
+              <thead><tr>
+                <th>Project</th><th>Customer</th><th>Amount</th>
+                <th>Est.</th><th>Sales</th><th>Date</th>
+              </tr></thead>
+              <tbody>${bids.map(detailBidRow).join('')}</tbody>
+            </table>
+          </div>` : `<div style="color:var(--text-muted);font-size:13px;padding:6px 0">${emptyMsg}</div>`}
+        </div>`;
+    }
+
+    body.innerHTML = `
+      <!-- KPI summary row -->
+      <div style="display:flex;gap:12px;margin-bottom:22px;flex-wrap:wrap">
+        <div class="stat-card" style="flex:1;min-width:110px;padding:12px 16px;border-top:3px solid ${winColor}">
+          <div class="stat-label">Win Rate</div>
+          <div class="stat-value" style="color:${winColor};font-size:1.6rem">${winRate}%</div>
+          <div class="stat-sub">${won.length}W · ${lost.length}L</div>
+        </div>
+        <div class="stat-card" style="flex:1;min-width:110px;padding:12px 16px;border-top:3px solid #16a34a">
+          <div class="stat-label">Won Value</div>
+          <div class="stat-value" style="color:#16a34a;font-size:1.4rem">${fmt(wonValue, 'currency')}</div>
+          <div class="stat-sub">${won.length} bids</div>
+        </div>
+        <div class="stat-card" style="flex:1;min-width:110px;padding:12px 16px;border-top:3px solid #dc2626">
+          <div class="stat-label">Lost Value</div>
+          <div class="stat-value" style="color:#dc2626;font-size:1.4rem">${fmt(lostValue, 'currency')}</div>
+          <div class="stat-sub">${lost.length} bids</div>
+        </div>
+        <div class="stat-card" style="flex:1;min-width:110px;padding:12px 16px;border-top:3px solid #6366f1">
+          <div class="stat-label">Active Pipeline</div>
+          <div class="stat-value" style="color:#6366f1;font-size:1.4rem">${fmt(activeValue, 'currency')}</div>
+          <div class="stat-sub">${activeBids.length} bid${activeBids.length !== 1 ? 's' : ''}</div>
+        </div>
+      </div>
+
+      ${detailSection('✅ Won', won, '#16a34a', 'No won bids found.')}
+      ${detailSection('❌ Lost', lost, '#dc2626', 'No lost bids found.')}
+      ${activeBids.length ? detailSection('🔵 Active Pipeline', activeBids, '#3b82f6', '') : ''}
+    `;
+  } catch (e) {
+    body.innerHTML = `<div class="text-danger" style="padding:16px">Error loading details: ${esc(e.message)}</div>`;
+  }
+}
+
+// ─────────────────────────────────────────────
 // ANALYTICS PAGE
 // ─────────────────────────────────────────────
 function analyticsSinceDate(period) {
@@ -819,8 +935,8 @@ async function renderAnalytics(main) {
 
   const customerRows = customers.slice(0, 30).map(c => {
     const rate = Math.round(c.win_rate * 100);
-    return `<tr>
-      <td style="font-weight:500;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(c.customer)}">${esc(c.customer)}</td>
+    return `<tr class="clickable-row" data-type="customer" data-value="${esc(c.customer)}" data-name="${esc(c.customer)}" onclick="analyticsDetailClick(this)" title="Click to see all bids for ${esc(c.customer)}">
+      <td style="font-weight:500;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.customer)}</td>
       <td style="text-align:center;color:#16a34a;font-weight:700">${c.awarded}</td>
       <td style="text-align:center;color:#dc2626;font-weight:700">${c.not_awarded}</td>
       <td style="min-width:130px">${winRateBar(rate)}</td>
@@ -831,11 +947,11 @@ async function renderAnalytics(main) {
   }).join('');
 
   // ── Person win rate rows ───────────────────────────────────
-  function personRows(people) {
+  function personRows(people, type) {
     if (!people.length) return '<tr><td colspan="5" class="no-data" style="padding:10px">No data for this period</td></tr>';
     return people.map(p => {
       const rate = Math.round(p.win_rate * 100);
-      return `<tr>
+      return `<tr class="clickable-row" data-type="${esc(type)}" data-value="${p.id}" data-name="${esc(p.name)}" onclick="analyticsDetailClick(this)" title="Click to see all bids for ${esc(p.name)}">
         <td><span class="initials-pill" style="margin-right:4px">${esc(p.initials)}</span>${esc(p.name)}</td>
         <td style="text-align:center;color:#16a34a;font-weight:700">${p.awarded}</td>
         <td style="text-align:center;color:#dc2626;font-weight:700">${p.not_awarded}</td>
@@ -864,8 +980,8 @@ async function renderAnalytics(main) {
   const maxPipe = Math.max(...topActivePipeline.map(c => c.pipeline_value || 0), 1);
   const pipeRows = topActivePipeline.map(c => {
     const pct = Math.max(6, Math.round((c.pipeline_value / maxPipe) * 100));
-    return `<div class="pipeline-bar-row">
-      <div class="pipeline-bar-label" style="min-width:130px;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(c._id)}">${esc(c._id)}</div>
+    return `<div class="pipeline-bar-row" style="cursor:pointer" data-type="customer" data-value="${esc(c._id)}" data-name="${esc(c._id)}" onclick="analyticsDetailClick(this)" title="Click to see all bids for ${esc(c._id)}">
+      <div class="pipeline-bar-label" style="min-width:130px;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c._id)}</div>
       <div class="pipeline-bar-track">
         <div class="pipeline-bar-fill" style="width:${pct}%;background:#6366f1">
           <span class="pipeline-bar-count">${c.count}</span>
@@ -963,7 +1079,7 @@ async function renderAnalytics(main) {
               <th>Rate</th>
               <th style="text-align:right">Won $</th>
             </tr></thead>
-            <tbody>${personRows(bySalesperson)}</tbody>
+            <tbody>${personRows(bySalesperson, 'salesperson')}</tbody>
           </table>
         </div>
       </div>
@@ -978,7 +1094,7 @@ async function renderAnalytics(main) {
               <th>Rate</th>
               <th style="text-align:right">Won $</th>
             </tr></thead>
-            <tbody>${personRows(byEstimator)}</tbody>
+            <tbody>${personRows(byEstimator, 'estimator')}</tbody>
           </table>
         </div>
       </div>

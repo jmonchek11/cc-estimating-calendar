@@ -420,7 +420,7 @@ async function getDigest() {
 
 // ── Bids ──────────────────────────────────────────────────────────────────────
 
-async function getBids({ stage, estimator_id, salesperson_id, status, search, overdue_only, mine_only, userId } = {}) {
+async function getBids({ stage, estimator_id, salesperson_id, status, search, customer_exact, overdue_only, mine_only, userId } = {}) {
   const todayStr = new Date().toISOString().split('T')[0];
   const CLOSED = ['awarded', 'not_awarded', 'closed'];
   const conditions = [{ is_deleted: 0 }];
@@ -430,6 +430,7 @@ async function getBids({ stage, estimator_id, salesperson_id, status, search, ov
   }
   if (estimator_id)   conditions.push({ estimator_id:   Number(estimator_id) });
   if (salesperson_id) conditions.push({ salesperson_id: Number(salesperson_id) });
+  if (customer_exact) conditions.push({ customer: customer_exact });
   if (status)         conditions.push({ status });
 
   if (overdue_only === 'true') {
@@ -645,19 +646,22 @@ async function getAnalytics(since) {
   const teamMap = {};
   allTeam.forEach(m => { teamMap[m._id] = m; });
 
-  function formatPersonRates(rows) {
+  // roles: array of allowed role strings — filters out people with wrong role
+  // (e.g. a salesperson who appears as estimator_id on some bids won't show in estimator list)
+  function formatPersonRates(rows, roles) {
     return rows
       .map(r => {
         const m = teamMap[r._id] || {};
         const total = r.awarded + r.not_awarded;
         return {
           id: r._id, name: m.name || 'Unknown', initials: m.initials || '?',
+          role: m.role || '',
           awarded: r.awarded, not_awarded: r.not_awarded, total,
           win_rate: total > 0 ? r.awarded / total : 0,
           awarded_value: r.awarded_value,
         };
       })
-      .filter(r => r.total > 0)
+      .filter(r => r.total > 0 && (!roles || roles.includes(r.role)))
       .sort((a, b) => b.total - a.total);
   }
 
@@ -686,8 +690,8 @@ async function getAnalytics(since) {
       win_rate: r.total > 0 ? r.awarded / r.total : 0,
       awarded_value: r.awarded_value, total_value: r.total_value,
     })),
-    byEstimator:   formatPersonRates(byEstimatorRaw),
-    bySalesperson: formatPersonRates(bySalespersonRaw),
+    byEstimator:   formatPersonRates(byEstimatorRaw,   ['estimator', 'estimator/pm']),
+    bySalesperson: formatPersonRates(bySalespersonRaw, ['salesperson', 'estimator/pm']),
     monthlyVolume,
     topActivePipeline,
   };
