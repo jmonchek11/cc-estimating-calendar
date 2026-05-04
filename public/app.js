@@ -1514,6 +1514,80 @@ function clearCleanupFilters() {
   renderPage('cleanup');
 }
 
+// ── Orphan estimator repair ────────────────────────────────────────────────────
+let _orphanData = null; // cached until user applies fix
+
+async function loadOrphanPanel() {
+  const wrap = document.getElementById('orphan-panel');
+  if (!wrap) return;
+  wrap.innerHTML = '<em style="color:var(--text-muted);font-size:13px">Scanning…</em>';
+  try {
+    _orphanData = await api.get('/api/admin/orphan-estimators');
+  } catch (e) {
+    wrap.innerHTML = '<em style="color:#dc2626;font-size:13px">Could not load scan results.</em>';
+    return;
+  }
+  renderOrphanPanel();
+}
+
+function renderOrphanPanel() {
+  const wrap = document.getElementById('orphan-panel');
+  if (!wrap || !_orphanData) return;
+  if (_orphanData.length === 0) {
+    wrap.innerHTML = '<span style="color:#16a34a;font-size:13px;font-weight:600">✅ No orphaned estimator references found.</span>';
+    return;
+  }
+
+  const rows = _orphanData.map(r => {
+    const sel = `orphan-sel-${r.bid_id}`;
+    const optionsHtml = r.candidates.map(c =>
+      `<option value="${c.id}" ${r.suggested===c.id?'selected':''}>${esc(c.initials)} – ${esc(c.name)} (${esc(c.role)})</option>`
+    ).join('');
+    return `
+      <tr>
+        <td style="font-size:13px">${esc(r.project_name)}${r.bid_number ? `<br><small style="color:var(--text-muted)">#${esc(r.bid_number)}</small>` : ''}</td>
+        <td><span class="badge badge-stage">${stageName(r.stage)}</span></td>
+        <td style="font-size:12px;max-width:200px;word-break:break-word;color:var(--text-muted)">${esc(r.notes || r.estimate_approved_by || '')}</td>
+        <td>
+          <select id="${sel}" class="form-control" style="font-size:12px;padding:3px 6px">
+            <option value="">— skip —</option>
+            ${optionsHtml}
+          </select>
+        </td>
+      </tr>`;
+  }).join('');
+
+  wrap.innerHTML = `
+    <div style="font-size:13px;font-weight:600;color:#d97706;margin-bottom:10px">
+      ⚠️ ${_orphanData.length} bid${_orphanData.length!==1?'s':''} found with estimator initials in notes/fields but no estimator assigned.
+      Review the suggested matches below and click <strong>Apply Fixes</strong>.
+    </div>
+    <div class="table-wrapper" style="max-height:320px;overflow-y:auto;margin-bottom:10px">
+      <table>
+        <thead><tr><th>Project</th><th>Stage</th><th>Notes / Field</th><th>Assign Estimator</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-primary btn-sm" onclick="applyOrphanFixes()">✅ Apply Fixes</button>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('orphan-card').style.display='none'">Dismiss</button>
+    </div>`;
+}
+
+async function applyOrphanFixes() {
+  if (!_orphanData) return;
+  const fixes = _orphanData
+    .map(r => ({ bid_id: r.bid_id, estimator_id: document.getElementById(`orphan-sel-${r.bid_id}`)?.value || '' }))
+    .filter(f => f.estimator_id);
+  if (!fixes.length) { alert('No estimators selected — nothing to apply.'); return; }
+  try {
+    const result = await api.post('/api/admin/fix-orphan-estimators', { fixes });
+    alert(`✅ Fixed ${result.fixed} bid${result.fixed!==1?'s':''}. The page will now reload.`);
+    _orphanData = null;
+    renderPage('cleanup');
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
 async function renderCleanup(main) {
   main.innerHTML = '<div class="loading-screen"><div class="spinner"></div><p>Loading…</p></div>';
 
@@ -1690,6 +1764,17 @@ async function renderCleanup(main) {
       </div>
       <button class="btn btn-secondary" onclick="clearCleanupFilters()">Reset Filters</button>
     </div>
+
+    ${State.currentUser?.is_admin ? `
+    <div id="orphan-card" style="background:var(--card-bg);border:1px solid #d97706;border-radius:8px;padding:14px 16px;margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <span style="font-size:13px;font-weight:700;color:#d97706">🔍 Estimator Scan</span>
+        <button class="btn btn-ghost btn-sm" onclick="loadOrphanPanel()">Scan Now</button>
+      </div>
+      <div id="orphan-panel" style="font-size:13px;color:var(--text-muted)">
+        Click <strong>Scan Now</strong> to find bids where estimator initials appear in notes but no estimator is assigned.
+      </div>
+    </div>` : ''}
 
     ${progressHtml}
     ${chipsHtml}

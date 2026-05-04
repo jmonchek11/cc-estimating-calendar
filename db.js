@@ -740,11 +740,78 @@ async function seedTeamData() {
   }
 }
 
+// ── Orphan estimator repair ────────────────────────────────────────────────────
+
+async function findOrphanEstimators() {
+  const [bids, team] = await Promise.all([
+    Bid.find({ is_deleted: 0, estimator_id: null }).lean(),
+    TeamMember.find({}).lean(),
+  ]);
+
+  // Build initials → member map (case-insensitive)
+  const initialsMap = {};
+  team.forEach(m => { initialsMap[m.initials.toUpperCase()] = m; });
+  const allInitials = Object.keys(initialsMap);
+
+  const results = [];
+  for (const bid of bids) {
+    if (!bid.notes && !bid.estimate_approved_by) continue;
+
+    const candidates = new Set();
+    // Check notes and estimate_approved_by for each known initials pattern
+    for (const field of ['notes', 'estimate_approved_by']) {
+      const val = (bid[field] || '').trim();
+      if (!val) continue;
+      for (const ini of allInitials) {
+        // Match: exact, starts-with separator, or standalone word
+        const re = new RegExp(`(?:^|\\b)${ini}(?:\\b|$)`, 'i');
+        if (re.test(val)) candidates.add(ini);
+      }
+    }
+
+    if (candidates.size === 0) continue;
+
+    results.push({
+      bid_id:    bid._id,
+      bid_number: bid.bid_number || null,
+      project_name: bid.project_name,
+      stage:     bid.stage,
+      notes:     bid.notes || null,
+      estimate_approved_by: bid.estimate_approved_by || null,
+      candidates: [...candidates].map(ini => ({
+        initials: ini,
+        id: initialsMap[ini]._id,
+        name: initialsMap[ini].name,
+        role: initialsMap[ini].role,
+      })),
+      // Auto-suggest when there's exactly one unambiguous match
+      suggested: candidates.size === 1 ? initialsMap[[...candidates][0]]._id : null,
+    });
+  }
+
+  return results;
+}
+
+async function fixOrphanEstimators(fixes) {
+  // fixes: [{ bid_id, estimator_id }]
+  let count = 0;
+  for (const { bid_id, estimator_id } of fixes) {
+    if (!bid_id || !estimator_id) continue;
+    await Bid.findByIdAndUpdate(bid_id, {
+      estimator_id: Number(estimator_id),
+      updated_at: new Date().toISOString().replace('T', ' ').substring(0, 19),
+    });
+    count++;
+  }
+  return { fixed: count };
+}
+
 module.exports = {
   getTeam, getAllTeam, createTeamMember, updateTeamMember,
   loginUser, getMember, setPassword, adminSetTempPassword, getMyStats,
   getBids, getBid, createBid, updateBid, deleteBid,
   getFollowups, logFollowup,
   getStats, getDigest, getAnalytics,
+  findOrphanEstimators, fixOrphanEstimators,
   seedTeamData,
 };

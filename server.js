@@ -174,6 +174,23 @@ app.get('/api/analytics', async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── ADMIN: orphan estimator repair ────────────────────────────────────────────
+app.get('/api/admin/orphan-estimators', async (req, res) => {
+  try {
+    const admin = await db.getMember(req.session.userId);
+    if (!admin || !admin.is_admin) return res.status(403).json({ error: 'Admin only.' });
+    res.json(await db.findOrphanEstimators());
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/admin/fix-orphan-estimators', async (req, res) => {
+  try {
+    const admin = await db.getMember(req.session.userId);
+    if (!admin || !admin.is_admin) return res.status(403).json({ error: 'Admin only.' });
+    res.json(await db.fixOrphanEstimators(req.body.fixes || []));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── Start ─────────────────────────────────────────────────────────────────────
 const MONGODB_URI = process.env.MONGODB_URI;
 if (!MONGODB_URI) {
