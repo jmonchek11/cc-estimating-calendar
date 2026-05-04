@@ -984,4 +984,16 @@ tbody td {
   margin: 1px 2px 1px 0;
   border: 1px solid;
 }
+/* ── Fix-mode field highlighting ─────────────────────────────────────────── */
+.field-needs-fix {
+  border-color: #f59e0b !important;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.30) !important;
+  background-color: rgba(245, 158, 11, 0.07) !important;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.field-needs-fix:focus {
+  border-color: #f59e0b !important;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.50) !important;
+}
+
 #pw-requirements div.met { color: #4ade80; }

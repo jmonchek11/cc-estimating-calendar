@@ -1638,7 +1638,10 @@ async function renderCleanup(main) {
         <td>${b.salesperson_initials ? `<span class="initials-pill" style="background:#dcfce7;color:#166534">${esc(b.salesperson_initials)}</span>` : '<span style="color:#dc2626;font-size:12px">—</span>'}</td>
         <td class="td-date">${fmt(b.date_received, 'date')}</td>
         <td onclick="event.stopPropagation()">
-          <button class="btn btn-primary btn-sm" onclick="openBidModal(${b.id})" title="Edit & fix this bid">✏️ Fix</button>
+          <button class="btn btn-primary btn-sm"
+            data-bid-id="${b.id}"
+            data-issues="${esc(JSON.stringify(b._issues.map(i=>i.key)))}"
+            onclick="openBidModalForFix(this)" title="Edit & fix this bid">✏️ Fix</button>
         </td>
       </tr>`;
   }).join('');
@@ -1828,7 +1831,36 @@ async function toggleTeamMember(id, currentActive) {
 // ─────────────────────────────────────────────
 // BID FORM MODAL
 // ─────────────────────────────────────────────
-function openBidModal(bidId = null, defaultStage = 'opportunity') {
+function openBidModalForFix(el) {
+  const bidId = +el.dataset.bidId;
+  const issueKeys = JSON.parse(el.dataset.issues || '[]');
+  openBidModal(bidId, null, issueKeys);
+}
+
+const ISSUE_FIELD_MAP = {
+  no_price:       ['f-estimate_amount'],
+  no_customer:    ['f-customer'],
+  no_estimator:   ['f-estimator_id'],
+  no_salesperson: ['f-salesperson_id'],
+  no_due_date:    ['f-estimate_due_date'],
+  no_followup:    ['f-next_followup_date'],
+  stale_followup: ['f-next_followup_date'],
+  very_stale:     ['f-stage'],
+  stale:          ['f-stage'],
+};
+
+function highlightBidFormIssues(issueKeys) {
+  document.querySelectorAll('.field-needs-fix').forEach(el => el.classList.remove('field-needs-fix'));
+  if (!issueKeys || !issueKeys.length) return;
+  issueKeys.forEach(key => {
+    (ISSUE_FIELD_MAP[key] || []).forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.classList.add('field-needs-fix');
+    });
+  });
+}
+
+function openBidModal(bidId = null, defaultStage = 'opportunity', highlightIssues = null) {
   const modal = document.getElementById('bid-modal');
   const form = document.getElementById('bid-form');
   form.reset();
@@ -1864,6 +1896,7 @@ function openBidModal(bidId = null, defaultStage = 'opportunity') {
       document.getElementById('f-notes').value = b.notes || '';
       document.getElementById('f-award_date').value = b.award_date || '';
       document.getElementById('f-awarded_contractor').value = b.awarded_contractor || '';
+      if (highlightIssues) highlightBidFormIssues(highlightIssues);
     });
   } else {
     document.getElementById('f-stage').value = defaultStage;
@@ -1874,6 +1907,7 @@ function openBidModal(bidId = null, defaultStage = 'opportunity') {
 }
 
 function closeBidModal() {
+  highlightBidFormIssues([]);
   document.getElementById('bid-modal').style.display = 'none';
 }
 
