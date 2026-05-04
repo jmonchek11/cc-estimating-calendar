@@ -13,7 +13,7 @@ const State = {
   analyticsPeriod: 'all',
   analyticsSort: 'volume',
   globalSearch: '',
-  cleanupFilters: { issue: '', search: '', person: '', stage: '', sort: 'issues', mineOnly: false },
+  cleanupFilters: { issue: '', search: '', person: '', hiddenStages: [], sort: 'issues', mineOnly: false },
 };
 
 // ─────────────────────────────────────────────
@@ -1486,9 +1486,15 @@ function setCleanupFilter(key, value) {
 }
 
 function refreshCleanup() {
-  State.cleanupFilters.stage  = document.getElementById('cu-stage-filter')?.value  || '';
   State.cleanupFilters.person = document.getElementById('cu-person-filter')?.value || '';
   State.cleanupFilters.sort   = document.getElementById('cu-sort-filter')?.value   || 'issues';
+  renderPage('cleanup');
+}
+
+function toggleCleanupStage(stage) {
+  const h = State.cleanupFilters.hiddenStages;
+  const idx = h.indexOf(stage);
+  if (idx === -1) h.push(stage); else h.splice(idx, 1);
   renderPage('cleanup');
 }
 
@@ -1504,7 +1510,7 @@ function toggleCleanupMine() {
 }
 
 function clearCleanupFilters() {
-  State.cleanupFilters = { issue: '', search: '', person: '', stage: '', sort: 'issues', mineOnly: false };
+  State.cleanupFilters = { issue: '', search: '', person: '', hiddenStages: [], sort: 'issues', mineOnly: false };
   renderPage('cleanup');
 }
 
@@ -1535,13 +1541,13 @@ async function renderCleanup(main) {
     { key: 'very_stale',     label: '1yr+ Old',         color: '#78716c' },
   ].filter(c => issueCounts[c.key]);
 
-  const { issue, search, person, stage, sort, mineOnly } = State.cleanupFilters;
+  const { issue, search, person, hiddenStages, sort, mineOnly } = State.cleanupFilters;
 
   // Apply filters
   let filtered = withIssues;
 
-  if (issue)  filtered = filtered.filter(b => b._issues.some(i => i.key === issue));
-  if (stage)  filtered = filtered.filter(b => b.stage === stage);
+  if (issue)               filtered = filtered.filter(b => b._issues.some(i => i.key === issue));
+  if (hiddenStages.length) filtered = filtered.filter(b => !hiddenStages.includes(b.stage));
   if (person) {
     const pid = Number(person);
     filtered = filtered.filter(b => b.estimator_id === pid || b.salesperson_id === pid);
@@ -1575,10 +1581,24 @@ async function renderCleanup(main) {
     filtered.sort((a, b) => a.project_name.localeCompare(b.project_name));
   }
 
+  // ── Stage counts (before stage filter, after other filters) ───────────────
+  const STAGE_DEFS = [
+    { key: 'active_bid',   label: 'Active Bid',    color: '#2563eb' },
+    { key: 'active_co',    label: 'Change Order',  color: '#7c3aed' },
+    { key: 'follow_up',    label: 'Follow Up',     color: '#d97706' },
+    { key: 'opportunity',  label: 'Opportunity',   color: '#0891b2' },
+    { key: 'awarded',      label: 'Awarded',       color: '#16a34a' },
+    { key: 'not_awarded',  label: 'Not Awarded',   color: '#dc2626' },
+    { key: 'closed',       label: 'Closed',        color: '#78716c' },
+  ];
+  const stageCounts = {};
+  withIssues.forEach(b => { stageCounts[b.stage] = (stageCounts[b.stage] || 0) + 1; });
+  const activeStages = STAGE_DEFS.filter(s => stageCounts[s.key]);
+
   // ── Build chips ────────────────────────────────────────────────────────────
   const activeFilter = issue;
   const chipsHtml = `
-    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px">
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">
       <button class="cleanup-chip${!activeFilter ? ' active' : ''}"
               onclick="setCleanupFilter('issue','')"
               style="border-color:#64748b;${!activeFilter ? 'background:#64748b;color:#fff' : 'color:#64748b'}">
@@ -1590,7 +1610,19 @@ async function renderCleanup(main) {
                 style="border-color:${c.color};${activeFilter===c.key ? `background:${c.color};color:#fff` : `color:${c.color}`}">
           ${c.label} <span class="chip-count">${issueCounts[c.key]}</span>
         </button>`).join('')}
-    </div>`;
+    </div>
+    ${activeStages.length > 1 ? `
+    <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:16px">
+      <span style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-right:2px">Stages:</span>
+      ${activeStages.map(s => {
+        const hidden = hiddenStages.includes(s.key);
+        return `<button class="cleanup-chip${!hidden ? ' active' : ''}"
+          onclick="toggleCleanupStage('${s.key}')"
+          style="border-color:${s.color};${!hidden ? `background:${s.color};color:#fff` : `color:${s.color};opacity:0.5`}">
+          ${s.label} <span class="chip-count">${stageCounts[s.key]}</span>
+        </button>`;
+      }).join('')}
+    </div>` : ''}`;
 
   // ── Filter bar ─────────────────────────────────────────────────────────────
   const allPeople = State.team.filter(m => m.active);
@@ -1653,7 +1685,7 @@ async function renderCleanup(main) {
         <div class="page-title">🧹 Data Cleanup</div>
         <div class="page-subtitle">
           ${withIssues.length} bids with missing data · ${filtered.length} shown
-          ${(issue||stage||person||mineOnly||search) ? ' <em style="color:var(--text-muted)">(filtered)</em>' : ''}
+          ${(issue||hiddenStages.length||person||mineOnly||search) ? ' <em style="color:var(--text-muted)">(filtered)</em>' : ''}
         </div>
       </div>
       <button class="btn btn-secondary" onclick="clearCleanupFilters()">Reset Filters</button>
@@ -1669,16 +1701,6 @@ async function renderCleanup(main) {
       <select id="cu-person-filter" onchange="refreshCleanup()">
         <option value="">All People</option>
         ${personOptions}
-      </select>
-      <select id="cu-stage-filter" onchange="refreshCleanup()">
-        <option value="">All Stages</option>
-        <option value="opportunity">Opportunity</option>
-        <option value="active_bid">Active Bid</option>
-        <option value="active_co">Change Order</option>
-        <option value="follow_up">Follow Up</option>
-        <option value="awarded">Awarded</option>
-        <option value="not_awarded">Not Awarded</option>
-        <option value="closed">Closed</option>
       </select>
       <select id="cu-sort-filter" onchange="refreshCleanup()">
         <option value="issues">Sort: Most Issues</option>
@@ -1706,7 +1728,6 @@ async function renderCleanup(main) {
     </div>`;
 
   // Restore select values after render
-  if (stage)  document.getElementById('cu-stage-filter').value  = stage;
   if (person) document.getElementById('cu-person-filter').value = person;
   if (sort !== 'issues') document.getElementById('cu-sort-filter').value = sort;
 }
