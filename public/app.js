@@ -12,6 +12,7 @@ const State = {
   quickLogBidId: null,
   analyticsPeriod: 'all',
   analyticsSort: 'volume',
+  globalSearch: '',
 };
 
 // ─────────────────────────────────────────────
@@ -168,6 +169,7 @@ async function renderPage(page) {
       case 'active-bids':   return await renderBidTable(main, 'active_bid', 'Active Bids', '🟡');
       case 'change-orders': return await renderBidTable(main, 'active_co', 'Change Orders', '🟠');
       case 'follow-ups':    return await renderFollowUps(main);
+      case 'search':        return await renderSearch(main);
       case 'digest':        return await renderDigest(main);
       case 'analytics':     return await renderAnalytics(main);
       case 'history':       return await renderHistory(main);
@@ -767,6 +769,151 @@ async function renderFollowUps(main) {
   if (urgencyVal) document.getElementById('fu-urgency-filter').value = urgencyVal;
   if (ownerVal)   document.getElementById('fu-owner-filter').value = ownerVal;
   if (sortVal !== 'urgency') document.getElementById('fu-sort-filter').value = sortVal;
+}
+
+// ─────────────────────────────────────────────
+// GLOBAL SEARCH
+// ─────────────────────────────────────────────
+let globalSearchTimer;
+
+function debounceGlobalSearch() {
+  clearTimeout(globalSearchTimer);
+  const q = (document.getElementById('global-search-input')?.value || '').trim();
+  State.globalSearch = q;
+
+  // Show / hide the clear ✕ button
+  const clearBtn = document.getElementById('sidebar-search-clear');
+  if (clearBtn) clearBtn.style.display = q ? 'block' : 'none';
+
+  if (q.length < 2) {
+    if (State.currentPage === 'search') renderPage('search');
+    return;
+  }
+
+  globalSearchTimer = setTimeout(() => {
+    if (State.currentPage !== 'search') navigate('search');
+    else renderPage('search');
+  }, 280);
+}
+
+function clearGlobalSearch() {
+  State.globalSearch = '';
+  const inp = document.getElementById('global-search-input');
+  if (inp) { inp.value = ''; inp.blur(); }
+  const clearBtn = document.getElementById('sidebar-search-clear');
+  if (clearBtn) clearBtn.style.display = 'none';
+  if (State.currentPage === 'search') navigate('dashboard');
+}
+
+async function renderSearch(main) {
+  // Sync query from live input (handles back-nav edge cases)
+  const inp = document.getElementById('global-search-input');
+  const q = (inp?.value || State.globalSearch || '').trim();
+  State.globalSearch = q;
+  const clearBtn = document.getElementById('sidebar-search-clear');
+  if (clearBtn) clearBtn.style.display = q ? 'block' : 'none';
+
+  if (q.length < 2) {
+    main.innerHTML = `
+      <div class="page-header">
+        <div><div class="page-title">🔍 Search</div></div>
+      </div>
+      <div class="empty-state">
+        <div class="empty-state-icon">🔍</div>
+        <div class="empty-state-title">Search all bids</div>
+        <div class="empty-state-desc">
+          Type in the search bar on the left to find any bid across<br>
+          <strong>all stages</strong> — opportunities, active bids, follow-ups, history, and more.<br>
+          <span style="font-size:12px;color:var(--text-light);margin-top:6px;display:block">
+            Tip: press <kbd style="background:#e2e8f0;padding:1px 5px;border-radius:3px;font-size:11px">Ctrl K</kbd> to focus the search bar from anywhere.
+          </span>
+        </div>
+      </div>`;
+    if (inp) setTimeout(() => inp.focus(), 50);
+    return;
+  }
+
+  main.innerHTML = '<div class="loading-screen"><div class="spinner"></div><p>Searching…</p></div>';
+
+  const bids = await api.get(`/api/bids?search=${encodeURIComponent(q)}`);
+
+  if (!bids.length) {
+    main.innerHTML = `
+      <div class="page-header">
+        <div>
+          <div class="page-title">🔍 Search Results</div>
+          <div class="page-subtitle">No results for "<strong>${esc(q)}</strong>"</div>
+        </div>
+      </div>
+      <div class="empty-state">
+        <div class="empty-state-icon">😶</div>
+        <div class="empty-state-title">No results found</div>
+        <div class="empty-state-desc">No bids matched "<strong>${esc(q)}</strong>".<br>Try a project name, bid #, customer, or job #.</div>
+      </div>`;
+    return;
+  }
+
+  // Group by stage in priority order (active work first, history last)
+  const STAGE_ORDER = ['active_bid', 'active_co', 'follow_up', 'opportunity', 'awarded', 'not_awarded', 'closed'];
+  const STAGE_COLORS = {
+    opportunity: '#3b82f6', active_bid: '#f59e0b', active_co: '#f97316',
+    follow_up: '#8b5cf6', awarded: '#16a34a', not_awarded: '#dc2626', closed: '#94a3b8'
+  };
+
+  const grouped = {};
+  bids.forEach(b => { (grouped[b.stage] ??= []).push(b); });
+
+  // Ordered stages that have results, then any unexpected stages
+  const orderedStages = [
+    ...STAGE_ORDER.filter(s => grouped[s]?.length),
+    ...Object.keys(grouped).filter(s => !STAGE_ORDER.includes(s)),
+  ];
+
+  const sections = orderedStages.map(s => {
+    const items = grouped[s];
+    const color = STAGE_COLORS[s] || '#94a3b8';
+    const rows = items.map(b => `
+      <tr class="clickable-row" onclick="openJobPanel(${b.id})">
+        <td class="td-project">${esc(b.project_name)}<small>${b.bid_number ? ' #' + esc(b.bid_number) : ''}</small></td>
+        <td class="td-customer">${esc(b.customer) || '—'}</td>
+        <td class="td-amount">${fmt(b.estimate_amount, 'currency')}</td>
+        <td class="td-date">${fmt(b.date_received, 'date')}</td>
+        <td>${b.estimator_initials   ? `<span class="initials-pill">${esc(b.estimator_initials)}</span>` : '—'}</td>
+        <td>${b.salesperson_initials ? `<span class="initials-pill" style="background:#dcfce7;color:#166534">${esc(b.salesperson_initials)}</span>` : '—'}</td>
+        <td onclick="event.stopPropagation()">
+          <button class="btn btn-ghost btn-sm" onclick="openBidModal(${b.id})"      title="Edit">✏️</button>
+          <button class="btn btn-ghost btn-sm" onclick="openFollowupModal(${b.id})" title="Log Follow-up">🔔</button>
+          <button class="btn btn-ghost btn-sm" onclick="openStageModal(${b.id},'${esc(b.stage)}')" title="Move Stage">➡️</button>
+        </td>
+      </tr>`).join('');
+
+    return `
+      <div style="margin-bottom:22px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <div class="section-title" style="color:${color}">${stageName(s)}</div>
+          <span style="background:${color};color:white;font-size:11px;font-weight:700;padding:1px 8px;border-radius:10px">${items.length}</span>
+        </div>
+        <div class="table-wrapper" style="margin:0">
+          <table>
+            <thead><tr>
+              <th>Project</th><th>Customer</th><th>Amount</th>
+              <th>Received</th><th>Est.</th><th>Sales</th><th></th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>`;
+  }).join('');
+
+  main.innerHTML = `
+    <div class="page-header">
+      <div>
+        <div class="page-title">🔍 Search Results</div>
+        <div class="page-subtitle">${bids.length} result${bids.length !== 1 ? 's' : ''} for "<strong>${esc(q)}</strong>"</div>
+      </div>
+      <button class="btn btn-secondary" onclick="clearGlobalSearch()">✕ Clear</button>
+    </div>
+    ${sections}`;
 }
 
 // ─────────────────────────────────────────────
@@ -1780,8 +1927,16 @@ async function logout() {
   await api.post('/api/auth/logout', {});
   State.currentUser = null;
   State.mineOnly = false;
+  State.globalSearch = '';
   const fab = document.getElementById('quick-log-fab');
   if (fab) fab.style.display = 'none';
+  // Hide and clear search bar
+  const sw = document.getElementById('sidebar-search-wrap');
+  if (sw) sw.style.display = 'none';
+  const inp = document.getElementById('global-search-input');
+  if (inp) inp.value = '';
+  const clearBtn = document.getElementById('sidebar-search-clear');
+  if (clearBtn) clearBtn.style.display = 'none';
   document.getElementById('app').style.display = 'none';
   showLoginOverlay();
 }
@@ -1796,6 +1951,9 @@ function updateSidebarUser(user) {
   document.getElementById('sidebar-user-role').textContent = user.role;
   const fab = document.getElementById('quick-log-fab');
   if (fab) fab.style.display = 'flex';
+  // Show global search bar
+  const sw = document.getElementById('sidebar-search-wrap');
+  if (sw) sw.style.display = 'block';
 }
 
 // (PIN input removed — now using email/password auth)
@@ -2060,6 +2218,15 @@ function openStageModalFromPanel() {
 async function init() {
   State.team = await api.get('/api/team');
   window.addEventListener('hashchange', onHashChange);
+
+  // Ctrl/Cmd+K → focus global search
+  document.addEventListener('keydown', e => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      e.preventDefault();
+      const inp = document.getElementById('global-search-input');
+      if (inp && State.currentUser) { inp.focus(); inp.select(); }
+    }
+  });
 
   // Check existing session
   const me = await api.get('/api/auth/me').catch(() => null);

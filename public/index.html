@@ -65,6 +65,21 @@
         </div>
       </div>
 
+      <!-- GLOBAL SEARCH -->
+      <div class="sidebar-search-wrap" id="sidebar-search-wrap" style="display:none">
+        <div class="sidebar-search-inner">
+          <span class="sidebar-search-icon">🔍</span>
+          <input type="text" id="global-search-input"
+                 class="sidebar-search-input"
+                 placeholder="Search all bids…"
+                 oninput="debounceGlobalSearch()"
+                 onkeydown="if(event.key==='Escape')clearGlobalSearch()"
+                 autocomplete="off" />
+          <button id="sidebar-search-clear" class="sidebar-search-clear"
+                  onclick="clearGlobalSearch()" style="display:none" title="Clear">✕</button>
+        </div>
+      </div>
+
       <div class="nav-section-label">PIPELINE</div>
       <a class="nav-item" data-page="dashboard" href="#dashboard">
         <span class="nav-icon">⬛</span> Dashboard
