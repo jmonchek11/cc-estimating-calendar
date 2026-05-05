@@ -14,9 +14,6 @@ const State = {
   analyticsSort: 'volume',
   globalSearch: '',
   cleanupFilters: { issue: '', search: '', person: '', hiddenStages: [], sort: 'issues', mineOnly: false },
-  meetingTab: 'opportunities',
-  meetingDiscussed: {},
-  meetingPresenter: false,
   calYear: new Date().getFullYear(),
   calMonth: new Date().getMonth(),
   calFilter: 'all',
@@ -206,7 +203,6 @@ async function updateBadges() {
 
 async function renderPage(page) {
   closeJobPanel();
-  if (page !== 'meeting') stopMeetingTimer();
   const main = document.getElementById('main');
   main.innerHTML = '<div class="loading-screen"><div class="spinner"></div><p>Loading...</p></div>';
   try {
@@ -221,7 +217,6 @@ async function renderPage(page) {
       case 'analytics':     return await renderAnalytics(main);
       case 'history':       return await renderHistory(main);
       case 'cleanup':       return await renderCleanup(main);
-      case 'meeting':       return await renderMeeting(main);
       case 'calendar':      return await renderCalendar(main);
       case 'settings':      return await renderSettings(main);
       default:              return await renderDashboard(main);
@@ -1944,286 +1939,7 @@ async function toggleTeamMember(id, currentActive) {
 }
 
 // ─────────────────────────────────────────────
-// MONDAY MEETING
-// ─────────────────────────────────────────────
-let meetingTimerInterval = null;
-let meetingTimerStart    = null;
-let _meetingData         = null;
-
-function meetingWeekStart() {
-  const d = new Date();
-  d.setDate(d.getDate() - 7);
-  d.setHours(0,0,0,0);
-  return d.toISOString().split('T')[0];
-}
-
-function startMeetingTimer() {
-  if (meetingTimerInterval) clearInterval(meetingTimerInterval);
-  if (!meetingTimerStart) meetingTimerStart = Date.now();
-  meetingTimerInterval = setInterval(() => {
-    const el = document.getElementById('meeting-timer');
-    if (!el) { clearInterval(meetingTimerInterval); return; }
-    const s   = Math.floor((Date.now() - meetingTimerStart) / 1000);
-    const m   = Math.floor(s / 60);
-    const sec = s % 60;
-    el.textContent = `⏱ ${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
-  }, 1000);
-}
-
-function stopMeetingTimer() {
-  if (meetingTimerInterval) { clearInterval(meetingTimerInterval); meetingTimerInterval = null; }
-}
-
-function meetingDueBadge(dueDate) {
-  if (!dueDate) return '<span class="mdue mdue-none">No Due Date</span>';
-  const days = Math.round((new Date(dueDate) - new Date()) / 86400000);
-  if (days < 0)   return `<span class="mdue mdue-red">🔴 ${Math.abs(days)}d Overdue</span>`;
-  if (days === 0) return `<span class="mdue mdue-red">🔴 Due Today</span>`;
-  if (days <= 7)  return `<span class="mdue mdue-yellow">🟡 Due in ${days}d</span>`;
-  return `<span class="mdue mdue-green">🟢 ${fmt(dueDate,'date')}</span>`;
-}
-
-function switchMeetingTab(tab) {
-  State.meetingTab = tab;
-  renderMeetingContent();
-}
-
-function toggleMeetingDiscussed(bidId) {
-  if (State.meetingDiscussed[bidId]) delete State.meetingDiscussed[bidId];
-  else State.meetingDiscussed[bidId] = true;
-  const card = document.getElementById(`mc-${bidId}`);
-  if (card) card.classList.toggle('mc-discussed', !!State.meetingDiscussed[bidId]);
-  const btn = document.getElementById(`mc-disc-btn-${bidId}`);
-  if (btn) {
-    btn.textContent = State.meetingDiscussed[bidId] ? '✓ Discussed' : 'Mark Discussed';
-    btn.classList.toggle('mc-disc-active', !!State.meetingDiscussed[bidId]);
-  }
-}
-
-function toggleMeetingPresenter() {
-  State.meetingPresenter = !State.meetingPresenter;
-  const wrap = document.getElementById('meeting-wrap');
-  if (wrap) wrap.classList.toggle('presenter-mode', State.meetingPresenter);
-  const btn = document.getElementById('meeting-presenter-btn');
-  if (btn) btn.textContent = State.meetingPresenter ? '👁 Exit Presenter' : '👁 Presenter Mode';
-}
-
-function openMeetingNote(bidId) {
-  const area = document.getElementById(`mc-note-${bidId}`);
-  if (!area) return;
-  const showing = area.style.display !== 'none';
-  area.style.display = showing ? 'none' : 'block';
-  if (!showing) {
-    const ta = document.getElementById(`mc-note-text-${bidId}`);
-    if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
-  }
-}
-
-async function saveMeetingNote(bidId) {
-  const ta = document.getElementById(`mc-note-text-${bidId}`);
-  if (!ta) return;
-  try {
-    const bid = await api.get(`/api/bids/${bidId}`);
-    await api.put(`/api/bids/${bidId}`, { ...bid, notes: ta.value.trim() });
-    if (_meetingData) {
-      ['opps','activeBids','activeCOs','followUps'].forEach(key => {
-        const idx = (_meetingData[key] || []).findIndex(b => b.id === bidId);
-        if (idx !== -1) _meetingData[key][idx].notes = ta.value.trim();
-      });
-    }
-    const area = document.getElementById(`mc-note-${bidId}`);
-    if (area) area.style.display = 'none';
-    const card = document.getElementById(`mc-${bidId}`);
-    if (card) {
-      card.style.borderColor = '#16a34a';
-      setTimeout(() => { if (card) card.style.borderColor = ''; }, 1200);
-    }
-  } catch(e) { alert('Error saving note: ' + e.message); }
-}
-
-function renderMeetingCard(b, showDue, fuOverride) {
-  const isNew     = _meetingData && b.date_received && b.date_received >= _meetingData.weekStart;
-  const discussed = !!State.meetingDiscussed[b.id];
-  const issues    = getBidIssues(b);
-  const hasNote   = b.notes && b.notes.trim();
-  const dueBadge  = fuOverride !== undefined ? fuOverride : (showDue ? meetingDueBadge(b.estimate_due_date) : '');
-
-  return `
-    <div class="meeting-card${discussed ? ' mc-discussed' : ''}" id="mc-${b.id}">
-      <div class="mc-top">
-        <div class="mc-title-row">
-          <span class="mc-name">${esc(b.project_name)}</span>
-          ${isNew ? '<span class="mc-new-badge">NEW</span>' : ''}
-        </div>
-        ${dueBadge}
-      </div>
-      <div class="mc-customer">${b.customer ? esc(b.customer) : '<span class="mc-missing">No customer</span>'}</div>
-      <div class="mc-meta">
-        ${b.estimator_initials   ? `<span class="initials-pill">${esc(b.estimator_initials)}</span>` : '<span class="mc-missing">No Est.</span>'}
-        ${b.salesperson_initials ? `<span class="initials-pill" style="background:#dcfce7;color:#166534">${esc(b.salesperson_initials)}</span>` : ''}
-        ${b.estimate_amount ? `<span class="mc-amount presenter-hide">${fmt(b.estimate_amount,'currency')}</span>` : ''}
-        ${b.estimate_pct_complete > 0 ? `<span class="mc-pct">${Math.round(b.estimate_pct_complete*100)}%</span>` : ''}
-      </div>
-      ${hasNote   ? `<div class="mc-note-preview">💬 ${esc(b.notes.substring(0,80))}${b.notes.length>80?'…':''}</div>` : ''}
-      ${issues.length ? `<div class="mc-issues">${issues.map(i=>`<span class="issue-tag" style="color:${i.color};background:${i.color}18;border-color:${i.color}40">${i.label}</span>`).join('')}</div>` : ''}
-      <div class="mc-actions">
-        <button id="mc-disc-btn-${b.id}" class="mc-disc-btn${discussed?' mc-disc-active':''}" onclick="toggleMeetingDiscussed(${b.id})">${discussed?'✓ Discussed':'Mark Discussed'}</button>
-        <button class="mc-note-btn" onclick="openMeetingNote(${b.id})">📝 Note</button>
-        <button class="mc-view-btn" onclick="openJobPanel(${b.id})">View</button>
-      </div>
-      <div class="mc-note-area" id="mc-note-${b.id}" style="display:none">
-        <textarea id="mc-note-text-${b.id}" class="mc-note-textarea" placeholder="Add a meeting note…">${esc(b.notes||'')}</textarea>
-        <div style="display:flex;gap:6px;margin-top:6px">
-          <button class="btn btn-primary btn-sm" onclick="saveMeetingNote(${b.id})">Save</button>
-          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('mc-note-${b.id}').style.display='none'">Cancel</button>
-        </div>
-      </div>
-    </div>`;
-}
-
-function renderMeetingContent() {
-  const content = document.getElementById('meeting-content');
-  if (!content || !_meetingData) return;
-  const { opps, activeBids, activeCOs, followUps } = _meetingData;
-  const tab = State.meetingTab;
-  const today = new Date().toISOString().split('T')[0];
-
-  document.querySelectorAll('.meeting-tab-btn').forEach(b =>
-    b.classList.toggle('active', b.dataset.tab === tab));
-
-  let bids = [], emptyMsg = 'Nothing here.', showDue = false;
-
-  if (tab === 'opportunities') {
-    bids = [...opps].sort((a,b) => (b.date_received||'').localeCompare(a.date_received||''));
-    emptyMsg = 'No opportunities in the pipeline.';
-  } else if (tab === 'active-bids') {
-    showDue = true;
-    bids = [...activeBids].sort((a,b) => {
-      if (!a.estimate_due_date && !b.estimate_due_date) return 0;
-      if (!a.estimate_due_date) return 1; if (!b.estimate_due_date) return -1;
-      return a.estimate_due_date.localeCompare(b.estimate_due_date);
-    });
-    emptyMsg = 'No active bids.';
-  } else if (tab === 'change-orders') {
-    showDue = true;
-    bids = [...activeCOs].sort((a,b) => {
-      if (!a.estimate_due_date && !b.estimate_due_date) return 0;
-      if (!a.estimate_due_date) return 1; if (!b.estimate_due_date) return -1;
-      return a.estimate_due_date.localeCompare(b.estimate_due_date);
-    });
-    emptyMsg = 'No active change orders.';
-  } else if (tab === 'follow-ups') {
-    bids = [...followUps].sort((a,b) => {
-      const ao = a.next_followup_date && a.next_followup_date < today;
-      const bo = b.next_followup_date && b.next_followup_date < today;
-      if (ao && !bo) return -1; if (!ao && bo) return 1;
-      if (!a.next_followup_date && b.next_followup_date) return 1;
-      if (a.next_followup_date && !b.next_followup_date) return -1;
-      return (a.next_followup_date||'').localeCompare(b.next_followup_date||'');
-    });
-    emptyMsg = 'No follow-ups pending.';
-  }
-
-  // Undiscussed first, discussed at bottom
-  const sorted = [
-    ...bids.filter(b => !State.meetingDiscussed[b.id]),
-    ...bids.filter(b =>  State.meetingDiscussed[b.id]),
-  ];
-
-  const cards = sorted.map(b => {
-    if (tab === 'follow-ups') {
-      const fu   = b.next_followup_date;
-      const days = fu ? Math.round((new Date(fu) - new Date()) / 86400000) : null;
-      let fubadge = '<span class="mdue mdue-none">No Follow-up Set</span>';
-      if (fu) {
-        if (days < 0)   fubadge = `<span class="mdue mdue-red">🔴 ${Math.abs(days)}d Overdue</span>`;
-        else if (days === 0) fubadge = `<span class="mdue mdue-red">🔴 Due Today</span>`;
-        else if (days <= 3)  fubadge = `<span class="mdue mdue-yellow">🟡 In ${days}d</span>`;
-        else fubadge = `<span class="mdue mdue-green">🟢 ${fmt(fu,'date')}</span>`;
-      }
-      return renderMeetingCard(b, false, fubadge);
-    }
-    return renderMeetingCard(b, showDue);
-  }).join('');
-
-  const dCount = bids.filter(b => State.meetingDiscussed[b.id]).length;
-
-  content.innerHTML = `
-    ${dCount ? `<div style="font-size:12px;color:var(--text-muted);text-align:right;margin-bottom:10px">${dCount} of ${bids.length} discussed</div>` : ''}
-    ${sorted.length
-      ? `<div class="meeting-grid">${cards}</div>`
-      : `<div class="empty-state"><div class="empty-state-icon">✅</div><div class="empty-state-title">${emptyMsg}</div></div>`}`;
-}
-
-async function renderMeeting(main) {
-  main.innerHTML = '<div class="loading-screen"><div class="spinner"></div><p>Loading meeting data…</p></div>';
-  const weekStart = meetingWeekStart();
-
-  const [opps, activeBids, activeCOs, followUps, awarded] = await Promise.all([
-    api.get('/api/bids?stage=opportunity'),
-    api.get('/api/bids?stage=active_bid'),
-    api.get('/api/bids?stage=active_co'),
-    api.get('/api/bids?stage=follow_up'),
-    api.get('/api/bids?stage=awarded'),
-  ]);
-
-  const recentWins = awarded.filter(b => b.award_date && b.award_date >= weekStart);
-  const winsValue  = recentWins.reduce((s, b) => s + (b.estimate_amount || 0), 0);
-  const newOpps    = opps.filter(b => b.date_received && b.date_received >= weekStart);
-  _meetingData = { opps, activeBids, activeCOs, followUps, recentWins, winsValue, newOpps, weekStart };
-
-  if (!meetingTimerStart) meetingTimerStart = Date.now();
-  startMeetingTimer();
-
-  const dateStr = new Date().toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' });
-
-  const winsBanner = recentWins.length ? `
-    <div class="meeting-wins-banner">
-      🏆 <strong>${recentWins.length} win${recentWins.length!==1?'s':''}</strong> since last week
-      ${winsValue > 0 ? `· <span class="presenter-hide">${fmt(winsValue,'currency')} awarded</span>` : ''}
-      <div class="meeting-wins-list">${recentWins.map(w=>`<span class="meeting-win-pill">${esc(w.project_name)}</span>`).join('')}</div>
-    </div>` : '';
-
-  main.innerHTML = `
-    <div class="meeting-wrap${State.meetingPresenter?' presenter-mode':''}" id="meeting-wrap">
-      <div class="meeting-header">
-        <div class="meeting-header-left">
-          <span class="meeting-title">📅 Monday Meeting</span>
-          <span class="meeting-date">${esc(dateStr)}</span>
-        </div>
-        <div class="meeting-header-right">
-          <span class="meeting-timer" id="meeting-timer">⏱ 00:00</span>
-          <button id="meeting-presenter-btn" class="meeting-presenter-btn" onclick="toggleMeetingPresenter()">
-            ${State.meetingPresenter ? '👁 Exit Presenter' : '👁 Presenter Mode'}
-          </button>
-        </div>
-      </div>
-
-      ${winsBanner}
-
-      <div class="meeting-tabs">
-        <button class="meeting-tab-btn${State.meetingTab==='opportunities'?' active':''}" data-tab="opportunities" onclick="switchMeetingTab('opportunities')">
-          🆕 Opportunities <span class="mtab-count">${opps.length}${newOpps.length ? ` · <span class="mtab-new">${newOpps.length} new</span>` : ''}</span>
-        </button>
-        <button class="meeting-tab-btn${State.meetingTab==='active-bids'?' active':''}" data-tab="active-bids" onclick="switchMeetingTab('active-bids')">
-          📐 Active Bids <span class="mtab-count">${activeBids.length}</span>
-        </button>
-        <button class="meeting-tab-btn${State.meetingTab==='change-orders'?' active':''}" data-tab="change-orders" onclick="switchMeetingTab('change-orders')">
-          🔄 Change Orders <span class="mtab-count">${activeCOs.length}</span>
-        </button>
-        <button class="meeting-tab-btn${State.meetingTab==='follow-ups'?' active':''}" data-tab="follow-ups" onclick="switchMeetingTab('follow-ups')">
-          📞 Follow Ups <span class="mtab-count">${followUps.length}</span>
-        </button>
-      </div>
-
-      <div id="meeting-content"></div>
-    </div>`;
-
-  renderMeetingContent();
-}
-
-// ─────────────────────────────────────────────
-// CALENDAR & WORKLOAD
+// CALENDAR
 // ─────────────────────────────────────────────
 let _calDayMap = {}; // dateStr -> [{bid, type}]  — populated by buildCalendarGrid
 
@@ -2299,15 +2015,6 @@ function buildCalendarGrid(year, month, bids, filterType) {
     if (filterType !== 'due_only')       add(b.next_followup_date, b, 'fu');
   });
 
-  // Detect conflict days
-  const conflictDays = new Set();
-  Object.entries(_calDayMap).forEach(([date, items]) => {
-    const dueBids = items.filter(i => i.type === 'due');
-    const ec = {};
-    dueBids.forEach(i => { if (i.bid.estimator_id) ec[i.bid.estimator_id] = (ec[i.bid.estimator_id]||0)+1; });
-    if (Object.values(ec).some(c => c >= 2) || dueBids.length >= 3) conflictDays.add(date);
-  });
-
   const headers = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
     .map(d => `<div class="cal-hdr-cell">${d}</div>`).join('');
 
@@ -2335,7 +2042,7 @@ function buildCalendarGrid(year, month, bids, filterType) {
       </div>`;
     }).join('');
 
-    cells += `<div class="cal-day${isToday?' cal-day-today':''}${conflictDays.has(ds)?' cal-day-conflict':''}${hasItems?' cal-day-clickable':''}"
+    cells += `<div class="cal-day${isToday?' cal-day-today':''}${hasItems?' cal-day-clickable':''}"
       ${hasItems ? `onclick="openCalDayModal('${ds}')"` : ''}>
       <div class="cal-day-num${isToday?' cal-day-num-today':''}">${d}</div>
       <div class="cal-day-chips">
@@ -2349,41 +2056,6 @@ function buildCalendarGrid(year, month, bids, filterType) {
   if (rem) for (let i = rem; i < 7; i++) cells += '<div class="cal-day-empty"></div>';
 
   return `<div class="cal-hdr">${headers}</div><div class="cal-grid">${cells}</div>`;
-}
-
-function buildWorkloadPanel(bids) {
-  const today   = new Date().toISOString().split('T')[0];
-  const in7     = new Date(); in7.setDate(in7.getDate() + 7);
-  const weekEnd = in7.toISOString().split('T')[0];
-  const estimators = State.team.filter(m => m.active && (m.role==='estimator'||m.role==='estimator/pm'));
-  if (!estimators.length) return '<p style="color:var(--text-muted);font-size:13px">No estimators found.</p>';
-
-  return estimators.map(est => {
-    const mine    = bids.filter(b => b.estimator_id === est.id);
-    const week    = mine.filter(b => b.estimate_due_date && b.estimate_due_date >= today && b.estimate_due_date <= weekEnd);
-    const overdue = mine.filter(b => b.estimate_due_date && b.estimate_due_date < today);
-    const total   = mine.reduce((s,b) => s+(b.estimate_amount||0), 0);
-    const color   = estimatorColor(est.id);
-    const score   = week.length + overdue.length * 1.5;
-    const sc      = score >= 5 ? '#dc2626' : score >= 3 ? '#d97706' : '#16a34a';
-    const label   = score >= 5 ? 'Overloaded' : score >= 3 ? 'Busy' : 'Available';
-    const pct     = Math.min(100, Math.round(score / 8 * 100));
-    return `
-      <div class="wl-card">
-        <div class="wl-header">
-          <span class="initials-pill" style="background:${color}20;color:${color}">${esc(est.initials)}</span>
-          <span class="wl-name">${esc(est.name)}</span>
-          <span class="wl-badge" style="color:${sc};background:${sc}18">${label}</span>
-        </div>
-        <div class="wl-row">
-          <span>${mine.length} active bid${mine.length!==1?'s':''}</span>
-          ${week.length    ? `<span class="wl-due-txt">· ${week.length} due this week</span>`   : ''}
-          ${overdue.length ? `<span class="wl-od-txt">· ${overdue.length} overdue</span>`        : ''}
-          ${total > 0      ? `<span class="presenter-hide wl-val">${fmt(total,'currency')}</span>` : ''}
-        </div>
-        <div class="wl-track"><div class="wl-fill" style="width:${pct}%;background:${sc}"></div></div>
-      </div>`;
-  }).join('');
 }
 
 function navCalendar(dir) {
@@ -2400,50 +2072,29 @@ async function renderCalendar(main) {
   const { calYear: year, calMonth: month, calFilter } = State;
   const monthName = new Date(year, month, 1).toLocaleDateString('en-US', { month:'long', year:'numeric' });
 
-  const conflicts = findWeekConflicts(bids);
-  const conflictBanner = conflicts.length ? `
-    <div class="cal-conflict-banner">
-      ⚠️ <strong>${conflicts.length} scheduling conflict${conflicts.length!==1?'s':''} this month</strong>
-      ${conflicts.slice(0,4).map(c =>
-        `<span class="cal-conflict-chip">${esc(c.estimatorInitials||'?')}: ${c.bids.length} bids week of ${fmt(c.weekStart,'date')}</span>`
-      ).join('')}
-      ${conflicts.length > 4 ? `<span style="opacity:.75">+${conflicts.length-4} more</span>` : ''}
-    </div>` : '';
-
   const estimators = State.team.filter(m => m.active && (m.role==='estimator'||m.role==='estimator/pm'));
   const legendHtml = [
     ...estimators.map(m => `<span class="cal-legend-item"><span class="cal-legend-dot" style="background:${estimatorColor(m.id)}"></span>${esc(m.initials)}</span>`),
-    `<span class="cal-legend-item"><span class="cal-legend-dot" style="background:#dc262622;border:1px solid #dc2626"></span>Conflict</span>`,
     `<span class="cal-legend-item"><span class="cal-legend-dot" style="background:var(--sidebar-hover-bg);border:1px dashed #94a3b8"></span>Follow-up</span>`,
   ].join('');
 
   main.innerHTML = `
     <div class="page-header">
-      <div><div class="page-title">📅 Calendar & Workload</div></div>
+      <div><div class="page-title">🗓️ Calendar</div></div>
     </div>
-    ${conflictBanner}
-    <div class="cal-layout">
-      <div class="cal-main-col">
-        <div class="cal-controls">
-          <button class="btn btn-ghost btn-sm" onclick="navCalendar(-1)">‹ Prev</button>
-          <span class="cal-month-label">${esc(monthName)}</span>
-          <button class="btn btn-ghost btn-sm" onclick="navCalendar(1)">Next ›</button>
-          <button class="btn btn-secondary btn-sm" onclick="State.calYear=new Date().getFullYear();State.calMonth=new Date().getMonth();renderPage('calendar')">Today</button>
-          <select class="cal-filter-select" onchange="State.calFilter=this.value;renderPage('calendar')">
-            <option value="all" ${calFilter==='all'?'selected':''}>Due Dates + Follow-ups</option>
-            <option value="due_only" ${calFilter==='due_only'?'selected':''}>Due Dates Only</option>
-            <option value="followups_only" ${calFilter==='followups_only'?'selected':''}>Follow-ups Only</option>
-          </select>
-        </div>
-        ${buildCalendarGrid(year, month, bids, calFilter)}
-        <div class="cal-legend">${legendHtml}</div>
-      </div>
-      <div class="cal-sidebar-col">
-        <div class="cal-sidebar-title">⚖️ Workload Balance</div>
-        <div class="cal-sidebar-sub">Active bids per estimator · next 7 days</div>
-        ${buildWorkloadPanel(bids)}
-      </div>
-    </div>`;
+    <div class="cal-controls">
+      <button class="btn btn-ghost btn-sm" onclick="navCalendar(-1)">‹ Prev</button>
+      <span class="cal-month-label">${esc(monthName)}</span>
+      <button class="btn btn-ghost btn-sm" onclick="navCalendar(1)">Next ›</button>
+      <button class="btn btn-secondary btn-sm" onclick="State.calYear=new Date().getFullYear();State.calMonth=new Date().getMonth();renderPage('calendar')">Today</button>
+      <select class="cal-filter-select" onchange="State.calFilter=this.value;renderPage('calendar')">
+        <option value="all" ${calFilter==='all'?'selected':''}>Due Dates + Follow-ups</option>
+        <option value="due_only" ${calFilter==='due_only'?'selected':''}>Due Dates Only</option>
+        <option value="followups_only" ${calFilter==='followups_only'?'selected':''}>Follow-ups Only</option>
+      </select>
+    </div>
+    ${buildCalendarGrid(year, month, bids, calFilter)}
+    <div class="cal-legend">${legendHtml}</div>`;
 }
 
 // ─────────────────────────────────────────────
