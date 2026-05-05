@@ -643,7 +643,7 @@ tbody td {
 
 .login-card {
   background: white; border-radius: 16px;
-  padding: 36px 40px; width: 100%; max-width: 680px;
+  padding: 20px 40px 36px; width: 100%; max-width: 680px;
   box-shadow: 0 25px 80px rgba(0,0,0,0.4);
   text-align: center;
 }
