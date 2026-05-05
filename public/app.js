@@ -2630,7 +2630,8 @@ function openStageModalFromPanel() {
 // INIT
 // ─────────────────────────────────────────────
 async function init() {
-  State.team = await api.get('/api/team');
+  // Team data may return 401 if no session yet — suppress and let login refetch
+  State.team = await api.get('/api/team').catch(() => []);
   window.addEventListener('hashchange', onHashChange);
 
   // Ctrl/Cmd+K → focus global search
