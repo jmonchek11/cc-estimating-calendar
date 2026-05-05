@@ -642,15 +642,15 @@ tbody td {
 }
 
 .login-card {
-  background: white; border-radius: 16px;
-  padding: 20px 40px 36px; width: 100%; max-width: 680px;
-  box-shadow: 0 25px 80px rgba(0,0,0,0.4);
+  background: none; border-radius: 0;
+  padding: 0; width: 100%; max-width: 400px;
+  box-shadow: none;
   text-align: center;
 }
 
 .login-logo { font-size: 48px; margin-bottom: 10px; }
 .login-title { font-size: 22px; font-weight: 800; color: var(--text); margin-bottom: 6px; }
-.login-subtitle { font-size: 14px; color: var(--text-muted); margin-bottom: 24px; }
+.login-subtitle { font-size: 14px; color: #94a3b8; margin-bottom: 24px; }
 
 .login-section-label {
   font-size: 10px; font-weight: 800; letter-spacing: 0.1em;
