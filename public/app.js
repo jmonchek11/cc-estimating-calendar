@@ -2225,6 +2225,37 @@ async function renderMeeting(main) {
 // ─────────────────────────────────────────────
 // CALENDAR & WORKLOAD
 // ─────────────────────────────────────────────
+let _calDayMap = {}; // dateStr -> [{bid, type}]  — populated by buildCalendarGrid
+
+function openCalDayModal(dateStr) {
+  const items = _calDayMap[dateStr] || [];
+  if (!items.length) return;
+  const label = new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' });
+  document.getElementById('cal-day-modal-title').textContent = label;
+  document.getElementById('cal-day-modal-body').innerHTML = items.map(({ bid, type }) => {
+    const color = type === 'due' ? estimatorColor(bid.estimator_id) : '#64748b';
+    const typeLabel = type === 'due' ? '📐 Due date' : '📞 Follow-up';
+    return `
+      <div class="cal-modal-row" onclick="openJobPanel(${bid.id});hideCalDayModal()">
+        <span class="cal-modal-dot" style="background:${color}"></span>
+        <div class="cal-modal-info">
+          <span class="cal-modal-name">${esc(bid.project_name)}</span>
+          <span class="cal-modal-meta">${typeLabel}
+            ${bid.estimator_initials ? ` · <span class="initials-pill">${esc(bid.estimator_initials)}</span>` : ''}
+            ${bid.salesperson_initials ? `<span class="initials-pill" style="background:#dcfce7;color:#166534">${esc(bid.salesperson_initials)}</span>` : ''}
+            ${bid.customer ? ` · ${esc(bid.customer)}` : ''}
+          </span>
+        </div>
+        <span class="badge badge-stage" style="flex-shrink:0">${stageName(bid.stage)}</span>
+      </div>`;
+  }).join('');
+  document.getElementById('cal-day-modal').style.display = 'flex';
+}
+
+function hideCalDayModal() {
+  document.getElementById('cal-day-modal').style.display = 'none';
+}
+
 const ESTIMATOR_PALETTE = ['#2563eb','#16a34a','#dc2626','#d97706','#7c3aed','#0891b2','#be185d','#ea580c'];
 function estimatorColor(id) {
   if (!id) return '#64748b';
@@ -2254,23 +2285,23 @@ function buildCalendarGrid(year, month, bids, filterType) {
   const today       = new Date().toISOString().split('T')[0];
   const pad         = n => String(n).padStart(2,'0');
 
-  // Map date -> items
-  const dayMap = {};
+  // Reset and populate the global day map
+  _calDayMap = {};
   const add = (dateStr, bid, type) => {
     if (!dateStr) return;
     const d = dateStr.substring(0,10);
     if (parseInt(d.substring(5,7))-1 !== month || parseInt(d.substring(0,4)) !== year) return;
-    if (!dayMap[d]) dayMap[d] = [];
-    dayMap[d].push({ bid, type });
+    if (!_calDayMap[d]) _calDayMap[d] = [];
+    _calDayMap[d].push({ bid, type });
   };
   bids.forEach(b => {
     if (filterType !== 'followups_only') add(b.estimate_due_date, b, 'due');
     if (filterType !== 'due_only')       add(b.next_followup_date, b, 'fu');
   });
 
-  // Detect conflict days (2+ bids for same estimator due same day, or 3+ total)
+  // Detect conflict days
   const conflictDays = new Set();
-  Object.entries(dayMap).forEach(([date, items]) => {
+  Object.entries(_calDayMap).forEach(([date, items]) => {
     const dueBids = items.filter(i => i.type === 'due');
     const ec = {};
     dueBids.forEach(i => { if (i.bid.estimator_id) ec[i.bid.estimator_id] = (ec[i.bid.estimator_id]||0)+1; });
@@ -2286,26 +2317,31 @@ function buildCalendarGrid(year, month, bids, filterType) {
   for (let d = 1; d <= daysInMonth; d++) {
     const ds      = `${year}-${pad(month+1)}-${pad(d)}`;
     const isToday = ds === today;
-    const items   = dayMap[ds] || [];
+    const items   = _calDayMap[ds] || [];
     const shown   = items.slice(0, 3);
     const extra   = items.length - 3;
+    const hasItems = items.length > 0;
 
     const chips = shown.map(({ bid, type }) => {
       if (type === 'due') {
         const c = estimatorColor(bid.estimator_id);
-        return `<div class="cal-chip" style="border-left-color:${c}" title="${esc(bid.project_name)}${bid.estimator_initials?' · '+bid.estimator_initials:''}">
+        return `<div class="cal-chip" style="border-left-color:${c}">
           <span class="cal-chip-txt">${esc(bid.project_name)}</span>
           ${bid.estimator_initials ? `<span class="cal-chip-ini" style="color:${c}">${esc(bid.estimator_initials)}</span>` : ''}
         </div>`;
       }
-      return `<div class="cal-chip cal-chip-fu" title="Follow-up: ${esc(bid.project_name)}">
+      return `<div class="cal-chip cal-chip-fu">
         <span class="cal-chip-txt">📞 ${esc(bid.project_name)}</span>
       </div>`;
     }).join('');
 
-    cells += `<div class="cal-day${isToday?' cal-day-today':''}${conflictDays.has(ds)?' cal-day-conflict':''}">
+    cells += `<div class="cal-day${isToday?' cal-day-today':''}${conflictDays.has(ds)?' cal-day-conflict':''}${hasItems?' cal-day-clickable':''}"
+      ${hasItems ? `onclick="openCalDayModal('${ds}')"` : ''}>
       <div class="cal-day-num${isToday?' cal-day-num-today':''}">${d}</div>
-      <div class="cal-day-chips">${chips}${extra>0?`<div class="cal-chip-more">+${extra} more</div>`:''}</div>
+      <div class="cal-day-chips">
+        ${chips}
+        ${extra > 0 ? `<button class="cal-chip-more" onclick="event.stopPropagation();openCalDayModal('${ds}')">+${extra} more</button>` : ''}
+      </div>
     </div>`;
   }
 
