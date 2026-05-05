@@ -984,6 +984,117 @@ tbody td {
   margin: 1px 2px 1px 0;
   border: 1px solid;
 }
+/* ── Monday Meeting ──────────────────────────────────────────────────────── */
+.meeting-wrap { padding-bottom: 40px; }
+.meeting-header {
+  display: flex; justify-content: space-between; align-items: center;
+  background: var(--card-bg); border: 1px solid var(--border);
+  border-radius: 10px; padding: 14px 20px; margin-bottom: 14px;
+  position: sticky; top: 0; z-index: 10;
+}
+.meeting-header-left { display: flex; flex-direction: column; gap: 3px; }
+.meeting-title { font-size: 18px; font-weight: 700; color: var(--text); }
+.meeting-date  { font-size: 12px; color: var(--text-muted); }
+.meeting-header-right { display: flex; align-items: center; gap: 12px; }
+.meeting-timer { font-size: 15px; font-weight: 700; color: var(--primary); font-variant-numeric: tabular-nums; letter-spacing: .03em; }
+.meeting-presenter-btn {
+  padding: 6px 14px; background: var(--sidebar-bg); color: var(--sidebar-text);
+  border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
+  font-size: 12px; font-weight: 600; font-family: inherit; transition: all 0.15s;
+}
+.meeting-presenter-btn:hover { background: var(--sidebar-active-bg); color: var(--sidebar-active-text); }
+.meeting-wins-banner {
+  background: linear-gradient(135deg, #78350f 0%, #92400e 100%);
+  border: 1px solid #b45309; border-radius: 10px;
+  padding: 12px 18px; margin-bottom: 14px;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  color: #fef3c7; font-size: 14px; font-weight: 600;
+}
+.meeting-wins-list { display: flex; gap: 6px; flex-wrap: wrap; }
+.meeting-win-pill {
+  background: rgba(255,255,255,0.15); border-radius: 12px;
+  padding: 2px 10px; font-size: 12px; font-weight: 500;
+}
+.meeting-tabs {
+  display: flex; gap: 4px; margin-bottom: 18px;
+  background: var(--card-bg); border: 1px solid var(--border);
+  border-radius: 10px; padding: 5px;
+}
+.meeting-tab-btn {
+  flex: 1; display: flex; align-items: center; justify-content: center; gap: 7px;
+  padding: 10px 8px; border: none; border-radius: 7px;
+  background: transparent; color: var(--text-muted);
+  cursor: pointer; font-size: 13px; font-weight: 600; font-family: inherit;
+  transition: all 0.15s; white-space: nowrap;
+}
+.meeting-tab-btn:hover { background: var(--sidebar-hover-bg); color: var(--text); }
+.meeting-tab-btn.active { background: var(--primary); color: #fff; }
+.mtab-count {
+  background: rgba(0,0,0,0.12); border-radius: 10px;
+  padding: 1px 8px; font-size: 11px; font-weight: 700;
+}
+.meeting-tab-btn.active .mtab-count { background: rgba(255,255,255,0.2); }
+.mtab-new { color: #fcd34d; }
+.meeting-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: 14px;
+}
+.meeting-card {
+  background: var(--card-bg); border: 1px solid var(--border);
+  border-radius: 10px; padding: 16px;
+  display: flex; flex-direction: column; gap: 9px;
+  transition: border-color 0.2s, opacity 0.2s;
+}
+.meeting-card:hover { border-color: var(--primary); }
+.meeting-card.mc-discussed { opacity: 0.4; }
+.meeting-card.mc-discussed .mc-name { text-decoration: line-through; color: var(--text-muted); }
+.mc-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.mc-title-row { display: flex; align-items: center; gap: 7px; flex: 1; min-width: 0; }
+.mc-name { font-size: 15px; font-weight: 700; color: var(--text); line-height: 1.3; }
+.mc-new-badge {
+  background: var(--primary); color: #fff; font-size: 9px; font-weight: 800;
+  padding: 2px 6px; border-radius: 4px; white-space: nowrap; letter-spacing: .06em; flex-shrink: 0;
+}
+.mc-customer { font-size: 13px; color: var(--text-muted); }
+.mc-missing   { color: #dc2626; font-style: italic; font-size: 12px; }
+.mc-meta      { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.mc-amount    { font-size: 13px; font-weight: 700; color: var(--text); margin-left: auto; }
+.mc-pct       { font-size: 11px; font-weight: 700; color: #16a34a; background: #dcfce7; border-radius: 4px; padding: 1px 6px; }
+.mc-note-preview {
+  font-size: 12px; color: var(--text-muted); background: var(--sidebar-hover-bg);
+  border-radius: 6px; padding: 6px 10px; border-left: 3px solid var(--border); line-height: 1.4;
+}
+.mc-issues  { display: flex; flex-wrap: wrap; gap: 3px; }
+.mc-actions { display: flex; gap: 6px; margin-top: 2px; flex-wrap: wrap; }
+.mc-disc-btn {
+  padding: 5px 12px; border-radius: 6px; border: 1px solid var(--border);
+  background: transparent; color: var(--text-muted); cursor: pointer;
+  font-size: 12px; font-weight: 600; font-family: inherit; transition: all 0.15s;
+}
+.mc-disc-btn:hover { border-color: #16a34a; color: #16a34a; }
+.mc-disc-btn.mc-disc-active { background: #16a34a; color: #fff; border-color: #16a34a; }
+.mc-note-btn, .mc-view-btn {
+  padding: 5px 10px; border-radius: 6px; border: 1px solid var(--border);
+  background: transparent; color: var(--text-muted); cursor: pointer;
+  font-size: 12px; font-weight: 600; font-family: inherit; transition: all 0.15s;
+}
+.mc-note-btn:hover, .mc-view-btn:hover { border-color: var(--primary); color: var(--primary); }
+.mc-note-area { padding-top: 4px; }
+.mc-note-textarea {
+  width: 100%; min-height: 72px; padding: 8px 10px;
+  background: var(--sidebar-hover-bg); border: 1px solid var(--border);
+  border-radius: 6px; color: var(--text); font-size: 13px; font-family: inherit;
+  resize: vertical; outline: none; transition: border-color 0.15s;
+}
+.mc-note-textarea:focus { border-color: var(--primary); }
+.mdue        { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 5px; white-space: nowrap; flex-shrink: 0; }
+.mdue-red    { background: #fef2f2; color: #dc2626; }
+.mdue-yellow { background: #fffbeb; color: #d97706; }
+.mdue-green  { background: #f0fdf4; color: #16a34a; }
+.mdue-none   { background: var(--sidebar-hover-bg); color: var(--text-muted); }
+.meeting-wrap.presenter-mode .presenter-hide { display: none !important; }
+
 /* ── Fix-mode field highlighting ─────────────────────────────────────────── */
 .field-needs-fix {
   border-color: #f59e0b !important;
