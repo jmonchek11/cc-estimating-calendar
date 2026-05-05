@@ -984,6 +984,69 @@ tbody td {
   margin: 1px 2px 1px 0;
   border: 1px solid;
 }
+/* ── Calendar & Workload ─────────────────────────────────────────────────── */
+.cal-conflict-banner {
+  background: linear-gradient(135deg, #78350f, #92400e);
+  border: 1px solid #b45309; border-radius: 8px;
+  padding: 10px 16px; margin-bottom: 14px;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  color: #fef3c7; font-size: 13px; font-weight: 600;
+}
+.cal-conflict-chip { background: rgba(255,255,255,0.15); border-radius: 4px; padding: 2px 8px; font-size: 12px; }
+.cal-layout { display: grid; grid-template-columns: 1fr 270px; gap: 16px; align-items: start; }
+@media (max-width: 900px) { .cal-layout { grid-template-columns: 1fr; } }
+.cal-controls { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+.cal-month-label { font-size: 16px; font-weight: 700; color: var(--text); flex: 1; text-align: center; }
+.cal-filter-select {
+  padding: 5px 8px; font-size: 12px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--card-bg);
+  color: var(--text); font-family: inherit; cursor: pointer; margin-left: auto;
+}
+.cal-hdr { display: grid; grid-template-columns: repeat(7,1fr); margin-bottom: 3px; }
+.cal-hdr-cell { text-align:center; font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:.05em; padding:5px 0; }
+.cal-grid { display: grid; grid-template-columns: repeat(7,1fr); gap: 3px; }
+.cal-day-empty { min-height: 80px; border-radius: 6px; background: var(--sidebar-hover-bg); opacity: 0.25; }
+.cal-day {
+  min-height: 80px; padding: 5px; border-radius: 6px;
+  background: var(--card-bg); border: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 2px; transition: border-color 0.15s;
+}
+.cal-day:hover { border-color: var(--primary); }
+.cal-day-today { border-color: var(--primary); background: rgba(37,99,235,0.04); }
+.cal-day-conflict { background: rgba(220,38,38,0.05); border-color: #dc262640; }
+.cal-day-num { font-size: 12px; font-weight: 600; color: var(--text-muted); line-height: 1.2; }
+.cal-day-num-today {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: var(--primary); color: #fff; font-size: 12px; font-weight: 700;
+}
+.cal-day-chips { display: flex; flex-direction: column; gap: 2px; flex: 1; overflow: hidden; }
+.cal-chip {
+  display: flex; align-items: center; gap: 3px; padding: 2px 4px;
+  background: var(--sidebar-hover-bg); border-radius: 3px;
+  border-left: 3px solid #64748b; min-width: 0;
+}
+.cal-chip-fu { border-left-color: #94a3b8; opacity: 0.7; }
+.cal-chip-txt { font-size: 10px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
+.cal-chip-ini { font-size: 9px; font-weight: 700; white-space: nowrap; flex-shrink: 0; }
+.cal-chip-more { font-size: 10px; color: var(--text-muted); padding: 1px 3px; font-style: italic; }
+.cal-legend { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 10px; }
+.cal-legend-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-muted); }
+.cal-legend-dot { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+.cal-sidebar-col { background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; padding: 16px; position: sticky; top: 16px; }
+.cal-sidebar-title { font-size: 15px; font-weight: 700; color: var(--text); margin-bottom: 2px; }
+.cal-sidebar-sub { font-size: 12px; color: var(--text-muted); margin-bottom: 14px; }
+.wl-card { background: var(--sidebar-hover-bg); border-radius: 8px; padding: 11px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 6px; }
+.wl-header { display: flex; align-items: center; gap: 7px; }
+.wl-name { font-size: 13px; font-weight: 600; color: var(--text); flex: 1; min-width: 0; }
+.wl-badge { font-size: 11px; font-weight: 700; border-radius: 4px; padding: 2px 7px; flex-shrink: 0; }
+.wl-row { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; font-size: 12px; color: var(--text-muted); }
+.wl-due-txt { color: #d97706; }
+.wl-od-txt  { color: #dc2626; }
+.wl-val     { margin-left: auto; font-weight: 700; color: var(--text); }
+.wl-track   { height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
+.wl-fill    { height: 100%; border-radius: 2px; transition: width 0.4s; }
+
 /* ── Monday Meeting ──────────────────────────────────────────────────────── */
 .meeting-wrap { padding-bottom: 40px; }
 .meeting-header {

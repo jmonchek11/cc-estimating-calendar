@@ -17,6 +17,9 @@ const State = {
   meetingTab: 'opportunities',
   meetingDiscussed: {},
   meetingPresenter: false,
+  calYear: new Date().getFullYear(),
+  calMonth: new Date().getMonth(),
+  calFilter: 'all',
 };
 
 // ─────────────────────────────────────────────
@@ -219,6 +222,7 @@ async function renderPage(page) {
       case 'history':       return await renderHistory(main);
       case 'cleanup':       return await renderCleanup(main);
       case 'meeting':       return await renderMeeting(main);
+      case 'calendar':      return await renderCalendar(main);
       case 'settings':      return await renderSettings(main);
       default:              return await renderDashboard(main);
     }
@@ -2216,6 +2220,194 @@ async function renderMeeting(main) {
     </div>`;
 
   renderMeetingContent();
+}
+
+// ─────────────────────────────────────────────
+// CALENDAR & WORKLOAD
+// ─────────────────────────────────────────────
+const ESTIMATOR_PALETTE = ['#2563eb','#16a34a','#dc2626','#d97706','#7c3aed','#0891b2','#be185d','#ea580c'];
+function estimatorColor(id) {
+  if (!id) return '#64748b';
+  return ESTIMATOR_PALETTE[Number(id) % ESTIMATOR_PALETTE.length];
+}
+
+function findWeekConflicts(bids) {
+  const weekMap = {};
+  bids.forEach(b => {
+    if (!b.estimator_id || !b.estimate_due_date) return;
+    const d = new Date(b.estimate_due_date + 'T00:00:00');
+    const dow = d.getDay();
+    const mon = new Date(d);
+    mon.setDate(d.getDate() - (dow === 0 ? 6 : dow - 1));
+    const wk = mon.toISOString().split('T')[0];
+    const key = `${b.estimator_id}-${wk}`;
+    if (!weekMap[key]) weekMap[key] = { estimatorId: b.estimator_id, estimatorInitials: b.estimator_initials, estimatorName: b.estimator_name, weekStart: wk, bids: [] };
+    weekMap[key].bids.push(b);
+  });
+  return Object.values(weekMap).filter(w => w.bids.length >= 2).sort((a,b) => b.bids.length - a.bids.length);
+}
+
+function buildCalendarGrid(year, month, bids, filterType) {
+  const firstDay    = new Date(year, month, 1);
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const startDOW    = firstDay.getDay();
+  const today       = new Date().toISOString().split('T')[0];
+  const pad         = n => String(n).padStart(2,'0');
+
+  // Map date -> items
+  const dayMap = {};
+  const add = (dateStr, bid, type) => {
+    if (!dateStr) return;
+    const d = dateStr.substring(0,10);
+    if (parseInt(d.substring(5,7))-1 !== month || parseInt(d.substring(0,4)) !== year) return;
+    if (!dayMap[d]) dayMap[d] = [];
+    dayMap[d].push({ bid, type });
+  };
+  bids.forEach(b => {
+    if (filterType !== 'followups_only') add(b.estimate_due_date, b, 'due');
+    if (filterType !== 'due_only')       add(b.next_followup_date, b, 'fu');
+  });
+
+  // Detect conflict days (2+ bids for same estimator due same day, or 3+ total)
+  const conflictDays = new Set();
+  Object.entries(dayMap).forEach(([date, items]) => {
+    const dueBids = items.filter(i => i.type === 'due');
+    const ec = {};
+    dueBids.forEach(i => { if (i.bid.estimator_id) ec[i.bid.estimator_id] = (ec[i.bid.estimator_id]||0)+1; });
+    if (Object.values(ec).some(c => c >= 2) || dueBids.length >= 3) conflictDays.add(date);
+  });
+
+  const headers = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
+    .map(d => `<div class="cal-hdr-cell">${d}</div>`).join('');
+
+  let cells = '';
+  for (let i = 0; i < startDOW; i++) cells += '<div class="cal-day-empty"></div>';
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const ds      = `${year}-${pad(month+1)}-${pad(d)}`;
+    const isToday = ds === today;
+    const items   = dayMap[ds] || [];
+    const shown   = items.slice(0, 3);
+    const extra   = items.length - 3;
+
+    const chips = shown.map(({ bid, type }) => {
+      if (type === 'due') {
+        const c = estimatorColor(bid.estimator_id);
+        return `<div class="cal-chip" style="border-left-color:${c}" title="${esc(bid.project_name)}${bid.estimator_initials?' · '+bid.estimator_initials:''}">
+          <span class="cal-chip-txt">${esc(bid.project_name)}</span>
+          ${bid.estimator_initials ? `<span class="cal-chip-ini" style="color:${c}">${esc(bid.estimator_initials)}</span>` : ''}
+        </div>`;
+      }
+      return `<div class="cal-chip cal-chip-fu" title="Follow-up: ${esc(bid.project_name)}">
+        <span class="cal-chip-txt">📞 ${esc(bid.project_name)}</span>
+      </div>`;
+    }).join('');
+
+    cells += `<div class="cal-day${isToday?' cal-day-today':''}${conflictDays.has(ds)?' cal-day-conflict':''}">
+      <div class="cal-day-num${isToday?' cal-day-num-today':''}">${d}</div>
+      <div class="cal-day-chips">${chips}${extra>0?`<div class="cal-chip-more">+${extra} more</div>`:''}</div>
+    </div>`;
+  }
+
+  const rem = (startDOW + daysInMonth) % 7;
+  if (rem) for (let i = rem; i < 7; i++) cells += '<div class="cal-day-empty"></div>';
+
+  return `<div class="cal-hdr">${headers}</div><div class="cal-grid">${cells}</div>`;
+}
+
+function buildWorkloadPanel(bids) {
+  const today   = new Date().toISOString().split('T')[0];
+  const in7     = new Date(); in7.setDate(in7.getDate() + 7);
+  const weekEnd = in7.toISOString().split('T')[0];
+  const estimators = State.team.filter(m => m.active && (m.role==='estimator'||m.role==='estimator/pm'));
+  if (!estimators.length) return '<p style="color:var(--text-muted);font-size:13px">No estimators found.</p>';
+
+  return estimators.map(est => {
+    const mine    = bids.filter(b => b.estimator_id === est.id);
+    const week    = mine.filter(b => b.estimate_due_date && b.estimate_due_date >= today && b.estimate_due_date <= weekEnd);
+    const overdue = mine.filter(b => b.estimate_due_date && b.estimate_due_date < today);
+    const total   = mine.reduce((s,b) => s+(b.estimate_amount||0), 0);
+    const color   = estimatorColor(est.id);
+    const score   = week.length + overdue.length * 1.5;
+    const sc      = score >= 5 ? '#dc2626' : score >= 3 ? '#d97706' : '#16a34a';
+    const label   = score >= 5 ? 'Overloaded' : score >= 3 ? 'Busy' : 'Available';
+    const pct     = Math.min(100, Math.round(score / 8 * 100));
+    return `
+      <div class="wl-card">
+        <div class="wl-header">
+          <span class="initials-pill" style="background:${color}20;color:${color}">${esc(est.initials)}</span>
+          <span class="wl-name">${esc(est.name)}</span>
+          <span class="wl-badge" style="color:${sc};background:${sc}18">${label}</span>
+        </div>
+        <div class="wl-row">
+          <span>${mine.length} active bid${mine.length!==1?'s':''}</span>
+          ${week.length    ? `<span class="wl-due-txt">· ${week.length} due this week</span>`   : ''}
+          ${overdue.length ? `<span class="wl-od-txt">· ${overdue.length} overdue</span>`        : ''}
+          ${total > 0      ? `<span class="presenter-hide wl-val">${fmt(total,'currency')}</span>` : ''}
+        </div>
+        <div class="wl-track"><div class="wl-fill" style="width:${pct}%;background:${sc}"></div></div>
+      </div>`;
+  }).join('');
+}
+
+function navCalendar(dir) {
+  let m = State.calMonth + dir, y = State.calYear;
+  if (m < 0)  { m = 11; y--; }
+  if (m > 11) { m = 0;  y++; }
+  State.calMonth = m; State.calYear = y;
+  renderPage('calendar');
+}
+
+async function renderCalendar(main) {
+  main.innerHTML = '<div class="loading-screen"><div class="spinner"></div><p>Loading…</p></div>';
+  const bids = await api.get('/api/bids?stage=opportunity,active_bid,active_co,follow_up');
+  const { calYear: year, calMonth: month, calFilter } = State;
+  const monthName = new Date(year, month, 1).toLocaleDateString('en-US', { month:'long', year:'numeric' });
+
+  const conflicts = findWeekConflicts(bids);
+  const conflictBanner = conflicts.length ? `
+    <div class="cal-conflict-banner">
+      ⚠️ <strong>${conflicts.length} scheduling conflict${conflicts.length!==1?'s':''} this month</strong>
+      ${conflicts.slice(0,4).map(c =>
+        `<span class="cal-conflict-chip">${esc(c.estimatorInitials||'?')}: ${c.bids.length} bids week of ${fmt(c.weekStart,'date')}</span>`
+      ).join('')}
+      ${conflicts.length > 4 ? `<span style="opacity:.75">+${conflicts.length-4} more</span>` : ''}
+    </div>` : '';
+
+  const estimators = State.team.filter(m => m.active && (m.role==='estimator'||m.role==='estimator/pm'));
+  const legendHtml = [
+    ...estimators.map(m => `<span class="cal-legend-item"><span class="cal-legend-dot" style="background:${estimatorColor(m.id)}"></span>${esc(m.initials)}</span>`),
+    `<span class="cal-legend-item"><span class="cal-legend-dot" style="background:#dc262622;border:1px solid #dc2626"></span>Conflict</span>`,
+    `<span class="cal-legend-item"><span class="cal-legend-dot" style="background:var(--sidebar-hover-bg);border:1px dashed #94a3b8"></span>Follow-up</span>`,
+  ].join('');
+
+  main.innerHTML = `
+    <div class="page-header">
+      <div><div class="page-title">📅 Calendar & Workload</div></div>
+    </div>
+    ${conflictBanner}
+    <div class="cal-layout">
+      <div class="cal-main-col">
+        <div class="cal-controls">
+          <button class="btn btn-ghost btn-sm" onclick="navCalendar(-1)">‹ Prev</button>
+          <span class="cal-month-label">${esc(monthName)}</span>
+          <button class="btn btn-ghost btn-sm" onclick="navCalendar(1)">Next ›</button>
+          <button class="btn btn-secondary btn-sm" onclick="State.calYear=new Date().getFullYear();State.calMonth=new Date().getMonth();renderPage('calendar')">Today</button>
+          <select class="cal-filter-select" onchange="State.calFilter=this.value;renderPage('calendar')">
+            <option value="all" ${calFilter==='all'?'selected':''}>Due Dates + Follow-ups</option>
+            <option value="due_only" ${calFilter==='due_only'?'selected':''}>Due Dates Only</option>
+            <option value="followups_only" ${calFilter==='followups_only'?'selected':''}>Follow-ups Only</option>
+          </select>
+        </div>
+        ${buildCalendarGrid(year, month, bids, calFilter)}
+        <div class="cal-legend">${legendHtml}</div>
+      </div>
+      <div class="cal-sidebar-col">
+        <div class="cal-sidebar-title">⚖️ Workload Balance</div>
+        <div class="cal-sidebar-sub">Active bids per estimator · next 7 days</div>
+        ${buildWorkloadPanel(bids)}
+      </div>
+    </div>`;
 }
 
 // ─────────────────────────────────────────────
