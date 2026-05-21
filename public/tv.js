@@ -1,8 +1,9 @@
 // ── Config ────────────────────────────────────────────────────────────────────
-const REFRESH_INTERVAL  = 60 * 1000;  // re-fetch every 60 s
-const WIN_CYCLE_INTERVAL = 7 * 1000;  // cycle wins every 7 s
-const PAGE_INTERVAL      = 8 * 1000;  // scroll to next page every 8 s
-const ROW_HEIGHT         = 72;        // px — must match .tv-row height in CSS
+const REFRESH_INTERVAL   = 60 * 1000;  // re-fetch every 60 s
+const WIN_CYCLE_INTERVAL =  7 * 1000;  // cycle wins every 7 s
+const PAGE_INTERVAL      =  8 * 1000;  // scroll to next page every 8 s
+const ROW_HEIGHT         = 72;         // px — must match .tv-row height in CSS
+const LOOKAHEAD_DAYS     = 14;         // show bids due within this many days
 
 const PALETTE = ['#2563eb','#16a34a','#dc2626','#d97706','#7c3aed','#0891b2','#be185d','#ea580c'];
 function estimatorColor(id) {
@@ -106,18 +107,34 @@ function startPager(totalRows) {
 function renderRows(bids) {
   const rowsEl = document.getElementById('tv-rows');
 
-  if (!bids || !bids.length) {
-    rowsEl.innerHTML = '<div class="tv-empty">No active bids or change orders 🎉</div>';
+  // Build date window: today → today + LOOKAHEAD_DAYS
+  const today  = new Date(); today.setHours(0, 0, 0, 0);
+  const cutoff = new Date(today); cutoff.setDate(cutoff.getDate() + LOOKAHEAD_DAYS);
+  const todayStr  = today.toISOString().split('T')[0];
+  const cutoffStr = cutoff.toISOString().split('T')[0];
+
+  // Filter to only bids with a due date inside the window (no overdue, no far-future)
+  const filtered = (bids || []).filter(b =>
+    b.estimate_due_date && b.estimate_due_date >= todayStr && b.estimate_due_date <= cutoffStr
+  );
+
+  // Update the window label in the table header
+  const rangeEl = document.getElementById('tv-date-range');
+  if (rangeEl) {
+    const fmt = d => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    rangeEl.textContent = `${fmt(today)} – ${fmt(cutoff)}`;
+  }
+
+  if (!filtered.length) {
+    rowsEl.innerHTML = '<div class="tv-empty">Nothing due in the next ' + LOOKAHEAD_DAYS + ' days 🎉</div>';
     startPager(0);
     return;
   }
 
-  // Sort: earliest due date first; null dates last
-  const sorted = [...bids].sort((a, b) => {
-    const da = a.estimate_due_date || '9999-99-99';
-    const db = b.estimate_due_date || '9999-99-99';
-    return da < db ? -1 : da > db ? 1 : 0;
-  });
+  // Sort by due date ascending
+  const sorted = [...filtered].sort((a, b) =>
+    a.estimate_due_date < b.estimate_due_date ? -1 : a.estimate_due_date > b.estimate_due_date ? 1 : 0
+  );
 
   rowsEl.innerHTML = sorted.map(b => {
     const color   = estimatorColor(b.estimator_id);
