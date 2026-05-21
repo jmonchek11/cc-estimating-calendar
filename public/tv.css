@@ -1,20 +1,22 @@
-/* ── Reset & Base ──────────────────────────────────────────────── */
+/* ── Reset ───────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --bg:        #080d18;
-  --bg2:       #0f1626;
-  --card:      #131d2e;
-  --card2:     #192236;
-  --border:    #1e2d45;
-  --text:      #f1f5f9;
-  --muted:     #64748b;
-  --primary:   #2563eb;
-  --red:       #dc2626;
-  --amber:     #d97706;
-  --green:     #16a34a;
-  --gold:      #f59e0b;
-  --gold-bg:   #78350f;
+  --bg:       #060c18;
+  --row-a:    #0b1425;
+  --row-b:    #0e1a2e;
+  --header-bg:#080f1e;
+  --border:   #1a2740;
+  --text:     #f8fafc;
+  --sub:      #94a3b8;
+  --red:      #f87171;
+  --red-bg:   rgba(239,68,68,.15);
+  --amber:    #fbbf24;
+  --amber-bg: rgba(251,191,36,.12);
+  --green:    #4ade80;
+  --green-bg: rgba(74,222,128,.1);
+  --gold:     #f59e0b;
+  --primary:  #3b82f6;
 }
 
 html, body {
@@ -25,270 +27,242 @@ html, body {
   font-family: 'Inter', sans-serif;
   display: flex;
   flex-direction: column;
-  user-select: none;
 }
 
-/* ── Header ────────────────────────────────────────────────────── */
+/* ── Header ──────────────────────────────────────────────────────── */
 .tv-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 0 32px;
-  height: 72px;
-  background: var(--bg2);
+  height: 74px;
+  padding: 0 36px;
+  background: var(--header-bg);
+  border-bottom: 2px solid var(--border);
+  flex-shrink: 0;
+  gap: 24px;
+}
+.tv-logo { height: 46px; object-fit: contain; flex-shrink: 0; }
+
+.tv-title {
+  flex: 1;
+  font-size: 26px; font-weight: 900;
+  letter-spacing: .18em; text-transform: uppercase;
+  color: var(--text); text-align: center;
+}
+
+.tv-header-clock {
+  display: flex; flex-direction: column; align-items: flex-end;
+  flex-shrink: 0; min-width: 190px;
+}
+.tv-time { font-size: 28px; font-weight: 800; letter-spacing: .04em; font-variant-numeric: tabular-nums; }
+.tv-date { font-size: 13px; color: var(--sub); font-weight: 500; margin-top: 1px; }
+
+/* ── Stats Bar ───────────────────────────────────────────────────── */
+.tv-stats {
+  display: flex;
+  align-items: stretch;
+  height: 66px;
+  background: var(--header-bg);
   border-bottom: 2px solid var(--border);
   flex-shrink: 0;
 }
-.tv-logo { height: 44px; object-fit: contain; }
-.tv-header-center { flex: 1; text-align: center; }
-.tv-title {
-  font-size: 22px; font-weight: 900;
-  letter-spacing: .14em; text-transform: uppercase;
-  color: var(--text);
-}
-.tv-header-right {
-  display: flex; flex-direction: column;
-  align-items: flex-end; gap: 2px; min-width: 180px;
-}
-.tv-date { font-size: 13px; color: var(--muted); font-weight: 500; }
-.tv-time { font-size: 24px; font-weight: 800; color: var(--text); font-variant-numeric: tabular-nums; letter-spacing: .04em; }
-
-/* ── Stats Bar ─────────────────────────────────────────────────── */
-.tv-stats-bar {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0;
-  height: 52px;
-  background: var(--bg2);
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
 .tv-stat {
-  display: flex; align-items: center; gap: 10px;
-  padding: 0 28px;
+  flex: 1;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  border-right: 1px solid var(--border);
+  gap: 2px;
 }
+.tv-stat:last-child { border-right: none; }
 .tv-stat-val {
-  font-size: 20px; font-weight: 800;
-  color: var(--primary);
+  font-size: 30px; font-weight: 900;
+  color: var(--primary); line-height: 1;
   font-variant-numeric: tabular-nums;
 }
-.tv-stat-label { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .07em; }
-.tv-stat-divider { width: 1px; height: 28px; background: var(--border); flex-shrink: 0; }
-.tv-stat-refresh { font-size: 13px !important; color: var(--muted) !important; }
-
-/* ── Estimator Lanes ───────────────────────────────────────────── */
-.tv-lanes-wrap {
-  flex: 1;
-  overflow: hidden;
-  padding: 16px 20px 12px;
-}
-.tv-lanes {
-  display: flex;
-  gap: 14px;
-  height: 100%;
-  align-items: flex-start;
-}
-.tv-loading {
-  color: var(--muted); font-size: 18px;
-  width: 100%; text-align: center; padding-top: 40px;
+.tv-stat-val.warn { color: var(--amber); }
+.tv-stat-label {
+  font-size: 11px; font-weight: 700; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--sub);
 }
 
-/* ── Lane Column ───────────────────────────────────────────────── */
-.tv-lane {
-  flex: 1;
-  min-width: 0;
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
-.tv-lane-header {
-  display: flex;
+/* ── Table Header ────────────────────────────────────────────────── */
+.tv-table-head {
+  display: grid;
+  grid-template-columns: 72px 1fr 90px 200px 180px;
   align-items: center;
-  gap: 10px;
-  padding: 12px 14px 10px;
-  border-bottom: 1px solid var(--border);
+  padding: 0 24px;
+  height: 40px;
+  background: var(--border);
   flex-shrink: 0;
 }
-.tv-lane-avatar {
-  width: 36px; height: 36px; border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 13px; font-weight: 800; color: #fff;
-  flex-shrink: 0;
+.tv-th {
+  font-size: 11px; font-weight: 800; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--sub);
 }
-.tv-lane-info { flex: 1; min-width: 0; }
-.tv-lane-name { font-size: 13px; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tv-lane-sub  { font-size: 11px; color: var(--muted); margin-top: 1px; }
-.tv-lane-count {
-  font-size: 18px; font-weight: 900;
-  color: var(--text); flex-shrink: 0;
-}
-.tv-lane-body {
+.tv-th.center { text-align: center; }
+.tv-th.right  { text-align: right; }
+
+/* ── Scrolling Rows ──────────────────────────────────────────────── */
+.tv-rows-wrap {
   flex: 1;
   overflow: hidden;
-  padding: 10px 10px 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.tv-lane-empty {
-  color: var(--muted); font-size: 12px;
-  text-align: center; padding: 20px 0;
-}
-.tv-lane-more {
-  font-size: 11px; font-weight: 700; color: var(--muted);
-  text-align: center; padding: 4px;
-  border: 1px dashed var(--border); border-radius: 6px;
-  margin-top: auto;
-}
-
-/* ── Bid Card ──────────────────────────────────────────────────── */
-.tv-bid-card {
-  background: var(--card2);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 9px 10px;
-  flex-shrink: 0;
-}
-.tv-bid-top {
-  display: flex; align-items: flex-start;
-  justify-content: space-between; gap: 6px;
-  margin-bottom: 5px;
-}
-.tv-bid-name {
-  font-size: 12px; font-weight: 700; color: var(--text);
-  line-height: 1.3; flex: 1; min-width: 0;
-  display: -webkit-box; -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical; overflow: hidden;
-}
-.tv-bid-type {
-  font-size: 9px; font-weight: 800; padding: 2px 6px;
-  border-radius: 4px; flex-shrink: 0; letter-spacing: .06em;
-  margin-top: 1px;
-}
-.tv-bid-type.bid { background: rgba(37,99,235,.25); color: #93c5fd; }
-.tv-bid-type.co  { background: rgba(217,119,6,.25);  color: #fcd34d; }
-
-.tv-bid-meta {
-  display: flex; align-items: center; gap: 8px;
-  margin-bottom: 6px;
-}
-.tv-due-badge {
-  font-size: 11px; font-weight: 700;
-  padding: 2px 7px; border-radius: 5px;
-  flex-shrink: 0;
-}
-.tv-due-badge.red    { background: rgba(220,38,38,.2);  color: #fca5a5; border: 1px solid rgba(220,38,38,.4); }
-.tv-due-badge.amber  { background: rgba(217,119,6,.2);  color: #fcd34d; border: 1px solid rgba(217,119,6,.4); }
-.tv-due-badge.green  { background: rgba(22,163,74,.2);  color: #86efac; border: 1px solid rgba(22,163,74,.4); }
-.tv-due-badge.none   { background: rgba(100,116,139,.15); color: var(--muted); border: 1px solid var(--border); }
-.tv-bid-customer {
-  font-size: 10px; color: var(--muted);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;
-}
-
-.tv-progress-row {
-  display: flex; align-items: center; gap: 8px;
-}
-.tv-progress-track {
-  flex: 1; height: 4px;
-  background: var(--border); border-radius: 2px; overflow: hidden;
-}
-.tv-progress-fill {
-  height: 100%; border-radius: 2px;
-  background: var(--primary);
-  transition: width .4s;
-}
-.tv-progress-pct {
-  font-size: 10px; font-weight: 700; color: var(--muted);
-  flex-shrink: 0; min-width: 28px; text-align: right;
-}
-
-/* ── Wins Section ──────────────────────────────────────────────── */
-.tv-wins-section {
-  flex-shrink: 0;
-  background: linear-gradient(135deg, #3b1a06 0%, #4c2208 50%, #3b1a06 100%);
-  border-top: 2px solid #92400e;
-  padding: 14px 32px 10px;
   position: relative;
-  overflow: hidden;
-  min-height: 130px;
 }
-.tv-wins-section::before {
-  content: '';
-  position: absolute; inset: 0;
-  background: radial-gradient(ellipse at 50% 0%, rgba(245,158,11,.12) 0%, transparent 70%);
-  pointer-events: none;
+.tv-rows {
+  position: absolute; top: 0; left: 0; right: 0;
+  transition: transform .6s cubic-bezier(.4,0,.2,1);
 }
-.tv-wins-label {
-  font-size: 11px; font-weight: 800; letter-spacing: .15em;
-  color: var(--gold); text-transform: uppercase;
-  margin-bottom: 8px; opacity: .9;
-}
-.tv-wins-stage { position: relative; height: 68px; overflow: hidden; }
-.tv-wins-display {
-  position: absolute; inset: 0;
-  display: flex; align-items: center; gap: 32px;
-}
-.tv-win-item {
-  position: absolute; inset: 0;
-  display: flex; align-items: center; gap: 28px;
-  opacity: 0; transition: opacity .7s ease;
-}
-.tv-win-item.active { opacity: 1; }
 
-.tv-win-trophy { font-size: 40px; flex-shrink: 0; filter: drop-shadow(0 0 8px rgba(245,158,11,.5)); }
-.tv-win-info { flex: 1; min-width: 0; }
-.tv-win-name {
-  font-size: 22px; font-weight: 900; color: #fef3c7;
+/* ── Bid Row ─────────────────────────────────────────────────────── */
+.tv-row {
+  display: grid;
+  grid-template-columns: 72px 1fr 90px 200px 180px;
+  align-items: center;
+  padding: 0 24px;
+  height: 72px;
+  border-bottom: 1px solid var(--border);
+  border-left: 5px solid transparent;
+  transition: background .2s;
+}
+.tv-row:nth-child(odd)  { background: var(--row-a); }
+.tv-row:nth-child(even) { background: var(--row-b); }
+.tv-row.overdue { animation: pulse-border 2s ease-in-out infinite; }
+
+@keyframes pulse-border {
+  0%,100% { border-left-color: rgba(239,68,68,.4); }
+  50%      { border-left-color: rgba(239,68,68,1); }
+}
+
+/* Estimator avatar */
+.tv-avatar {
+  width: 44px; height: 44px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; font-weight: 900; color: #fff;
+  flex-shrink: 0;
+}
+
+/* Project name */
+.tv-proj {
+  padding-right: 20px;
+  overflow: hidden;
+}
+.tv-proj-name {
+  font-size: 22px; font-weight: 700; color: var(--text);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   line-height: 1.2;
 }
-.tv-win-meta { font-size: 13px; color: #fcd34d; margin-top: 3px; font-weight: 600; }
-.tv-win-amount {
-  font-size: 32px; font-weight: 900;
-  color: var(--gold); flex-shrink: 0;
-  font-variant-numeric: tabular-nums;
-  text-shadow: 0 0 20px rgba(245,158,11,.4);
+.tv-proj-cust {
+  font-size: 14px; color: var(--sub); margin-top: 3px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
+/* Type badge */
+.tv-type {
+  font-size: 13px; font-weight: 800; letter-spacing: .08em;
+  padding: 5px 12px; border-radius: 6px;
+  display: inline-block; text-align: center;
+}
+.tv-type.bid { background: rgba(59,130,246,.2); color: #93c5fd; border: 1px solid rgba(59,130,246,.4); }
+.tv-type.co  { background: rgba(251,191,36,.2);  color: #fde68a; border: 1px solid rgba(251,191,36,.4); }
+
+/* Amount */
+.tv-amount {
+  font-size: 18px; font-weight: 700; color: var(--sub);
+  text-align: right; padding-right: 20px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Due date */
+.tv-due {
+  display: flex; align-items: center; justify-content: flex-end;
+  gap: 10px;
+}
+.tv-due-pill {
+  padding: 8px 18px; border-radius: 8px;
+  font-size: 20px; font-weight: 900;
+  white-space: nowrap; text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.tv-due-pill.red    { background: var(--red-bg);   color: var(--red);   border: 1px solid rgba(239,68,68,.4); }
+.tv-due-pill.amber  { background: var(--amber-bg); color: var(--amber); border: 1px solid rgba(251,191,36,.4); }
+.tv-due-pill.green  { background: var(--green-bg); color: var(--green); border: 1px solid rgba(74,222,128,.3); }
+.tv-due-pill.none   { background: transparent;     color: var(--sub);   border: 1px solid var(--border); }
+
+/* Empty state */
+.tv-empty {
+  display: flex; align-items: center; justify-content: center;
+  height: 200px; font-size: 20px; color: var(--sub);
+}
+
+/* ── Page indicator ──────────────────────────────────────────────── */
+.tv-pager {
+  display: flex; align-items: center; justify-content: center;
+  gap: 8px; height: 28px; flex-shrink: 0;
+  background: var(--header-bg);
+  border-top: 1px solid var(--border);
+}
+.tv-pager-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--border); transition: background .3s;
+}
+.tv-pager-dot.active { background: var(--primary); }
+
+/* ── Wins Banner ─────────────────────────────────────────────────── */
+.tv-wins {
+  flex-shrink: 0;
+  min-height: 120px;
+  background: linear-gradient(135deg, #1c0d00 0%, #2d1500 40%, #1c0d00 100%);
+  border-top: 2px solid #92400e;
+  padding: 14px 36px;
+  position: relative; overflow: hidden;
+}
+.tv-wins::after {
+  content: '';
+  position: absolute; inset: 0;
+  background: radial-gradient(ellipse 80% 100% at 50% 0%, rgba(245,158,11,.08) 0%, transparent 70%);
+  pointer-events: none;
+}
+.tv-wins-lbl {
+  font-size: 11px; font-weight: 800; letter-spacing: .18em;
+  color: #d97706; text-transform: uppercase; margin-bottom: 8px;
+}
+.tv-wins-stage { position: relative; height: 60px; }
+.tv-win-item {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; gap: 24px;
+  opacity: 0; transition: opacity .7s ease;
+}
+.tv-win-item.active { opacity: 1; }
+.tv-win-icon { font-size: 36px; flex-shrink: 0; }
+.tv-win-body { flex: 1; min-width: 0; }
+.tv-win-name {
+  font-size: 26px; font-weight: 800; color: #fef3c7;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tv-win-meta { font-size: 14px; color: #fcd34d; margin-top: 4px; font-weight: 600; }
+.tv-win-amt {
+  font-size: 38px; font-weight: 900; color: var(--gold);
+  flex-shrink: 0; font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 24px rgba(245,158,11,.35);
+}
 .tv-wins-dots {
-  display: flex; gap: 6px; justify-content: flex-end;
-  margin-top: 6px;
+  display: flex; gap: 7px; justify-content: flex-end; margin-top: 6px;
 }
-.tv-wins-dot {
-  width: 6px; height: 6px; border-radius: 50%;
-  background: rgba(245,158,11,.3);
-  transition: background .3s;
-}
+.tv-wins-dot { width: 7px; height: 7px; border-radius: 50%; background: rgba(245,158,11,.25); transition: background .3s; }
 .tv-wins-dot.active { background: var(--gold); }
 
-/* ── No-wins bar ───────────────────────────────────────────────── */
-.tv-no-wins-bar {
-  flex-shrink: 0;
-  height: 42px;
-  background: var(--bg2);
-  border-top: 1px solid var(--border);
+/* ── No-wins ─────────────────────────────────────────────────────── */
+.tv-no-wins {
+  flex-shrink: 0; height: 48px;
+  background: var(--header-bg); border-top: 1px solid var(--border);
   display: flex; align-items: center; justify-content: center;
-  font-size: 13px; color: var(--muted); font-weight: 600;
+  font-size: 15px; color: var(--sub); font-weight: 600;
 }
 
-/* ── Error overlay ─────────────────────────────────────────────── */
+/* ── Error ───────────────────────────────────────────────────────── */
 .tv-error {
-  position: fixed; inset: 0;
-  background: var(--bg);
+  position: fixed; inset: 0; background: var(--bg);
   display: flex; align-items: center; justify-content: center;
-  z-index: 100;
+  z-index: 999;
 }
-.tv-error-box { text-align: center; color: var(--text); }
-
-/* ── Pulse animation for overdue items ─────────────────────────── */
-@keyframes pulse-red {
-  0%, 100% { border-color: rgba(220,38,38,.4); }
-  50%       { border-color: rgba(220,38,38,.9); }
-}
-.tv-bid-card.overdue { animation: pulse-red 2s ease-in-out infinite; }
+.tv-error-inner { text-align: center; }
+.tv-error-inner p { font-size: 20px; color: var(--sub); margin-top: 12px; }

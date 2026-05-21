@@ -11,58 +11,78 @@
 
   <!-- HEADER -->
   <header class="tv-header">
-    <div class="tv-header-left">
-      <img src="/logo.png" alt="Liberty" class="tv-logo" />
-    </div>
-    <div class="tv-header-center">
-      <span class="tv-title">ESTIMATING PIPELINE</span>
-    </div>
-    <div class="tv-header-right">
-      <span class="tv-date" id="tv-date"></span>
+    <img src="/logo.png" alt="Liberty" class="tv-logo" />
+    <div class="tv-title">ESTIMATING PIPELINE</div>
+    <div class="tv-header-clock">
       <span class="tv-time" id="tv-time"></span>
+      <span class="tv-date" id="tv-date"></span>
     </div>
   </header>
 
   <!-- STATS BAR -->
-  <div class="tv-stats-bar" id="tv-stats">
-    <div class="tv-stat"><span class="tv-stat-val" id="stat-bids">—</span><span class="tv-stat-label">Active Bids</span></div>
-    <div class="tv-stat-divider"></div>
-    <div class="tv-stat"><span class="tv-stat-val" id="stat-cos">—</span><span class="tv-stat-label">Change Orders</span></div>
-    <div class="tv-stat-divider"></div>
-    <div class="tv-stat"><span class="tv-stat-val" id="stat-value">—</span><span class="tv-stat-label">Pipeline Value</span></div>
-    <div class="tv-stat-divider"></div>
-    <div class="tv-stat"><span class="tv-stat-val" id="stat-week">—</span><span class="tv-stat-label">Due This Week</span></div>
-    <div class="tv-stat-divider"></div>
-    <div class="tv-stat"><span class="tv-stat-val tv-stat-refresh" id="stat-refresh">—</span><span class="tv-stat-label">Last Update</span></div>
-  </div>
-
-  <!-- ESTIMATOR LANES -->
-  <div class="tv-lanes-wrap">
-    <div class="tv-lanes" id="tv-lanes">
-      <div class="tv-loading">Loading pipeline data…</div>
+  <div class="tv-stats">
+    <div class="tv-stat">
+      <span class="tv-stat-val" id="stat-bids">—</span>
+      <span class="tv-stat-label">Active Bids</span>
+    </div>
+    <div class="tv-stat">
+      <span class="tv-stat-val" id="stat-cos">—</span>
+      <span class="tv-stat-label">Change Orders</span>
+    </div>
+    <div class="tv-stat">
+      <span class="tv-stat-val" id="stat-value">—</span>
+      <span class="tv-stat-label">Pipeline Value</span>
+    </div>
+    <div class="tv-stat">
+      <span class="tv-stat-val" id="stat-week">—</span>
+      <span class="tv-stat-label">Due This Week</span>
+    </div>
+    <div class="tv-stat">
+      <span class="tv-stat-val" id="stat-overdue">—</span>
+      <span class="tv-stat-label">Overdue</span>
+    </div>
+    <div class="tv-stat">
+      <span class="tv-stat-val" id="stat-refresh">—</span>
+      <span class="tv-stat-label">Last Update</span>
     </div>
   </div>
 
-  <!-- WINS SECTION -->
-  <div class="tv-wins-section" id="tv-wins-section" style="display:none">
-    <div class="tv-wins-label">🏆 RECENTLY AWARDED</div>
-    <div class="tv-wins-stage">
-      <div class="tv-wins-display" id="tv-wins-display"></div>
-    </div>
-    <div class="tv-wins-dots" id="tv-wins-dots"></div>
+  <!-- TABLE HEADER -->
+  <div class="tv-table-head">
+    <div class="tv-th"></div>
+    <div class="tv-th">Project</div>
+    <div class="tv-th center">Type</div>
+    <div class="tv-th right">Amount</div>
+    <div class="tv-th right">Due Date</div>
   </div>
 
-  <!-- NO WINS TICKER -->
-  <div class="tv-no-wins-bar" id="tv-no-wins-bar" style="display:none">
-    <span>No recent awards found — keep pushing! 💪</span>
+  <!-- SCROLLING ROWS -->
+  <div class="tv-rows-wrap" id="tv-rows-wrap">
+    <div class="tv-rows" id="tv-rows">
+      <div class="tv-empty">Loading pipeline data…</div>
+    </div>
+  </div>
+
+  <!-- PAGE INDICATOR -->
+  <div class="tv-pager" id="tv-pager"></div>
+
+  <!-- WINS BANNER -->
+  <div class="tv-wins" id="tv-wins" style="display:none">
+    <div class="tv-wins-lbl">🏆 RECENTLY AWARDED</div>
+    <div class="tv-wins-stage"></div>
+    <div class="tv-wins-dots"></div>
+  </div>
+
+  <!-- NO WINS BAR -->
+  <div class="tv-no-wins" id="tv-no-wins">
+    No recent awards found — keep pushing! 💪
   </div>
 
   <!-- AUTH ERROR -->
   <div class="tv-error" id="tv-error" style="display:none">
-    <div class="tv-error-box">
-      <div style="font-size:48px">🔒</div>
-      <div style="font-size:24px;margin-top:12px">Invalid TV token</div>
-      <div style="font-size:14px;margin-top:8px;opacity:.6">Check the URL and try again.</div>
+    <div class="tv-error-inner">
+      <div style="font-size:64px">🔒</div>
+      <p>Invalid TV token — check the URL and try again.</p>
     </div>
   </div>
 
