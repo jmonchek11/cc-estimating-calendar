@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=1920" />
+  <title>Liberty Estimating — Live Board</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="tv.css" />
+</head>
+<body>
+
+  <!-- HEADER -->
+  <header class="tv-header">
+    <div class="tv-header-left">
+      <img src="logo.png" alt="Liberty" class="tv-logo" />
+    </div>
+    <div class="tv-header-center">
+      <span class="tv-title">ESTIMATING PIPELINE</span>
+    </div>
+    <div class="tv-header-right">
+      <span class="tv-date" id="tv-date"></span>
+      <span class="tv-time" id="tv-time"></span>
+    </div>
+  </header>
+
+  <!-- STATS BAR -->
+  <div class="tv-stats-bar" id="tv-stats">
+    <div class="tv-stat"><span class="tv-stat-val" id="stat-bids">—</span><span class="tv-stat-label">Active Bids</span></div>
+    <div class="tv-stat-divider"></div>
+    <div class="tv-stat"><span class="tv-stat-val" id="stat-cos">—</span><span class="tv-stat-label">Change Orders</span></div>
+    <div class="tv-stat-divider"></div>
+    <div class="tv-stat"><span class="tv-stat-val" id="stat-value">—</span><span class="tv-stat-label">Pipeline Value</span></div>
+    <div class="tv-stat-divider"></div>
+    <div class="tv-stat"><span class="tv-stat-val" id="stat-week">—</span><span class="tv-stat-label">Due This Week</span></div>
+    <div class="tv-stat-divider"></div>
+    <div class="tv-stat"><span class="tv-stat-val tv-stat-refresh" id="stat-refresh">—</span><span class="tv-stat-label">Last Update</span></div>
+  </div>
+
+  <!-- ESTIMATOR LANES -->
+  <div class="tv-lanes-wrap">
+    <div class="tv-lanes" id="tv-lanes">
+      <div class="tv-loading">Loading pipeline data…</div>
+    </div>
+  </div>
+
+  <!-- WINS SECTION -->
+  <div class="tv-wins-section" id="tv-wins-section" style="display:none">
+    <div class="tv-wins-label">🏆 RECENTLY AWARDED</div>
+    <div class="tv-wins-stage">
+      <div class="tv-wins-display" id="tv-wins-display"></div>
+    </div>
+    <div class="tv-wins-dots" id="tv-wins-dots"></div>
+  </div>
+
+  <!-- NO WINS TICKER -->
+  <div class="tv-no-wins-bar" id="tv-no-wins-bar" style="display:none">
+    <span>No recent awards found — keep pushing! 💪</span>
+  </div>
+
+  <!-- AUTH ERROR -->
+  <div class="tv-error" id="tv-error" style="display:none">
+    <div class="tv-error-box">
+      <div style="font-size:48px">🔒</div>
+      <div style="font-size:24px;margin-top:12px">Invalid TV token</div>
+      <div style="font-size:14px;margin-top:8px;opacity:.6">Check the URL and try again.</div>
+    </div>
+  </div>
+
+  <script src="tv.js"></script>
+</body>
+</html>

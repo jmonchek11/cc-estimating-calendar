@@ -26,12 +26,85 @@ app.use(session({
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Auth middleware — protects /api/ routes except public ones
-const PUBLIC_API = ['/api/auth/', '/api/team'];
+const PUBLIC_API = ['/api/auth/', '/api/team', '/api/tv/'];
 app.use((req, res, next) => {
   if (!req.path.startsWith('/api/')) return next();
   if (PUBLIC_API.some(p => req.path.startsWith(p))) return next();
   if (!req.session.userId) return res.status(401).json({ error: 'Not authenticated' });
   next();
+});
+
+// ── TV Kiosk ──────────────────────────────────────────────────────────────────
+app.get('/tv', (req, res) => res.sendFile(path.join(__dirname, 'public', 'tv.html')));
+
+app.get('/api/tv/data', async (req, res) => {
+  const token = req.query.token;
+  const expected = process.env.TV_TOKEN;
+  if (!expected || token !== expected) return res.status(401).json({ error: 'Invalid TV token' });
+
+  try {
+    const mongoose = require('mongoose');
+    const Bid        = require('./models/Bid');
+    const TeamMember = require('./models/TeamMember');
+
+    const pipeline = [
+      { $lookup: { from: 'teammembers', localField: 'estimator_id',   foreignField: '_id', as: 'estimator'   } },
+      { $lookup: { from: 'teammembers', localField: 'salesperson_id', foreignField: '_id', as: 'salesperson' } },
+      { $unwind: { path: '$estimator',   preserveNullAndEmptyArrays: true } },
+      { $unwind: { path: '$salesperson', preserveNullAndEmptyArrays: true } },
+    ];
+
+    // Active bids + change orders
+    const bids = await Bid.aggregate([
+      { $match: { stage: { $in: ['active_bid', 'active_co'] }, is_deleted: { $ne: 1 } } },
+      ...pipeline,
+      { $sort: { estimate_due_date: 1 } },
+    ]);
+
+    // Recent wins (last 60 days)
+    const since = new Date(); since.setDate(since.getDate() - 60);
+    const sinceStr = since.toISOString().split('T')[0];
+    const wins = await Bid.aggregate([
+      { $match: { stage: 'awarded', award_date: { $gte: sinceStr }, is_deleted: { $ne: 1 } } },
+      ...pipeline,
+      { $sort: { award_date: -1 } },
+      { $limit: 15 },
+    ]);
+
+    // Stats
+    const today   = new Date().toISOString().split('T')[0];
+    const in7     = new Date(); in7.setDate(in7.getDate() + 7);
+    const weekEnd = in7.toISOString().split('T')[0];
+
+    const fmt = b => ({
+      id:                    b._id,
+      bid_number:            b.bid_number   || null,
+      stage:                 b.stage,
+      project_name:          b.project_name,
+      customer:              b.customer     || null,
+      estimate_due_date:     b.estimate_due_date    || null,
+      estimate_amount:       b.estimate_amount      || null,
+      estimate_pct_complete: b.estimate_pct_complete || 0,
+      award_date:            b.award_date   || null,
+      estimator_id:          b.estimator_id || null,
+      estimator_initials:    b.estimator?.initials  || null,
+      estimator_name:        b.estimator?.name      || null,
+      salesperson_initials:  b.salesperson?.initials || null,
+    });
+
+    res.json({
+      bids:  bids.map(fmt),
+      wins:  wins.map(fmt),
+      stats: {
+        activeBids:    bids.filter(b => b.stage === 'active_bid').length,
+        activeCOs:     bids.filter(b => b.stage === 'active_co').length,
+        pipelineValue: bids.reduce((s, b) => s + (b.estimate_amount || 0), 0),
+        dueThisWeek:   bids.filter(b => b.estimate_due_date >= today && b.estimate_due_date <= weekEnd).length,
+        overdueCount:  bids.filter(b => b.estimate_due_date && b.estimate_due_date < today).length,
+      },
+      timestamp: new Date().toISOString(),
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ── Password strength helper ───────────────────────────────────────────────────
