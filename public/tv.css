@@ -33,14 +33,14 @@ html, body {
 .tv-header {
   display: flex;
   align-items: center;
-  height: 74px;
-  padding: 0 36px;
+  height: 100px;
+  padding: 0 40px;
   background: var(--header-bg);
   border-bottom: 2px solid var(--border);
   flex-shrink: 0;
-  gap: 24px;
+  gap: 28px;
 }
-.tv-logo { height: 46px; object-fit: contain; flex-shrink: 0; }
+.tv-logo { height: 72px; object-fit: contain; flex-shrink: 0; }
 
 .tv-title {
   flex: 1;
