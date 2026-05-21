@@ -7,7 +7,7 @@ const path = require('path');
 const db = require('./db');
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '25mb' }));
 
 // ── Session ───────────────────────────────────────────────────────────────────
 app.use(session({
@@ -247,6 +247,22 @@ app.get('/api/my-stats', async (req, res) => {
 app.get('/api/analytics', async (req, res) => {
   try { res.json(await db.getAnalytics(req.query.since || null)); }
   catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── ADMIN: Excel import / sync ────────────────────────────────────────────────
+app.post('/api/admin/sync-excel', async (req, res) => {
+  try {
+    const admin = await db.getMember(req.session.userId);
+    if (!admin || !admin.is_admin) return res.status(403).json({ error: 'Admin only.' });
+
+    const { fileData } = req.body;
+    if (!fileData) return res.status(400).json({ error: 'No fileData provided.' });
+
+    const buffer = Buffer.from(fileData, 'base64');
+    const { syncFromBuffer } = require('./sync-excel-lib');
+    const stats = await syncFromBuffer(buffer);
+    res.json(stats);
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ── ADMIN: orphan estimator repair ────────────────────────────────────────────

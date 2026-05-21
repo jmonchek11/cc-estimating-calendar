@@ -1852,7 +1852,23 @@ async function renderSettings(main) {
     <div class="card" style="max-width:640px">
       <div class="section-title">Team Members</div>
       <div class="team-table">${rows}</div>
-    </div>`;
+    </div>
+
+    ${isAdmin ? `
+    <div class="card" style="max-width:640px;margin-top:20px">
+      <div class="section-title">📥 Import Excel File</div>
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px">
+        Upload the latest <strong>Estimating Calendar.xlsx</strong> to sync all bids into the database.
+        Existing bids are matched by Bid # or project name and updated; new bids are inserted.
+        Nothing is deleted.
+      </p>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <input type="file" id="excel-file-input" accept=".xlsx"
+               style="flex:1;min-width:200px;font-size:13px;color:var(--text-muted)" />
+        <button class="btn btn-primary" onclick="importExcel()">Import &amp; Sync</button>
+      </div>
+      <div id="excel-import-result" style="margin-top:14px"></div>
+    </div>` : ''}`;
 }
 
 function showAddTeamForm(memberId, name, initials, role, active, email, is_admin) {
@@ -1936,6 +1952,60 @@ async function toggleTeamMember(id, currentActive) {
   await api.put(`/api/team/${id}`, { active: currentActive ? 0 : 1 });
   State.team = await api.get('/api/team');
   await renderSettings(document.getElementById('main'));
+}
+
+async function importExcel() {
+  const input    = document.getElementById('excel-file-input');
+  const resultEl = document.getElementById('excel-import-result');
+  if (!input || !input.files.length) {
+    resultEl.innerHTML = '<span style="color:var(--danger)">Please select an .xlsx file first.</span>';
+    return;
+  }
+  const file = input.files[0];
+  if (!file.name.toLowerCase().endsWith('.xlsx')) {
+    resultEl.innerHTML = '<span style="color:var(--danger)">Only .xlsx files are supported.</span>';
+    return;
+  }
+
+  resultEl.innerHTML = '<span style="color:var(--text-muted)">⏳ Uploading and syncing — this may take a moment…</span>';
+
+  const reader = new FileReader();
+  reader.onerror = () => {
+    resultEl.innerHTML = '<span style="color:var(--danger)">Failed to read file.</span>';
+  };
+  reader.onload = async (e) => {
+    // Convert ArrayBuffer → base64 in safe chunks
+    const bytes = new Uint8Array(e.target.result);
+    let binary = '';
+    const chunk = 8192;
+    for (let i = 0; i < bytes.length; i += chunk) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+    }
+    const fileData = btoa(binary);
+
+    try {
+      const result = await api.post('/api/admin/sync-excel', { fileData });
+      const errDetail = result.errors && result.errors.length
+        ? `<div style="margin-top:8px;font-size:12px;color:var(--danger)">
+             Errors:<br>${result.errors.map(e => `• ${esc(e.project)}: ${esc(e.message)}`).join('<br>')}
+           </div>`
+        : '';
+      resultEl.innerHTML = `
+        <div style="background:var(--card-bg);border:1px solid var(--border);border-radius:8px;padding:12px 16px;font-size:13px">
+          ✅ <strong>Sync complete</strong><br>
+          <span style="color:var(--text-muted)">
+            Updated: <strong style="color:var(--text)">${result.update}</strong> &nbsp;·&nbsp;
+            Inserted: <strong style="color:var(--text)">${result.insert}</strong> &nbsp;·&nbsp;
+            Skipped: <strong style="color:var(--text)">${result.skip}</strong>
+            ${result.error > 0 ? ` &nbsp;·&nbsp; Errors: <strong style="color:var(--danger)">${result.error}</strong>` : ''}
+          </span>
+          ${errDetail}
+        </div>`;
+    } catch (err) {
+      resultEl.innerHTML = `<span style="color:var(--danger)">Sync failed: ${esc(err.message)}</span>`;
+    }
+  };
+  reader.readAsArrayBuffer(file);
 }
 
 // ─────────────────────────────────────────────
