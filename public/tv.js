@@ -10,7 +10,15 @@ function estimatorColor(id) {
 }
 
 // ── Token ─────────────────────────────────────────────────────────────────────
-const TV_TOKEN = new URLSearchParams(window.location.search).get('token') || '';
+// Accepts token from either:
+//   /tv/MY-TOKEN          ← path style (preferred for Fully Kiosk)
+//   /tv?token=MY-TOKEN    ← query string style
+(function() {
+  const pathParts = window.location.pathname.split('/').filter(Boolean);
+  // pathParts[0] = 'tv', pathParts[1] = token (if path style)
+  window._TV_TOKEN = pathParts[1] || new URLSearchParams(window.location.search).get('token') || '';
+})();
+const TV_TOKEN = window._TV_TOKEN;
 
 // ── Clock ─────────────────────────────────────────────────────────────────────
 function tickClock() {

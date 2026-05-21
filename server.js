@@ -35,7 +35,9 @@ app.use((req, res, next) => {
 });
 
 // ── TV Kiosk ──────────────────────────────────────────────────────────────────
-app.get('/tv', (req, res) => res.sendFile(path.join(__dirname, 'public', 'tv.html')));
+// Support both /tv?token=xxx  AND  /tv/xxx  (path style — friendlier for Fully Kiosk)
+app.get('/tv',       (req, res) => res.sendFile(path.join(__dirname, 'public', 'tv.html')));
+app.get('/tv/:token', (req, res) => res.sendFile(path.join(__dirname, 'public', 'tv.html')));
 
 app.get('/api/tv/data', async (req, res) => {
   const token = req.query.token;
