@@ -3832,8 +3832,8 @@ function renderLifecycleSection(bid, linkedCOs = []) {
   const hasPhases = phases.length > 0;
   const hasLinkedCOs = linkedCOs.length > 0;
 
-  // Only render if there's something to show (phases exist, it's awarded, or it's a CO with a parent)
-  if (!hasPhases && !hasLinkedCOs && !bid.parent_bid_id && bid.stage !== 'awarded') return '';
+  // Always show for active bids so the "New Phase" button is accessible
+  if (!hasPhases && !hasLinkedCOs && !bid.parent_bid_id && !isActive && bid.stage !== 'awarded') return '';
 
   // Phase timeline rows
   const phaseRows = phases.map((p, i) => {
