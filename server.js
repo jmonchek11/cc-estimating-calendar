@@ -216,6 +216,20 @@ app.delete('/api/bids/:id', async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── CONTACT & COMPANY PROFILES ───────────────────────────────────────────────
+app.get('/api/contacts/:id/bids', async (req, res) => {
+  try { res.json(await db.getContactBids(req.params.id)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/companies/bids', async (req, res) => {
+  try {
+    const { name } = req.query;
+    if (!name) return res.status(400).json({ error: 'name required' });
+    res.json(await db.getCompanyBids(name));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── BID CONTACTS ──────────────────────────────────────────────────────────────
 app.get('/api/bids/:id/contacts', async (req, res) => {
   try { res.json(await db.getBidContacts(req.params.id)); }

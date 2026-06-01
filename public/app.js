@@ -2097,12 +2097,15 @@ async function renderContacts(main) {
   const rows = contacts.map(c => {
     const loc = [c.city, c.state].filter(Boolean).join(', ');
     const coBadge = c.company
-      ? `<span class="ct-company-name" onclick="editContactCompany(${c.id},event)">${esc(c.company)}</span>`
+      ? `<span class="ct-company-name" onclick="editContactCompany(${c.id},event)">${esc(c.company)}</span>
+         <span class="company-link" style="font-size:11px;margin-left:4px" data-company="${esc(c.company)}" onclick="openCompanyProfile(this.dataset.company);event.stopPropagation()">↗</span>`
       : `<button class="ct-assign-btn" onclick="editContactCompany(${c.id},event)">+ Assign</button>`;
     return `
       <tr>
-        <td class="td-project" style="cursor:pointer" onclick="openContactModal(${c.id})">
-          <strong>${esc(c.full_name || '—')}</strong>
+        <td class="td-project">
+          <span class="profile-link" data-contact-id="${c.id}"
+                onclick="openContactProfile(this.dataset.contactId)"
+                style="font-weight:600">${esc(c.full_name || '—')}</span>
         </td>
         <td id="ct-co-cell-${c.id}">${coBadge}</td>
         <td>${fmtPhone(c.phone)}</td>
@@ -3116,8 +3119,13 @@ function renderJobPanelContent(bid, followups, contacts = []) {
   const customers = [bid.customer, bid.customer2, bid.customer3, bid.customer4, bid.customer5]
     .filter(Boolean).join(', ');
 
+  // Individual customer names as clickable company-profile links
+  const customerLinks = customerList.map(c =>
+    `<span class="company-link" data-company="${esc(c)}" onclick="openCompanyProfile(this.dataset.company)">${esc(c)}</span>`
+  ).join('<span style="color:var(--text-muted)"> · </span>');
+
   const detailFields = [
-    customers ? `<div class="jp-field"><span class="jp-label">Customer</span><span class="jp-value">${esc(customers)}</span></div>` : '',
+    customerList.length ? `<div class="jp-field"><span class="jp-label">Customer</span><span class="jp-value">${customerLinks}</span></div>` : '',
     bid.estimate_amount ? `<div class="jp-field"><span class="jp-label">Estimate Amount</span><span class="jp-value">${fmt(bid.estimate_amount, 'currency')}</span></div>` : '',
     bid.estimator_initials ? `<div class="jp-field"><span class="jp-label">Estimator</span><span class="jp-value"><span class="initials-pill">${esc(bid.estimator_initials)}</span></span></div>` : '',
     bid.salesperson_initials ? `<div class="jp-field"><span class="jp-label">Salesperson</span><span class="jp-value"><span class="initials-pill" style="background:#dcfce7;color:#166534">${esc(bid.salesperson_initials)}</span></span></div>` : '',
@@ -3183,7 +3191,9 @@ function renderJobPanelContent(bid, followups, contacts = []) {
     const linkedCards = linked.map(c => `
       <div class="jp-contact-card">
         <div class="jp-contact-info">
-          <div class="jp-contact-name">${esc(c.full_name)}</div>
+          <div class="jp-contact-name profile-link"
+               data-contact-id="${c.id}"
+               onclick="openContactProfile(this.dataset.contactId)">${esc(c.full_name)}</div>
           <div class="jp-contact-meta">
             ${c.phone ? `<a href="tel:${esc(c.phone)}" class="jp-contact-link">${fmtPhone(c.phone)}</a>` : ''}
             ${c.phone && c.email ? ' &nbsp;·&nbsp; ' : ''}
@@ -3305,6 +3315,129 @@ async function unlinkBidContact(bidId, customerName, contactId) {
     await api.post(`/api/bids/${bidId}/contacts/unlink`, { customer_name: customerName, contact_id: contactId });
     openJobPanel(bidId);
   } catch (e) { alert('Failed to unlink: ' + e.message); }
+}
+
+// ── Contact & Company Profile Modal ──────────────────────────────────────────
+
+async function openContactProfile(contactId) {
+  const id = Number(contactId);
+  // Look up contact details from cache or fetch
+  let contact = (_allContactsForSearch || _contactsCache || []).find(c => c.id === id);
+  if (!contact) contact = await api.get(`/api/contacts/${id}`);
+
+  showProfileModal({
+    title:    contact.full_name,
+    subtitle: [contact.company, fmtPhone(contact.phone), contact.email].filter(Boolean).join(' · '),
+    fetchUrl: `/api/contacts/${id}/bids`,
+    icon:     '👤',
+  });
+}
+
+async function openCompanyProfile(companyName) {
+  showProfileModal({
+    title:    companyName,
+    subtitle: 'Company',
+    fetchUrl: `/api/companies/bids?name=${encodeURIComponent(companyName)}`,
+    icon:     '🏢',
+  });
+}
+
+async function showProfileModal({ title, subtitle, fetchUrl, icon }) {
+  // Remove any existing profile modal
+  document.getElementById('profile-modal-overlay')?.remove();
+
+  // Create overlay with spinner
+  const overlay = document.createElement('div');
+  overlay.id = 'profile-modal-overlay';
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-box modal-large" style="max-height:85vh;overflow:hidden;display:flex;flex-direction:column">
+      <div class="modal-header">
+        <div>
+          <div style="font-size:18px;font-weight:800">${icon} ${esc(title)}</div>
+          ${subtitle ? `<div style="font-size:13px;color:var(--text-muted);margin-top:2px">${esc(subtitle)}</div>` : ''}
+        </div>
+        <button class="modal-close" onclick="document.getElementById('profile-modal-overlay').remove()">×</button>
+      </div>
+      <div id="profile-modal-content" style="flex:1;overflow-y:auto;padding:20px 24px">
+        <div class="loading-screen" style="height:120px"><div class="spinner"></div></div>
+      </div>
+    </div>`;
+  overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+
+  try {
+    const { bids, stats } = await api.get(fetchUrl);
+
+    const winPct = stats.winRate !== null ? `${stats.winRate}%` : '—';
+    const statsHtml = `
+      <div class="profile-stats">
+        <div class="profile-stat">
+          <div class="profile-stat-val">${stats.total}</div>
+          <div class="profile-stat-lbl">Total Bids</div>
+        </div>
+        <div class="profile-stat">
+          <div class="profile-stat-val" style="color:var(--primary)">${stats.active}</div>
+          <div class="profile-stat-lbl">Active</div>
+        </div>
+        <div class="profile-stat">
+          <div class="profile-stat-val" style="color:var(--success)">${stats.wins}</div>
+          <div class="profile-stat-lbl">Wins</div>
+        </div>
+        <div class="profile-stat">
+          <div class="profile-stat-val" style="color:var(--danger)">${stats.losses}</div>
+          <div class="profile-stat-lbl">Losses</div>
+        </div>
+        <div class="profile-stat">
+          <div class="profile-stat-val" style="color:${stats.winRate >= 50 ? 'var(--success)' : stats.winRate !== null ? 'var(--amber)' : 'var(--text-muted)'}">${winPct}</div>
+          <div class="profile-stat-lbl">Win Rate</div>
+        </div>
+        <div class="profile-stat">
+          <div class="profile-stat-val" style="color:var(--success)">${fmt(stats.wonValue, 'currency')}</div>
+          <div class="profile-stat-lbl">Won Value</div>
+        </div>
+        <div class="profile-stat">
+          <div class="profile-stat-val">${fmt(stats.totalValue, 'currency')}</div>
+          <div class="profile-stat-lbl">Total Pipeline</div>
+        </div>
+      </div>`;
+
+    const rows = bids.map(b => {
+      const customers = [b.customer, b.customer2, b.customer3, b.customer4, b.customer5].filter(Boolean).join(', ');
+      const stageClass = b.stage === 'awarded' ? 'color:var(--success);font-weight:700'
+        : b.stage === 'not_awarded' ? 'color:var(--danger)' : '';
+      return `
+        <tr class="clickable-row" onclick="document.getElementById('profile-modal-overlay').remove();setTimeout(()=>openJobPanel(${b.id}),80)">
+          <td class="td-project">${esc(b.project_name)}${b.bid_number ? `<small> #${esc(b.bid_number)}</small>` : ''}</td>
+          <td><span class="badge badge-stage" style="${stageClass}">${stageName(b.stage)}</span></td>
+          <td style="font-size:12px;color:var(--text-muted)">${esc(customers) || '—'}</td>
+          <td>${fmt(b.estimate_amount, 'currency')}</td>
+          <td>${b.estimator_initials ? `<span class="initials-pill">${esc(b.estimator_initials)}</span>` : '—'}</td>
+          <td style="color:var(--text-muted);font-size:12px">${fmt(b.date_received, 'date')}</td>
+        </tr>`;
+    }).join('');
+
+    const tableHtml = bids.length ? `
+      <div style="margin-top:16px">
+        <div style="font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px">
+          Bid History (${bids.length})
+        </div>
+        <div class="table-wrapper">
+          <table>
+            <thead><tr>
+              <th>Project</th><th>Stage</th><th>Customer(s)</th>
+              <th>Amount</th><th>Est.</th><th>Received</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>` : `<div class="empty-state" style="height:100px"><div class="empty-state-desc">No bids linked yet.</div></div>`;
+
+    document.getElementById('profile-modal-content').innerHTML = statsHtml + tableHtml;
+  } catch (e) {
+    document.getElementById('profile-modal-content').innerHTML =
+      `<div class="text-danger">Error loading: ${esc(e.message)}</div>`;
+  }
 }
 
 // ── Quick-create contact from job panel ───────────────────────────────────────

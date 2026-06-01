@@ -824,6 +824,50 @@ async function fixOrphanEstimators(fixes) {
   return { fixed: count };
 }
 
+// ── Contact & Company profiles ───────────────────────────────────────────────
+
+function calcBidStats(bids) {
+  const ACTIVE = ['opportunity', 'active_bid', 'active_co', 'follow_up'];
+  const won    = bids.filter(b => b.stage === 'awarded');
+  const lost   = bids.filter(b => b.stage === 'not_awarded');
+  const active = bids.filter(b => ACTIVE.includes(b.stage));
+  const decided = won.length + lost.length;
+  return {
+    total:      bids.length,
+    active:     active.length,
+    wins:       won.length,
+    losses:     lost.length,
+    winRate:    decided > 0 ? Math.round(won.length / decided * 100) : null,
+    wonValue:   won.reduce((s, b) => s + (b.estimate_amount || 0), 0),
+    totalValue: bids.reduce((s, b) => s + (b.estimate_amount || 0), 0),
+  };
+}
+
+async function getContactBids(contactId) {
+  const bids = await Bid.aggregate([
+    { $match: { is_deleted: 0, 'customer_contacts.contact_id': Number(contactId) } },
+    ...BID_PIPELINE,
+    { $sort: { created_at: -1 } },
+  ]).then(r => r.map(formatBid));
+  return { bids, stats: calcBidStats(bids) };
+}
+
+async function getCompanyBids(companyName) {
+  const bids = await Bid.aggregate([
+    { $match: {
+      is_deleted: 0,
+      $or: [
+        { customer:  companyName }, { customer2: companyName },
+        { customer3: companyName }, { customer4: companyName },
+        { customer5: companyName },
+      ],
+    }},
+    ...BID_PIPELINE,
+    { $sort: { created_at: -1 } },
+  ]).then(r => r.map(formatBid));
+  return { bids, stats: calcBidStats(bids) };
+}
+
 // ── Bid ↔ Contact links ───────────────────────────────────────────────────────
 
 async function getBidContacts(bidId) {
@@ -1029,6 +1073,7 @@ module.exports = {
   getFollowups, logFollowup,
   getStats, getDigest, getAnalytics,
   findOrphanEstimators, fixOrphanEstimators,
+  getContactBids, getCompanyBids,
   getBidContacts, addBidContact, removeBidContact,
   getContacts, getContact, createContact, updateContact, deleteContact, importContacts,
   seedTeamData,

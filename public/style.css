@@ -369,6 +369,37 @@ tbody td {
 }
 .jp-ct-create:hover { background: rgba(37,99,235,.06); }
 
+/* ── Profile modal ── */
+.profile-stats {
+  display: flex; gap: 0; flex-wrap: wrap;
+  background: var(--sidebar-hover-bg);
+  border: 1px solid var(--border); border-radius: 8px;
+  overflow: hidden;
+}
+.profile-stat {
+  flex: 1; min-width: 90px;
+  display: flex; flex-direction: column; align-items: center;
+  padding: 14px 8px;
+  border-right: 1px solid var(--border);
+  text-align: center;
+}
+.profile-stat:last-child { border-right: none; }
+.profile-stat-val { font-size: 22px; font-weight: 900; line-height: 1; color: var(--text); }
+.profile-stat-lbl { font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); margin-top: 4px; }
+
+/* Clickable name/company links */
+.profile-link {
+  cursor: pointer; color: var(--primary);
+  border-bottom: 1px solid transparent;
+  transition: border-color .15s;
+}
+.profile-link:hover { border-bottom-color: var(--primary); }
+.company-link {
+  cursor: pointer; color: var(--primary); font-size: 13px;
+  border-bottom: 1px dashed rgba(59,130,246,.4);
+}
+.company-link:hover { border-bottom-style: solid; }
+
 /* ── Contacts page ── */
 .ct-company-name {
   cursor: pointer; color: var(--text);
