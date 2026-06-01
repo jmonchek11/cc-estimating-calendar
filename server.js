@@ -260,6 +260,30 @@ app.get('/api/companies/bids', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── BID LIFECYCLE (phases & CO links) ─────────────────────────────────────────
+app.get('/api/bids/check-duplicate', async (req, res) => {
+  try { res.json(await db.checkDuplicateBidNumber(req.query.bid_number || '')); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/bids/:id/phases', async (req, res) => {
+  try { res.json(await db.savePhase(req.params.id, req.body.label || '')); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.get('/api/bids/:id/linked-cos', async (req, res) => {
+  try { res.json(await db.getLinkedCOs(req.params.id)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/bids/:id/link-parent', async (req, res) => {
+  try {
+    const { parent_bid_id } = req.body;
+    if (!parent_bid_id) return res.status(400).json({ error: 'parent_bid_id required' });
+    res.json(await db.linkCOToParent(req.params.id, parent_bid_id));
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 // ── BID CONTACTS ──────────────────────────────────────────────────────────────
 app.get('/api/bids/:id/contacts', async (req, res) => {
   try { res.json(await db.getBidContacts(req.params.id)); }

@@ -332,6 +332,32 @@ tbody td {
 .badge-bid   { background: rgba(59,130,246,.15); color: #3b82f6; border: 1px solid rgba(59,130,246,.3); font-size: 11px; font-weight: 700; }
 .badge-co    { background: rgba(251,191,36,.15);  color: #d97706; border: 1px solid rgba(251,191,36,.3); font-size: 11px; font-weight: 700; }
 
+/* ── Bid lifecycle timeline ── */
+.lifecycle-phase {
+  display: flex; gap: 10px; align-items: flex-start;
+  padding: 8px 0; border-bottom: 1px solid var(--border);
+}
+.lifecycle-phase:last-of-type { border-bottom: none; }
+.lifecycle-phase-marker {
+  flex-shrink: 0; width: 22px; height: 22px; border-radius: 50%;
+  background: var(--primary); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 800; margin-top: 1px;
+}
+.lifecycle-phase-body { flex: 1; min-width: 0; }
+.lifecycle-phase-title { font-size: 13px; font-weight: 700; color: var(--text); }
+.lifecycle-meta { font-size: 11px; font-weight: 400; color: var(--text-muted); margin-left: 6px; }
+.lifecycle-current-marker {
+  font-size: 11px; font-weight: 700; color: var(--primary);
+  padding: 4px 0; letter-spacing: .05em;
+}
+.lifecycle-co-row {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 8px; border-radius: 5px; margin-bottom: 3px;
+  font-size: 12px; cursor: pointer;
+}
+.lifecycle-co-row:hover { background: rgba(0,0,0,.04); }
+
 /* ── Job panel: reminder cards ── */
 .jp-reminder-card {
   display: flex; align-items: flex-start; gap: 8px;

@@ -157,7 +157,8 @@
           <div class="form-grid-3">
             <div class="form-group">
               <label>Bid # <span class="optional">(optional)</span></label>
-              <input type="text" id="f-bid_number" placeholder="B26-0001" />
+              <input type="text" id="f-bid_number" placeholder="B26-0001" onblur="checkBidNumberDuplicate()" />
+              <div id="bid-number-warning" style="display:none;margin-top:6px;padding:8px 10px;background:#fef3c7;border:1px solid #fcd34d;border-radius:6px;font-size:12px"></div>
             </div>
             <div class="form-group">
               <label>Job #</label>

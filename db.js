@@ -74,6 +74,20 @@ function formatBid(b) {
     date_contract_signed: o.date_contract_signed ?? null,
     status: o.status ?? 'Open',
     next_followup_date: o.next_followup_date ?? null,
+    parent_bid_id: o.parent_bid_id ?? null,
+    phases: (o.phases || []).map(p => ({
+      phase_num:    p.phase_num,
+      label:        p.label || '',
+      estimator_id: p.estimator_id || null,
+      sub_estimators: p.sub_estimators || [],
+      customers:    p.customers || [],
+      amount:       p.amount || null,
+      date_received:  p.date_received || null,
+      date_submitted: p.date_submitted || null,
+      notes:        p.notes || null,
+      checklist:    p.checklist || [],
+      created_at:   p.created_at || null,
+    })),
     sub_estimators: (o.sub_estimators || []).map(se => ({
       estimator_id: se.estimator_id,
       scope:        se.scope || null,
@@ -451,6 +465,76 @@ async function getDigest() {
   };
 }
 
+// ── Bid phases & lifecycle ────────────────────────────────────────────────────
+
+async function savePhase(bidId, label) {
+  const bid = await Bid.findById(Number(bidId)).lean();
+  if (!bid) throw new Error('Bid not found');
+
+  const phaseNum = (bid.phases || []).length + 1;
+  const phase = {
+    phase_num:    phaseNum,
+    label:        label || `Phase ${phaseNum}`,
+    estimator_id: bid.estimator_id || null,
+    sub_estimators: bid.sub_estimators || [],
+    customers:    [bid.customer, bid.customer2, bid.customer3, bid.customer4, bid.customer5].filter(Boolean),
+    amount:       bid.estimate_amount || null,
+    date_received:  bid.date_received || null,
+    date_submitted: bid.date_estimate_sent || null,
+    notes:        bid.notes || null,
+    checklist:    bid.checklist || [],
+    created_at:   nowStr(),
+  };
+
+  await Bid.updateOne(
+    { _id: Number(bidId) },
+    {
+      $push: { phases: phase },
+      $set:  { checklist: [], updated_at: nowStr() },
+    }
+  );
+  return getBid(bidId);
+}
+
+async function getLinkedCOs(bidId) {
+  const bid = await Bid.findById(Number(bidId)).lean();
+  if (!bid) return [];
+  const conditions = [{ parent_bid_id: Number(bidId) }];
+  if (bid.job_number) {
+    conditions.push({
+      job_number: bid.job_number,
+      stage: { $in: ['active_co', 'follow_up', 'awarded', 'not_awarded', 'closed'] },
+      is_deleted: 0,
+    });
+  }
+  const raw = await Bid.aggregate([
+    { $match: { is_deleted: 0, $or: conditions } },
+    ...BID_PIPELINE,
+    { $sort: { created_at: 1 } },
+  ]).then(r => r.map(formatBid));
+  // Deduplicate
+  const seen = new Set();
+  return raw.filter(b => { if (seen.has(b.id)) return false; seen.add(b.id); return true; });
+}
+
+async function linkCOToParent(coId, parentBidId) {
+  await Bid.updateOne(
+    { _id: Number(coId) },
+    { $set: { parent_bid_id: Number(parentBidId), updated_at: nowStr() } }
+  );
+  return getBid(coId);
+}
+
+async function checkDuplicateBidNumber(bidNumber) {
+  if (!bidNumber) return null;
+  const existing = await Bid.aggregate([
+    { $match: { bid_number: bidNumber, is_deleted: 0 } },
+    ...BID_PIPELINE,
+    { $limit: 1 },
+  ]).then(r => r[0] ? formatBid(r[0]) : null);
+  return existing;
+}
+
 // ── Settings ──────────────────────────────────────────────────────────────────
 
 async function getSettings() {
@@ -559,7 +643,7 @@ const BID_FIELDS = [
   'estimate_review_date', 'estimate_amount', 'estimate_pct_complete',
   'estimate_approved_by', 'bid_result', 'award_date', 'awarded_contractor',
   'contract_reviewed_by', 'date_contract_signed', 'status', 'next_followup_date',
-  'sub_estimators', 'checklist',
+  'sub_estimators', 'checklist', 'parent_bid_id', 'phases',
 ];
 
 async function createBid(data) {
@@ -1211,6 +1295,7 @@ module.exports = {
   getFollowups, logFollowup,
   getStats, getDigest, getAnalytics,
   findOrphanEstimators, fixOrphanEstimators,
+  savePhase, getLinkedCOs, linkCOToParent, checkDuplicateBidNumber,
   getSettings, updateSettings,
   addReminder, dismissReminder, deleteReminder,
   getContactBids, getCompanyBids,

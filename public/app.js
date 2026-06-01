@@ -3060,6 +3060,42 @@ function openBidModal(bidId = null, defaultStage = 'opportunity', highlightIssue
   modal.style.display = 'flex';
 }
 
+// ── Duplicate bid number detection ───────────────────────────────────────────
+async function checkBidNumberDuplicate() {
+  const val     = document.getElementById('f-bid_number')?.value.trim();
+  const warnEl  = document.getElementById('bid-number-warning');
+  const editId  = document.getElementById('bid-id')?.value; // empty on new bids
+  if (!warnEl) return;
+  if (!val) { warnEl.style.display = 'none'; return; }
+
+  const existing = await api.get(`/api/bids/check-duplicate?bid_number=${encodeURIComponent(val)}`).catch(() => null);
+
+  // Ignore if it's the same bid we're editing
+  if (!existing || (editId && String(existing.id) === String(editId))) {
+    warnEl.style.display = 'none';
+    return;
+  }
+
+  const phaseCount = (existing.phases || []).length;
+  warnEl.style.display = 'block';
+  warnEl.innerHTML = `
+    ⚠️ <strong>${esc(val)}</strong> already exists:
+    <strong>${esc(existing.project_name)}</strong>
+    · ${stageName(existing.stage)}
+    ${phaseCount ? `· ${phaseCount} phase${phaseCount>1?'s':''} on record` : ''}
+    <br>
+    <span style="margin-top:4px;display:inline-flex;gap:8px">
+      <button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px"
+              onclick="closeBidModal();openJobPanel(${existing.id})">
+        View existing bid
+      </button>
+      <button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px;color:#d97706"
+              onclick="closeBidModal();openJobPanel(${existing.id});setTimeout(()=>openNewPhaseModal(${existing.id}),300)">
+        Add new phase to it
+      </button>
+    </span>`;
+}
+
 // ── Sub-estimator rows ────────────────────────────────────────────────────────
 function addSubEstimatorRow(estimatorId = '', scope = '') {
   const list = document.getElementById('sub-estimators-list');
@@ -3618,13 +3654,15 @@ async function openJobPanel(bidId) {
   overlay.style.display = 'block';
   panel.classList.add('open');
   try {
-    const [bid, followups, contacts] = await Promise.all([
+    const isAwarded = false; // will be set after bid loads
+    const [bid, followups, contacts, linkedCOs] = await Promise.all([
       api.get(`/api/bids/${bidId}`),
       api.get(`/api/bids/${bidId}/followups`),
       api.get(`/api/bids/${bidId}/contacts`),
+      api.get(`/api/bids/${bidId}/linked-cos`),
     ]);
     document.getElementById('job-panel-title').textContent = bid.project_name;
-    body.innerHTML = renderJobPanelContent(bid, followups, contacts);
+    body.innerHTML = renderJobPanelContent(bid, followups, contacts, linkedCOs);
   } catch (e) {
     body.innerHTML = `<div class="text-danger" style="padding:16px">Error loading: ${esc(e.message)}</div>`;
   }
@@ -3639,7 +3677,7 @@ function closeJobPanel() {
   State.currentPanelBidId = null;
 }
 
-function renderJobPanelContent(bid, followups, contacts = []) {
+function renderJobPanelContent(bid, followups, contacts = [], linkedCOs = []) {
   // Declare customerList first — used by both the contacts section and detailFields
   const customerList = [bid.customer, bid.customer2, bid.customer3, bid.customer4, bid.customer5].filter(Boolean);
 
@@ -3771,6 +3809,7 @@ function renderJobPanelContent(bid, followups, contacts = []) {
         ${bid.job_number ? `<span style="font-size:12px;color:var(--text-muted)">Job: ${esc(bid.job_number)}</span>` : ''}
       </div>
     </div>
+    ${renderLifecycleSection(bid, linkedCOs)}
     ${contactsSection}
     ${renderRemindersSection(bid)}
     ${detailFields ? `<div class="jp-section"><div class="jp-section-title">Details</div>${detailFields}</div>` : ''}
@@ -3780,6 +3819,198 @@ function renderJobPanelContent(bid, followups, contacts = []) {
     ${notesSection}
     ${awardSection}
     ${followupHistory}`;
+}
+
+// ── Bid Lifecycle (phases + linked COs) ──────────────────────────────────────
+
+const PHASE_LABELS = ['50% Budget', '80% DD', 'CD Pricing', 'Final Bid', 'Re-Bid', 'Value Engineering', 'Custom'];
+
+function renderLifecycleSection(bid, linkedCOs = []) {
+  const phases   = bid.phases || [];
+  const isCO     = !!bid.job_number && bid.stage !== 'awarded';
+  const isActive = ['opportunity','active_bid','active_co','follow_up'].includes(bid.stage);
+  const hasPhases = phases.length > 0;
+  const hasLinkedCOs = linkedCOs.length > 0;
+
+  // Only render if there's something to show (phases exist, it's awarded, or it's a CO with a parent)
+  if (!hasPhases && !hasLinkedCOs && !bid.parent_bid_id && bid.stage !== 'awarded') return '';
+
+  // Phase timeline rows
+  const phaseRows = phases.map((p, i) => {
+    const estM = State.team.find(t => t.id === p.estimator_id);
+    const clDone = (p.checklist || []).filter(id => !id.startsWith('na:')).length;
+    const clNA   = (p.checklist || []).filter(id => id.startsWith('na:')).length;
+    const clDenom = CHECKLIST_TOTAL - clNA;
+    const clPct  = clDenom > 0 ? Math.round(clDone / clDenom * 100) : 0;
+    const subs   = (p.sub_estimators || []).map(se => {
+      const m = State.team.find(t => t.id === se.estimator_id);
+      return m ? `<span class="initials-pill initials-pill-sub" title="${esc(m.name)}">${esc(m.initials)}</span>` : '';
+    }).join('');
+    return `
+      <div class="lifecycle-phase">
+        <div class="lifecycle-phase-marker">${i + 1}</div>
+        <div class="lifecycle-phase-body">
+          <div class="lifecycle-phase-title">
+            ${esc(p.label || `Phase ${p.phase_num}`)}
+            ${p.date_submitted ? `<span class="lifecycle-meta">submitted ${fmt(p.date_submitted,'date')}</span>` : ''}
+          </div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:2px;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+            ${estM ? `<span class="initials-pill" style="transform:scale(.85);transform-origin:left">${esc(estM.initials)}</span>` : ''}
+            ${subs}
+            ${p.amount ? `<strong style="color:var(--text)">${fmt(p.amount,'currency')}</strong>` : ''}
+            ${p.customers?.length ? `<span>${p.customers.join(' · ')}</span>` : ''}
+            ${p.checklist?.length ? `<span style="color:var(--primary)">${clDone}/${clDenom} checklist (${clPct}%)</span>` : ''}
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+
+  // Linked CO rows
+  const coRows = linkedCOs.map(co => {
+    const estM = State.team.find(t => t.id === co.estimator_id);
+    return `
+      <div class="lifecycle-co-row clickable-row" onclick="closeJobPanel();setTimeout(()=>openJobPanel(${co.id}),80)">
+        <span class="badge badge-co" style="flex-shrink:0">CO</span>
+        <span style="flex:1;min-width:0;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(co.project_name)}${co.bid_number?` <span style="color:var(--text-muted);font-size:11px">#${esc(co.bid_number)}</span>`:''}</span>
+        ${estM ? `<span class="initials-pill" style="transform:scale(.85)">${esc(estM.initials)}</span>` : ''}
+        <span style="font-size:12px;color:var(--text-muted);flex-shrink:0">${fmt(co.estimate_amount,'currency')}</span>
+        <span class="badge badge-stage" style="flex-shrink:0;font-size:10px">${stageName(co.stage)}</span>
+      </div>`;
+  }).join('');
+
+  // Parent bid link (on COs)
+  const parentSection = bid.parent_bid_id ? `
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">
+      Linked to bid:
+      <button class="btn-inline-link" onclick="closeJobPanel();setTimeout(()=>openJobPanel(${bid.parent_bid_id}),80)">
+        View parent bid →
+      </button>
+    </div>` : '';
+
+  // Link CO search (on non-CO bids)
+  const linkCOSearch = !isCO ? `
+    <div id="lc-search-wrap-${bid.id}" style="display:none;margin-top:8px">
+      <input type="text" class="form-input" style="margin-bottom:6px"
+             placeholder="Search by bid #, project name…"
+             oninput="filterLinkCOSearch(this,${bid.id})" />
+      <div id="lc-search-results-${bid.id}" class="jp-ct-results-box"></div>
+    </div>` : '';
+
+  return `
+    <div class="jp-section">
+      <div class="jp-section-title">🔄 Bid Lifecycle</div>
+      ${parentSection}
+      ${phaseRows}
+      ${hasPhases || bid.stage === 'awarded' ? `<div class="lifecycle-current-marker">▶ Current Phase</div>` : ''}
+      ${isActive ? `
+        <button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="openNewPhaseModal(${bid.id})">
+          + Save as Phase / Start New Round
+        </button>` : ''}
+      ${hasLinkedCOs || bid.stage === 'awarded' ? `
+        <div style="margin-top:12px;border-top:1px solid var(--border);padding-top:10px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+            <span style="font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted)">Change Orders${hasLinkedCOs?` (${linkedCOs.length})`:''}</span>
+            <button class="btn btn-ghost btn-sm" onclick="toggleLinkCOSearch(${bid.id})">+ Link CO</button>
+          </div>
+          ${coRows || '<div style="font-size:12px;color:var(--text-muted)">No change orders linked yet.</div>'}
+          ${linkCOSearch}
+        </div>` : ''}
+    </div>`;
+}
+
+// ── New Phase Modal ───────────────────────────────────────────────────────────
+function openNewPhaseModal(bidId) {
+  const existing = document.getElementById('new-phase-modal');
+  if (existing) existing.remove();
+
+  const opts = PHASE_LABELS.map(l => `<option>${l}</option>`).join('');
+  const div = document.createElement('div');
+  div.id = 'new-phase-modal';
+  div.className = 'modal-overlay';
+  div.onclick = e => { if (e.target === div) div.remove(); };
+  div.innerHTML = `
+    <div class="modal-box modal-small">
+      <div class="modal-header">
+        <span style="font-weight:700">Save Phase & Start New Round</span>
+        <button class="modal-close" onclick="document.getElementById('new-phase-modal').remove()">×</button>
+      </div>
+      <div style="padding:20px 24px">
+        <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px">
+          The current checklist, amount, estimator and customers will be saved as a completed phase.
+          The checklist will then be cleared for the new round.
+        </p>
+        <div class="form-group" style="margin-bottom:16px">
+          <label class="form-label">Label for this phase (what you're saving)</label>
+          <select class="form-input" id="np-label">
+            ${opts}
+          </select>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn btn-secondary" onclick="document.getElementById('new-phase-modal').remove()">Cancel</button>
+          <button class="btn btn-primary" onclick="confirmNewPhase(${bidId})">Save Phase & Continue</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(div);
+}
+
+async function confirmNewPhase(bidId) {
+  const label = document.getElementById('np-label')?.value || '';
+  try {
+    await api.post(`/api/bids/${bidId}/phases`, { label });
+    document.getElementById('new-phase-modal')?.remove();
+    openJobPanel(bidId);
+  } catch (e) { alert('Failed to save phase: ' + e.message); }
+}
+
+// ── Link CO to parent bid ─────────────────────────────────────────────────────
+let _linkedCOSearchBids = null;
+
+async function toggleLinkCOSearch(bidId) {
+  const wrap = document.getElementById(`lc-search-wrap-${bidId}`);
+  if (!wrap) return;
+  const opening = wrap.style.display === 'none';
+  wrap.style.display = opening ? 'block' : 'none';
+  if (opening) {
+    if (!_linkedCOSearchBids) {
+      // Load active COs and follow-up COs
+      _linkedCOSearchBids = await api.get('/api/bids?stage=active_co,follow_up');
+    }
+    filterLinkCOSearch(wrap.querySelector('input'), bidId);
+    wrap.querySelector('input')?.focus();
+  }
+}
+
+function filterLinkCOSearch(input, bidId) {
+  const q = (input?.value || '').toLowerCase();
+  const results = document.getElementById(`lc-search-results-${bidId}`);
+  if (!results || !_linkedCOSearchBids) return;
+
+  const matches = _linkedCOSearchBids
+    .filter(b => b.job_number) // only COs have job_number
+    .filter(b =>
+      (b.project_name || '').toLowerCase().includes(q) ||
+      (b.bid_number   || '').toLowerCase().includes(q) ||
+      (b.job_number   || '').toLowerCase().includes(q)
+    ).slice(0, 12);
+
+  results.innerHTML = matches.length
+    ? matches.map(b => `
+        <div class="jp-ct-result" onclick="linkCOToParent(${bidId},${b.id},'${esc(b.project_name)}')">
+          <div style="font-weight:600;font-size:13px">${esc(b.project_name)}</div>
+          <div style="font-size:12px;color:var(--text-muted)">
+            ${b.job_number?`Job: ${esc(b.job_number)}`:''}${b.bid_number?` · #${esc(b.bid_number)}`:''}
+          </div>
+        </div>`).join('')
+    : '<div style="padding:10px 12px;font-size:13px;color:var(--text-muted)">No change orders found.</div>';
+}
+
+async function linkCOToParent(parentBidId, coId, coName) {
+  try {
+    await api.put(`/api/bids/${coId}/link-parent`, { parent_bid_id: parentBidId });
+    _linkedCOSearchBids = null;
+    openJobPanel(parentBidId);
+  } catch (e) { alert('Failed to link: ' + e.message); }
 }
 
 // ── Bid Reminders ────────────────────────────────────────────────────────────
