@@ -3116,8 +3116,8 @@ function closeJobPanel() {
 }
 
 function renderJobPanelContent(bid, followups, contacts = []) {
-  const customers = [bid.customer, bid.customer2, bid.customer3, bid.customer4, bid.customer5]
-    .filter(Boolean).join(', ');
+  // Declare customerList first — used by both the contacts section and detailFields
+  const customerList = [bid.customer, bid.customer2, bid.customer3, bid.customer4, bid.customer5].filter(Boolean);
 
   // Individual customer names as clickable company-profile links
   const customerLinks = customerList.map(c =>
@@ -3177,7 +3177,7 @@ function renderJobPanelContent(bid, followups, contacts = []) {
     </div>` : '';
 
   // ── Customer Contacts section — one slot per customer ─────────────────────
-  const customerList = [bid.customer, bid.customer2, bid.customer3, bid.customer4, bid.customer5].filter(Boolean);
+  // (customerList already declared at top of function)
 
   // Build a lookup: customer_name → [linked contacts]
   const contactsByCustomer = {};
