@@ -632,7 +632,7 @@ function refreshFollowUps() {
 }
 
 function clearFollowUpFilters() {
-  ['fu-search','fu-stage-filter','fu-urgency-filter','fu-owner-filter'].forEach(id => {
+  ['fu-search','fu-type-filter','fu-customer-filter','fu-urgency-filter','fu-owner-filter'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
@@ -646,26 +646,35 @@ function clearFollowUpFilters() {
 // FOLLOW-UPS PAGE
 // ─────────────────────────────────────────────
 async function renderFollowUps(main) {
-  const searchVal  = document.getElementById('fu-search')?.value || '';
-  const stageVal   = document.getElementById('fu-stage-filter')?.value || '';
-  const urgencyVal = document.getElementById('fu-urgency-filter')?.value || '';
-  const ownerVal   = document.getElementById('fu-owner-filter')?.value || '';
-  const sortVal    = document.getElementById('fu-sort-filter')?.value || 'urgency';
+  const searchVal   = document.getElementById('fu-search')?.value    || '';
+  const typeVal     = document.getElementById('fu-type-filter')?.value   || '';
+  const urgencyVal  = document.getElementById('fu-urgency-filter')?.value || '';
+  const ownerVal    = document.getElementById('fu-owner-filter')?.value  || '';
+  const customerVal = document.getElementById('fu-customer-filter')?.value || '';
+  const sortVal     = document.getElementById('fu-sort-filter')?.value   || 'urgency';
 
-  const params = new URLSearchParams({ stage: stageVal || 'opportunity,active_bid,active_co,follow_up' });
+  // Follow-ups page always shows only follow_up stage
+  const params = new URLSearchParams({ stage: 'follow_up' });
   if (searchVal) params.set('search', searchVal);
   if (State.mineOnly && State.currentUser) params.set('mine_only', 'true');
 
   let bids = await api.get('/api/bids?' + params.toString());
 
-  // Client-side owner filter: salesperson owns it if assigned, otherwise estimator
+  // Type filter — CO = has job_number, BID = no job_number
+  if (typeVal === 'bid') bids = bids.filter(b => !b.job_number);
+  if (typeVal === 'co')  bids = bids.filter(b => !!b.job_number);
+
+  // Customer filter
+  if (customerVal) bids = bids.filter(b => b.customer === customerVal);
+
+  // Owner filter: salesperson owns it if assigned, otherwise estimator
   if (ownerVal) {
     bids = bids.filter(b =>
       b.salesperson_id ? b.salesperson_id == ownerVal : b.estimator_id == ownerVal
     );
   }
 
-  // Client-side urgency filter
+  // Urgency filter
   if (urgencyVal) {
     bids = bids.filter(b => {
       if (urgencyVal === 'none') return !b.next_followup_date;
@@ -705,9 +714,15 @@ async function renderFollowUps(main) {
   const overdueCnt  = bids.filter(b => b.next_followup_date && followupUrgency(b) === 'overdue').length;
   const todayCnt    = bids.filter(b => b.next_followup_date && followupUrgency(b) === 'today').length;
   const weekCnt     = bids.filter(b => b.next_followup_date && followupUrgency(b) === 'this-week').length;
+  const bidCnt      = bids.filter(b => !b.job_number).length;
+  const coCnt       = bids.filter(b =>  b.job_number).length;
 
   const ownerOptions = State.team.filter(m => m.active)
     .map(m => `<option value="${m.id}">${esc(m.initials)} – ${esc(m.name)}</option>`).join('');
+
+  // Unique customer list from loaded bids
+  const customers = [...new Set(bids.map(b => b.customer).filter(Boolean))].sort();
+  const customerOptions = customers.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
 
   function ownerCell(b) {
     // Salesperson owns the follow-up if assigned; estimator otherwise
@@ -732,15 +747,22 @@ async function renderFollowUps(main) {
   }
 
   const rows = bids.map(b => {
-    const urgency = b.next_followup_date ? followupUrgency(b) : 'none';
+    const urgency  = b.next_followup_date ? followupUrgency(b) : 'none';
     const rowClass = urgency === 'overdue' ? 'row-overdue' : urgency === 'today' ? 'row-due-soon' : '';
+    const isCO     = !!b.job_number;
+    const refNum   = isCO ? (b.job_number || b.bid_number) : b.bid_number;
+    const typeBadge = isCO
+      ? `<span class="badge badge-co">CO</span>`
+      : `<span class="badge badge-bid">BID</span>`;
     return `
       <tr class="${rowClass} clickable-row" onclick="openJobPanel(${b.id})">
-        <td class="td-project">${esc(b.project_name)}<small>${b.bid_number ? '#' + esc(b.bid_number) : ''}</small></td>
+        <td class="td-project">
+          ${typeBadge}
+          ${esc(b.project_name)}<small>${refNum ? ' #' + esc(refNum) : ''}</small>
+        </td>
         <td class="td-customer">${esc(b.customer) || '—'}</td>
         <td class="td-date">${fmt(b.date_received, 'date')}</td>
         <td class="td-amount">${fmt(b.estimate_amount, 'currency')}</td>
-        <td><span class="badge badge-stage">${stageName(b.stage)}</span></td>
         <td>${ownerCell(b)}</td>
         <td>${followupDueCell(b)}</td>
         <td><div class="actions" onclick="event.stopPropagation()">
@@ -755,19 +777,26 @@ async function renderFollowUps(main) {
     <div class="page-header">
       <div>
         <div class="page-title">🔔 Follow Ups</div>
-        <div class="page-subtitle">${bids.length} record${bids.length !== 1 ? 's' : ''} · ${overdueCnt} overdue · ${todayCnt} due today · ${weekCnt} this week</div>
+        <div class="page-subtitle">
+          ${bids.length} item${bids.length !== 1 ? 's' : ''}
+          · <span class="badge badge-bid" style="font-size:11px">${bidCnt} Bid${bidCnt !== 1 ? 's' : ''}</span>
+          <span class="badge badge-co" style="font-size:11px">${coCnt} CO${coCnt !== 1 ? 's' : ''}</span>
+          · ${overdueCnt} overdue · ${todayCnt} due today · ${weekCnt} this week
+        </div>
       </div>
       <button class="btn btn-primary" onclick="openBidModal(null,'follow_up')">+ Add</button>
     </div>
 
     <div class="filter-bar">
       <input type="text" id="fu-search" placeholder="Search project, bid #, customer…" value="${esc(searchVal)}" oninput="debounceFollowUps()" />
-      <select id="fu-stage-filter" onchange="refreshFollowUps()">
-        <option value="">All Stages</option>
-        <option value="opportunity">Opportunity</option>
-        <option value="active_bid">Active Bid</option>
-        <option value="active_co">Change Order</option>
-        <option value="follow_up">Follow Up</option>
+      <select id="fu-type-filter" onchange="refreshFollowUps()">
+        <option value="">Bids + COs</option>
+        <option value="bid">Bids Only</option>
+        <option value="co">Change Orders Only</option>
+      </select>
+      <select id="fu-customer-filter" onchange="refreshFollowUps()">
+        <option value="">All Customers</option>
+        ${customerOptions}
       </select>
       <select id="fu-urgency-filter" onchange="refreshFollowUps()">
         <option value="">All Urgency</option>
@@ -797,7 +826,7 @@ async function renderFollowUps(main) {
       <table>
         <thead>
           <tr>
-            <th>Project</th><th>Customer</th><th>Received</th><th>Amount</th><th>Stage</th>
+            <th>Project</th><th>Customer</th><th>Received</th><th>Amount</th>
             <th>Owner</th><th>Follow-up Due</th><th>Actions</th>
           </tr>
         </thead>
@@ -810,9 +839,10 @@ async function renderFollowUps(main) {
       </div>`}
     </div>`;
 
-  if (stageVal)   document.getElementById('fu-stage-filter').value = stageVal;
-  if (urgencyVal) document.getElementById('fu-urgency-filter').value = urgencyVal;
-  if (ownerVal)   document.getElementById('fu-owner-filter').value = ownerVal;
+  if (typeVal)     document.getElementById('fu-type-filter').value     = typeVal;
+  if (customerVal) document.getElementById('fu-customer-filter').value = customerVal;
+  if (urgencyVal)  document.getElementById('fu-urgency-filter').value  = urgencyVal;
+  if (ownerVal)    document.getElementById('fu-owner-filter').value    = ownerVal;
   if (sortVal !== 'urgency') document.getElementById('fu-sort-filter').value = sortVal;
 }
 
@@ -1444,7 +1474,7 @@ async function renderDigest(main) {
           ${bidList(d.newThisWeek, true)}
         </div>
         <div class="digest-section">
-          <div class="digest-section-title">📤 Bids Submitted This Week</div>
+          <div class="digest-section-title">📤 Bids Submitted — Last 2 Weeks</div>
           ${bidList(d.submittedThisWeek)}
         </div>
       </div>
@@ -1460,21 +1490,12 @@ async function renderDigest(main) {
         </div>
       </div>
 
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
-        <div class="digest-section">
-          <div class="digest-section-title">👷 By Estimator</div>
-          <table class="digest-table">
-            <thead><tr><th>Estimator</th><th style="text-align:center">Active Bids</th><th style="text-align:right">Value</th></tr></thead>
-            <tbody>${estimatorRows}</tbody>
-          </table>
-        </div>
-        <div class="digest-section">
-          <div class="digest-section-title">📞 By Salesperson</div>
-          <table class="digest-table">
-            <thead><tr><th>Salesperson</th><th style="text-align:center">Active</th><th style="text-align:center">Overdue F/U</th></tr></thead>
-            <tbody>${salespersonRows}</tbody>
-          </table>
-        </div>
+      <div class="digest-section">
+        <div class="digest-section-title">📞 By Salesperson</div>
+        <table class="digest-table">
+          <thead><tr><th>Salesperson</th><th style="text-align:center">Active</th><th style="text-align:center">Overdue F/U</th></tr></thead>
+          <tbody>${salespersonRows}</tbody>
+        </table>
       </div>
     </div>`;
 }
@@ -2102,7 +2123,9 @@ function buildCalendarGrid(year, month, bids, filterType) {
     const chips = shown.map(({ bid, type }) => {
       if (type === 'due') {
         const c = estimatorColor(bid.estimator_id);
-        return `<div class="cal-chip" style="border-left-color:${c}">
+        // hex → rgba at 25% opacity for readable background fill
+        const bg = c + '40';
+        return `<div class="cal-chip" style="background:${bg};border-left-color:${c}">
           <span class="cal-chip-txt">${esc(bid.project_name)}</span>
           ${bid.estimator_initials ? `<span class="cal-chip-ini" style="color:${c}">${esc(bid.estimator_initials)}</span>` : ''}
         </div>`;

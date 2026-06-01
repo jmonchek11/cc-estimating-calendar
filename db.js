@@ -301,9 +301,10 @@ async function getStats() {
 }
 
 async function getDigest() {
-  const todayStr = new Date().toISOString().split('T')[0];
-  const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
-  const weekAhead = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
+  const todayStr    = new Date().toISOString().split('T')[0];
+  const weekAgo     = new Date(Date.now() -  7 * 86400000).toISOString().split('T')[0];
+  const twoWeeksAgo = new Date(Date.now() - 14 * 86400000).toISOString().split('T')[0];
+  const weekAhead   = new Date(Date.now() +  7 * 86400000).toISOString().split('T')[0];
   const CLOSED = ['awarded', 'not_awarded', 'closed'];
 
   const [pipelineSummary, bidsForEstimators, estimators, bidsForSalespeople, salespeople,
@@ -347,8 +348,8 @@ async function getDigest() {
     ]).then(r => r.map(formatBid)),
 
     Bid.aggregate([
-      { $match: { is_deleted: 0, date_estimate_sent: { $gte: weekAgo, $lte: todayStr } } },
-      { $sort: { date_estimate_sent: 1 } },
+      { $match: { is_deleted: 0, date_estimate_sent: { $gte: twoWeeksAgo, $lte: todayStr } } },
+      { $sort: { date_estimate_sent: -1 } },
       ...BID_PIPELINE,
     ]).then(r => r.map(formatBid)),
 
@@ -725,6 +726,22 @@ async function seedTeamData() {
       const id = await nextId('team_members');
       await TeamMember.create({ _id: id, name, initials, role, active: 1 });
     }
+  }
+
+  // Fix: salesperson-only members should never appear as estimator_id on bids.
+  // Move them to salesperson_id (if slot is empty) and clear estimator_id.
+  const salesOnly = await TeamMember.find({ role: 'salesperson' });
+  for (const sp of salesOnly) {
+    // Bid has them as estimator and has no salesperson → promote to salesperson
+    await Bid.updateMany(
+      { estimator_id: sp._id, salesperson_id: null, is_deleted: 0 },
+      { $set: { salesperson_id: sp._id, estimator_id: null } }
+    );
+    // Bid already has a salesperson → just clear the estimator slot
+    await Bid.updateMany(
+      { estimator_id: sp._id, salesperson_id: { $ne: null }, is_deleted: 0 },
+      { $set: { estimator_id: null } }
+    );
   }
 
   // Seed Joe Monchek as admin
