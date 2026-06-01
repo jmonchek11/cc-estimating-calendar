@@ -73,6 +73,7 @@ function formatBid(b) {
     date_contract_signed: o.date_contract_signed ?? null,
     status: o.status ?? 'Open',
     next_followup_date: o.next_followup_date ?? null,
+    checklist: o.checklist ?? [],
     is_deleted: o.is_deleted ?? 0,
     created_at: o.created_at ?? null,
     updated_at: o.updated_at ?? null,

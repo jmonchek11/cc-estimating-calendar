@@ -2031,6 +2031,209 @@ async function importExcel() {
 }
 
 // ─────────────────────────────────────────────
+// BID CHECKLIST
+// ─────────────────────────────────────────────
+const CHECKLIST = [
+  { id: 'ps', label: 'Plans & Specs', items: [
+    { id: 'ps1', label: 'Review Bid Invite email' },
+    { id: 'ps2', label: 'Review Bid Site' },
+    { id: 'ps3', label: 'Review Plans & Specs' },
+    { id: 'ps4', label: 'Review photos' },
+    { id: 'ps5', label: 'Check Google Maps / street view' },
+    { id: 'ps6', label: 'Check Accubid scales' },
+    { id: 'ps7', label: 'Ceiling heights and types' },
+    { id: 'ps8', label: 'Logistics (labor factor for staging, waiting, badging, etc.)' },
+    { id: 'ps9', label: 'Call architect — find other GCs to bid to' },
+  ]},
+  { id: 'ms', label: 'Miscellaneous', items: [
+    { id: 'ms1', label: 'Bid type (budget? Final round?)' },
+    { id: 'ms2', label: 'RACP' },
+    { id: 'ms3', label: 'Buy American' },
+    { id: 'ms4', label: 'Tax Exempt / KOZ etc.' },
+    { id: 'ms5', label: 'ICRA Requirements' },
+  ]},
+  { id: 'pb', label: 'Pre-Bid', items: [
+    { id: 'pb1', label: 'Pre Con' },
+    { id: 'pb2', label: 'Pre Con with GC' },
+    { id: 'pb3', label: 'Send RFIs' },
+    { id: 'pb4', label: 'RFIs Answered?' },
+  ]},
+  { id: 'rq', label: 'Requests for Quotes (RFQs)', items: [
+    { id: 'rq1',  label: 'Lighting Counts' },
+    { id: 'rq2',  label: 'Attic Stock, Mockups' },
+    { id: 'rq3',  label: 'Lighting Rep / Mixed Bag' },
+    { id: 'rq4',  label: 'Lighting RFQ' },
+    { id: 'rq5',  label: 'Gear Counts' },
+    { id: 'rq6',  label: 'Gear Studies' },
+    { id: 'rq7',  label: 'Gear RFQ' },
+    { id: 'rq8',  label: 'Fire Alarm RFQ' },
+    { id: 'rq9',  label: 'Nurse Call RFQ' },
+    { id: 'rq10', label: 'Generator RFQ' },
+    { id: 'rq11', label: 'Electrical Testing' },
+    { id: 'rq12', label: 'Rigging RFQ' },
+    { id: 'rq13', label: 'Misc RFQ (Wiremold / Poke-Thrus)' },
+  ]},
+  { id: 'to', label: 'Takeoff', items: [
+    { id: 'to1',  label: 'Electrical Safe-Off / Demo' },
+    { id: 'to2',  label: 'Temporary Power & Lighting' },
+    { id: 'to3',  label: 'Lighting' },
+    { id: 'to4',  label: 'Devices & Receptacles' },
+    { id: 'to5',  label: 'Mechanical' },
+    { id: 'to6',  label: 'Fire Alarm' },
+    { id: 'to7',  label: 'Nurse Call' },
+    { id: 'to8',  label: 'Low Voltage & Tele/Data' },
+    { id: 'to9',  label: 'Access Controls & Security' },
+    { id: 'to10', label: 'Distribution' },
+    { id: 'to11', label: 'Review Extension' },
+  ]},
+  { id: 'rv', label: 'Review Quotes', items: [
+    { id: 'rv1', label: 'Lighting Quote' },
+    { id: 'rv2', label: 'Gear Quote w/ Studies' },
+    { id: 'rv3', label: 'Electrical Testing Quote' },
+    { id: 'rv4', label: 'Fire Alarm Quote' },
+    { id: 'rv5', label: 'Nurse Call Quote' },
+    { id: 'rv6', label: 'Rigging Quote' },
+    { id: 'rv7', label: 'Generator Quote' },
+    { id: 'rv8', label: 'Off-Hours Work' },
+    { id: 'rv9', label: 'Review Project Schedule' },
+  ]},
+  { id: 'ae', label: 'Accubid Job Expenses', items: [
+    { id: 'ae1',  label: 'Direct Labor (DirLb)' },
+    { id: 'ae2',  label: 'Incidental Labor (IncLb)' },
+    { id: 'ae3',  label: 'Indirect Labor (IndLb)' },
+    { id: 'ae4',  label: 'Subcontractors (Subs)' },
+    { id: 'ae5',  label: 'General Expenses (GenExp)' },
+    { id: 'ae6',  label: 'Quoted Materials (QtMat)' },
+    { id: 'ae7',  label: 'Final Price (FnPrc)' },
+    { id: 'ae8',  label: 'Tax' },
+    { id: 'ae9',  label: 'Bond' },
+    { id: 'ae10', label: 'GenExp: add permits and inspections' },
+    { id: 'ae11', label: 'Key Indicators (KeyInd) — enter Area' },
+  ]},
+  { id: 'bp', label: 'Bid Proposal', items: [
+    { id: 'bp1', label: 'GC Scope of Work' },
+    { id: 'bp2', label: 'Complete Bid for Customer' },
+    { id: 'bp3', label: 'Verify Current Drawings' },
+  ]},
+  { id: 'sb', label: 'Schedule Bid Review', items: [
+    { id: 'sb1', label: 'Calendar invite' },
+    { id: 'sb2', label: 'Project HQ action item' },
+  ]},
+  { id: 'br', label: 'Bid Review', items: [
+    { id: 'br1',  label: 'Project Schedule' },
+    { id: 'br2',  label: 'GC Scope of Work' },
+    { id: 'br3',  label: 'EMT vs. MC' },
+    { id: 'br4',  label: 'Labor Rates & Jurisdiction' },
+    { id: 'br5',  label: 'Remote Drivers' },
+    { id: 'br6',  label: 'Current Drawings' },
+    { id: 'br7',  label: 'Verify Correct Breakers' },
+    { id: 'br8',  label: 'Lighting Rep' },
+    { id: 'br9',  label: 'Review Vendor Quotes' },
+    { id: 'br10', label: 'Equipment Rentals' },
+    { id: 'br11', label: 'OH, Profit, Material, Tax' },
+    { id: 'br12', label: 'Bonding and Insurance' },
+    { id: 'br13', label: 'BIM' },
+    { id: 'br14', label: 'Square Foot Pricing' },
+    { id: 'br15', label: 'Tariff Exclusions' },
+    { id: 'br16', label: 'Bid Proposal' },
+  ]},
+  { id: 'sn', label: 'Send', items: [
+    { id: 'sn1', label: 'Send bid to customer(s)' },
+    { id: 'sn2', label: 'Update Bid Tracker (Status, BidDateSent, BidRfcPrice, fill in missing GCs)' },
+  ]},
+];
+
+const CHECKLIST_TOTAL = CHECKLIST.reduce((s, sec) => s + sec.items.length, 0);
+
+function renderChecklistSection(bid) {
+  const checked = new Set(bid.checklist || []);
+  const totalChecked = checked.size;
+  const pct = Math.round(totalChecked / CHECKLIST_TOTAL * 100);
+  const isCO = !!bid.job_number; // Change orders still get checklist but it's less relevant
+
+  const sections = CHECKLIST.map(sec => {
+    const secChecked = sec.items.filter(i => checked.has(i.id)).length;
+    return `
+      <div class="cl-section">
+        <div class="cl-section-hdr">
+          <span class="cl-section-name">${esc(sec.label)}</span>
+          <span class="cl-section-count">${secChecked}/${sec.items.length}</span>
+        </div>
+        ${sec.items.map(item => `
+          <label class="cl-item${checked.has(item.id) ? ' cl-item-done' : ''}">
+            <input type="checkbox" class="cl-checkbox"
+                   data-bid-id="${bid.id}" data-item-id="${item.id}"
+                   ${checked.has(item.id) ? 'checked' : ''}
+                   onchange="toggleChecklistItem(this)" />
+            <span class="cl-item-label">${esc(item.label)}</span>
+          </label>`).join('')}
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="jp-section" id="cl-section-${bid.id}">
+      <div class="cl-header" onclick="toggleChecklistOpen(${bid.id})">
+        <div>
+          <div class="jp-section-title" style="margin:0">Bid Checklist
+            <span class="cl-summary">${totalChecked}/${CHECKLIST_TOTAL} · ${pct}%</span>
+          </div>
+          <div class="cl-progress-bar-wrap">
+            <div class="cl-progress-bar-fill" id="cl-bar-${bid.id}" style="width:${pct}%"></div>
+          </div>
+        </div>
+        <span class="cl-toggle-icon" id="cl-icon-${bid.id}">▶</span>
+      </div>
+      <div class="cl-body" id="cl-body-${bid.id}" style="display:none">
+        ${sections}
+      </div>
+    </div>`;
+}
+
+function toggleChecklistOpen(bidId) {
+  const body = document.getElementById(`cl-body-${bidId}`);
+  const icon = document.getElementById(`cl-icon-${bidId}`);
+  if (!body) return;
+  const open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : 'block';
+  if (icon) icon.textContent = open ? '▶' : '▼';
+}
+
+let _clSaveTimer = null;
+
+async function toggleChecklistItem(checkbox) {
+  const bidId  = Number(checkbox.dataset.bidId);
+  const itemId = checkbox.dataset.itemId;
+  const checked = checkbox.checked;
+
+  // Update label style instantly
+  const label = checkbox.closest('.cl-item');
+  if (label) label.classList.toggle('cl-item-done', checked);
+
+  // Collect all currently checked items for this bid from the DOM
+  const allCheckboxes = document.querySelectorAll(`.cl-checkbox[data-bid-id="${bidId}"]`);
+  const checklist = Array.from(allCheckboxes).filter(cb => cb.checked).map(cb => cb.dataset.itemId);
+  const pct = Math.round(checklist.length / CHECKLIST_TOTAL * 100) / 100;
+
+  // Update the summary and bar immediately
+  const sectionEl = document.getElementById(`cl-section-${bidId}`);
+  const summaryEl = sectionEl?.querySelector('.cl-summary');
+  const barEl     = document.getElementById(`cl-bar-${bidId}`);
+  if (summaryEl) summaryEl.textContent = `${checklist.length}/${CHECKLIST_TOTAL} · ${Math.round(pct*100)}%`;
+  if (barEl)     barEl.style.width = `${Math.round(pct*100)}%`;
+
+  // Debounce the API call — save 800ms after last change
+  clearTimeout(_clSaveTimer);
+  _clSaveTimer = setTimeout(async () => {
+    try {
+      await api.put(`/api/bids/${bidId}`, { checklist, estimate_pct_complete: pct });
+      // Update the progress bar in the panel header if visible
+      const progressEl = document.querySelector(`.jp-progress-fill[data-bid-id="${bidId}"]`);
+      if (progressEl) progressEl.style.width = `${Math.round(pct*100)}%`;
+    } catch (e) { console.error('Checklist save failed:', e.message); }
+  }, 800);
+}
+
+// ─────────────────────────────────────────────
 // CONTACTS PAGE
 // ─────────────────────────────────────────────
 let _contactsCache = [];   // full list; filtered client-side
@@ -3244,6 +3447,7 @@ function renderJobPanelContent(bid, followups, contacts = []) {
     ${detailFields ? `<div class="jp-section"><div class="jp-section-title">Details</div>${detailFields}</div>` : ''}
     ${dateFields ? `<div class="jp-section"><div class="jp-section-title">Dates</div>${dateFields}</div>` : ''}
     ${progressSection}
+    ${renderChecklistSection(bid)}
     ${notesSection}
     ${awardSection}
     ${followupHistory}`;
