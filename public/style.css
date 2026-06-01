@@ -500,6 +500,19 @@ tbody td {
   text-align: center;
   line-height: 26px;
 }
+/* Sub-estimator pill — same shape, lighter fill to distinguish from main */
+.initials-pill-sub {
+  background: #e0e7ff; color: #3730a3;
+  opacity: 0.8;
+  border: 1px dashed #a5b4fc;
+}
+
+/* Sub-estimator row in bid form */
+.sub-est-row {
+  display: flex; gap: 6px; align-items: center;
+}
+.sub-est-row select { flex: 0 0 180px; }
+.sub-est-row .sub-est-scope { flex: 1; }
 
 /* ── PROGRESS BAR ── */
 .progress-bar {

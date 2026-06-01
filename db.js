@@ -73,6 +73,10 @@ function formatBid(b) {
     date_contract_signed: o.date_contract_signed ?? null,
     status: o.status ?? 'Open',
     next_followup_date: o.next_followup_date ?? null,
+    sub_estimators: (o.sub_estimators || []).map(se => ({
+      estimator_id: se.estimator_id,
+      scope:        se.scope || null,
+    })),
     checklist: o.checklist ?? [],
     is_deleted: o.is_deleted ?? 0,
     created_at: o.created_at ?? null,
@@ -443,7 +447,11 @@ async function getBids({ stage, estimator_id, salesperson_id, status, search, cu
 
   if (mine_only === 'true' && userId) {
     const uid = Number(userId);
-    conditions.push({ $or: [{ estimator_id: uid }, { salesperson_id: uid }] });
+    conditions.push({ $or: [
+      { estimator_id: uid },
+      { salesperson_id: uid },
+      { 'sub_estimators.estimator_id': uid },
+    ]});
   }
 
   if (search) {

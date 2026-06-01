@@ -478,7 +478,13 @@ async function renderBidTable(main, stage, title, icon) {
           <small style="color:var(--text-muted);font-size:11px">${pctWidth}%</small>
         </td>
         <td class="td-date ${dueDateClass}">${fmt(b.estimate_due_date, 'date')}</td>
-        <td>${b.estimator_initials ? `<span class="initials-pill">${esc(b.estimator_initials)}</span>` : '—'}</td>
+        <td>
+          ${b.estimator_initials ? `<span class="initials-pill">${esc(b.estimator_initials)}</span>` : '—'}
+          ${(b.sub_estimators||[]).map(se => {
+            const m = State.team.find(t => t.id === se.estimator_id);
+            return m ? `<span class="initials-pill initials-pill-sub" title="${esc(m.name)}${se.scope?' · '+se.scope:''}">${esc(m.initials)}</span>` : '';
+          }).join('')}
+        </td>
         <td>${b.salesperson_initials ? `<span class="initials-pill" style="background:#dcfce7;color:#166534">${esc(b.salesperson_initials)}</span>` : '—'}</td>
         <td>${statusBadge(b.status)}</td>
         <td>
@@ -594,7 +600,13 @@ async function renderBidTableWithFilters(main, stage, title, icon) {
         <td class="td-amount">${fmt(b.estimate_amount, 'currency')}</td>
         <td><div class="progress-bar"><div class="progress-fill ${pctWidth >= 100 ? 'complete' : ''}" style="width:${pctWidth}%"></div></div><small style="color:var(--text-muted);font-size:11px">${pctWidth}%</small></td>
         <td class="td-date ${dueDateClass}">${fmt(b.estimate_due_date, 'date')}</td>
-        <td>${b.estimator_initials ? `<span class="initials-pill">${esc(b.estimator_initials)}</span>` : '—'}</td>
+        <td>
+          ${b.estimator_initials ? `<span class="initials-pill">${esc(b.estimator_initials)}</span>` : '—'}
+          ${(b.sub_estimators||[]).map(se => {
+            const m = State.team.find(t => t.id === se.estimator_id);
+            return m ? `<span class="initials-pill initials-pill-sub" title="${esc(m.name)}${se.scope?' · '+se.scope:''}">${esc(m.initials)}</span>` : '';
+          }).join('')}
+        </td>
         <td>${b.salesperson_initials ? `<span class="initials-pill" style="background:#dcfce7;color:#166534">${esc(b.salesperson_initials)}</span>` : '—'}</td>
         <td>${statusBadge(b.status)}</td>
         <td><div class="actions" onclick="event.stopPropagation()">
@@ -2842,6 +2854,7 @@ function openBidModal(bidId = null, defaultStage = 'opportunity', highlightIssue
   document.getElementById('bid-modal-title').textContent = bidId ? 'Edit Bid' : 'Add New Bid';
 
   populateTeamDropdowns('f-estimator_id', 'f-salesperson_id');
+  loadSubEstimatorsIntoForm([]);  // clear any previous rows
 
   if (bidId) {
     api.get(`/api/bids/${bidId}`).then(b => {
@@ -2870,6 +2883,7 @@ function openBidModal(bidId = null, defaultStage = 'opportunity', highlightIssue
       document.getElementById('f-notes').value = b.notes || '';
       document.getElementById('f-award_date').value = b.award_date || '';
       document.getElementById('f-awarded_contractor').value = b.awarded_contractor || '';
+      loadSubEstimatorsIntoForm(b.sub_estimators || []);
       if (highlightIssues) highlightBidFormIssues(highlightIssues);
     });
   } else {
@@ -2878,6 +2892,39 @@ function openBidModal(bidId = null, defaultStage = 'opportunity', highlightIssue
   }
 
   modal.style.display = 'flex';
+}
+
+// ── Sub-estimator rows ────────────────────────────────────────────────────────
+function addSubEstimatorRow(estimatorId = '', scope = '') {
+  const list = document.getElementById('sub-estimators-list');
+  if (!list) return;
+  const estimators = State.team.filter(m => m.active && (m.role === 'estimator' || m.role === 'estimator/pm'));
+  const opts = estimators.map(m =>
+    `<option value="${m.id}" ${String(m.id) === String(estimatorId) ? 'selected' : ''}>${esc(m.initials)} – ${esc(m.name)}</option>`
+  ).join('');
+  const row = document.createElement('div');
+  row.className = 'sub-est-row';
+  row.innerHTML = `
+    <select class="sub-est-select">
+      <option value="">-- Select Estimator --</option>
+      ${opts}
+    </select>
+    <input type="text" class="sub-est-scope" placeholder="Scope (Fire Alarm, Data/LV…)" value="${esc(scope)}" />
+    <button type="button" class="btn btn-ghost btn-sm sub-est-remove" onclick="this.closest('.sub-est-row').remove()" title="Remove">✕</button>`;
+  list.appendChild(row);
+}
+
+function getSubEstimatorsFromForm() {
+  return Array.from(document.querySelectorAll('.sub-est-row')).map(row => ({
+    estimator_id: Number(row.querySelector('.sub-est-select')?.value) || null,
+    scope:        row.querySelector('.sub-est-scope')?.value.trim() || null,
+  })).filter(se => se.estimator_id);
+}
+
+function loadSubEstimatorsIntoForm(subEstimators) {
+  const list = document.getElementById('sub-estimators-list');
+  if (list) list.innerHTML = '';
+  (subEstimators || []).forEach(se => addSubEstimatorRow(se.estimator_id, se.scope || ''));
 }
 
 function closeBidModal() {
@@ -2913,6 +2960,7 @@ async function saveBid() {
     notes: document.getElementById('f-notes').value.trim(),
     award_date: document.getElementById('f-award_date').value || null,
     awarded_contractor: document.getElementById('f-awarded_contractor').value.trim(),
+    sub_estimators: getSubEstimatorsFromForm(),
   };
 
   if (!data.project_name) { alert('Project name is required.'); return; }
@@ -3418,6 +3466,13 @@ function renderJobPanelContent(bid, followups, contacts = []) {
     customerList.length ? `<div class="jp-field"><span class="jp-label">Customer</span><span class="jp-value">${customerLinks}</span></div>` : '',
     bid.estimate_amount ? `<div class="jp-field"><span class="jp-label">Estimate Amount</span><span class="jp-value">${fmt(bid.estimate_amount, 'currency')}</span></div>` : '',
     bid.estimator_initials ? `<div class="jp-field"><span class="jp-label">Estimator</span><span class="jp-value"><span class="initials-pill">${esc(bid.estimator_initials)}</span></span></div>` : '',
+    (bid.sub_estimators||[]).length ? `<div class="jp-field"><span class="jp-label">Sub-Estimators</span><span class="jp-value">${
+      bid.sub_estimators.map(se => {
+        const m = State.team.find(t => t.id === se.estimator_id);
+        if (!m) return '';
+        return `<span class="initials-pill initials-pill-sub" title="${esc(m.name)}">${esc(m.initials)}</span>${se.scope ? `<span style="font-size:12px;color:var(--text-muted);margin-left:4px">${esc(se.scope)}</span>` : ''}`;
+      }).join('<span style="margin:0 6px;color:var(--border)">·</span>')
+    }</span></div>` : '',
     bid.salesperson_initials ? `<div class="jp-field"><span class="jp-label">Salesperson</span><span class="jp-value"><span class="initials-pill" style="background:#dcfce7;color:#166534">${esc(bid.salesperson_initials)}</span></span></div>` : '',
   ].filter(Boolean).join('');
 
