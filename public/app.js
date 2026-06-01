@@ -45,6 +45,16 @@ function fmt(val, type = 'text') {
   return val;
 }
 
+// Compact currency for stat boxes — always fits in a small tile
+function fmtCompact(n) {
+  if (!n) return '—';
+  const v = parseFloat(n);
+  if (isNaN(v)) return '—';
+  if (v >= 1000000) return '$' + (v / 1000000).toFixed(1) + 'M';
+  if (v >= 1000)    return '$' + Math.round(v / 1000) + 'K';
+  return '$' + v;
+}
+
 function today() { return new Date().toISOString().split('T')[0]; }
 
 function daysDiff(dateStr) {
@@ -3674,11 +3684,11 @@ async function showProfileModal({ title, subtitle, fetchUrl, icon }) {
           <div class="profile-stat-lbl">Win Rate</div>
         </div>
         <div class="profile-stat">
-          <div class="profile-stat-val" style="color:var(--success)">${fmt(stats.wonValue, 'currency')}</div>
+          <div class="profile-stat-val" style="color:#16a34a">${fmtCompact(stats.wonValue)}</div>
           <div class="profile-stat-lbl">Won Value</div>
         </div>
         <div class="profile-stat">
-          <div class="profile-stat-val">${fmt(stats.totalValue, 'currency')}</div>
+          <div class="profile-stat-val">${fmtCompact(stats.totalValue)}</div>
           <div class="profile-stat-lbl">Total Pipeline</div>
         </div>
       </div>`;

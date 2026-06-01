@@ -441,20 +441,23 @@ tbody td {
 /* ── Profile modal ── */
 .profile-stats {
   display: flex; gap: 0; flex-wrap: wrap;
-  background: var(--sidebar-hover-bg);
+  background: #f8fafc;
   border: 1px solid var(--border); border-radius: 8px;
   overflow: hidden;
 }
 .profile-stat {
-  flex: 1; min-width: 90px;
+  flex: 1; min-width: 110px;
   display: flex; flex-direction: column; align-items: center;
-  padding: 14px 8px;
+  padding: 14px 10px;
   border-right: 1px solid var(--border);
   text-align: center;
 }
 .profile-stat:last-child { border-right: none; }
-.profile-stat-val { font-size: 22px; font-weight: 900; line-height: 1; color: var(--text); }
-.profile-stat-lbl { font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); margin-top: 4px; }
+.profile-stat-val {
+  font-size: 20px; font-weight: 900; line-height: 1; color: #1e293b;
+  word-break: break-word; max-width: 100%;
+}
+.profile-stat-lbl { font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #64748b; margin-top: 4px; }
 
 /* Clickable name/company links */
 .profile-link {
