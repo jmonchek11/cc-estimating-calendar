@@ -1133,15 +1133,39 @@ async function openAnalyticsDetail(type, value, displayName) {
 // ─────────────────────────────────────────────
 // ANALYTICS PAGE
 // ─────────────────────────────────────────────
-function analyticsSinceDate(period) {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
+function analyticsDateRange(period) {
+  // Returns { since, until } — both may be null (= no bound)
+  if (period && /^Q[1-4]-\d{4}$/.test(period)) {
+    const qNum  = Number(period[1]) - 1;   // 0-indexed quarter
+    const year  = Number(period.slice(3));
+    const start = new Date(year, qNum * 3, 1);
+    const end   = new Date(year, qNum * 3 + 3, 0); // last day of quarter
+    return {
+      since: start.toISOString().split('T')[0],
+      until: end.toISOString().split('T')[0],
+    };
+  }
+  const d = new Date(); d.setHours(0,0,0,0);
   if (period === '3m')  { d.setMonth(d.getMonth() - 3); }
   else if (period === '6m')  { d.setMonth(d.getMonth() - 6); }
   else if (period === '1y')  { d.setFullYear(d.getFullYear() - 1); }
   else if (period === 'ytd') { d.setMonth(0); d.setDate(1); }
-  else return null;
-  return d.toISOString().split('T')[0];
+  else return { since: null, until: null };
+  return { since: d.toISOString().split('T')[0], until: null };
+}
+
+function buildQuarterOptions(currentPeriod) {
+  const now = new Date();
+  const opts = [];
+  for (let i = 0; i < 8; i++) {
+    let month = now.getMonth() - i * 3;
+    let year  = now.getFullYear();
+    while (month < 0) { month += 12; year--; }
+    const q = Math.floor(month / 3) + 1;
+    const val = `Q${q}-${year}`;
+    opts.push(`<option value="${val}" ${currentPeriod === val ? 'selected' : ''}>Q${q} ${year}</option>`);
+  }
+  return opts.join('');
 }
 
 async function renderAnalytics(main) {
@@ -1149,13 +1173,18 @@ async function renderAnalytics(main) {
 
   const period  = State.analyticsPeriod || 'all';
   const sortBy  = State.analyticsSort   || 'volume';
-  const since   = analyticsSinceDate(period);
-  const url     = '/api/analytics' + (since ? `?since=${encodeURIComponent(since)}` : '');
+  const { since, until } = analyticsDateRange(period);
+  const params = new URLSearchParams();
+  if (since) params.set('since', since);
+  if (until) params.set('until', until);
+  const url = '/api/analytics' + (params.toString() ? '?' + params.toString() : '');
 
   const d = await api.get(url);
-  const { overall, byCustomer, byEstimator, bySalesperson, monthlyVolume, topActivePipeline } = d;
+  const { overall, byCustomer, byEstimator, bySalesperson, monthlyVolume,
+          topActivePipeline, quarterlyTrend, awardedBids, notAwardedBids } = d;
 
   const periodLabels = { all: 'All Time', '3m': 'Last 3 Months', '6m': 'Last 6 Months', '1y': 'Last 12 Months', ytd: 'Year to Date' };
+  const periodLabel = periodLabels[period] || period.replace('-', ' ');
 
   // ── KPI values ─────────────────────────────────────────────
   const winRatePct  = Math.round((overall.win_rate || 0) * 100);
@@ -1239,19 +1268,68 @@ async function renderAnalytics(main) {
   // ── Period selector (shared HTML) ─────────────────────────
   const periodSelect = `
     <select onchange="State.analyticsPeriod=this.value;renderPage('analytics')"
-      style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:white;cursor:pointer">
+      style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--card-bg);color:var(--text);cursor:pointer">
       <option value="all" ${period==='all'?'selected':''}>All Time</option>
       <option value="ytd" ${period==='ytd'?'selected':''}>Year to Date</option>
       <option value="1y"  ${period==='1y' ?'selected':''}>Last 12 Months</option>
       <option value="6m"  ${period==='6m' ?'selected':''}>Last 6 Months</option>
       <option value="3m"  ${period==='3m' ?'selected':''}>Last 3 Months</option>
+      <optgroup label="──── By Quarter ────">${buildQuarterOptions(period)}</optgroup>
     </select>`;
+
+  // ── Quarterly trend table ──────────────────────────────────
+  const qtRows = quarterlyTrend.slice(-8).map(q => {
+    const rate = q.win_rate !== null ? Math.round(q.win_rate * 100) : null;
+    const rateColor = rate === null ? 'var(--text-muted)' : rate >= 50 ? '#16a34a' : rate >= 35 ? '#d97706' : '#dc2626';
+    const rateBar = rate !== null ? `
+      <div style="display:flex;align-items:center;gap:6px">
+        <div style="flex:1;height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden;min-width:40px">
+          <div style="height:100%;width:${rate}%;background:${rateColor};border-radius:3px"></div>
+        </div>
+        <span style="font-weight:700;color:${rateColor};font-size:12px;min-width:30px">${rate}%</span>
+      </div>` : '<span style="color:var(--text-muted)">—</span>';
+    const isCurrentPeriod = period === `Q${q.quarter}-${q.year}`;
+    return `<tr class="clickable-row${isCurrentPeriod?' row-due-soon':''}"
+               onclick="State.analyticsPeriod='Q${q.quarter}-${q.year}';renderPage('analytics')"
+               title="Click to filter to ${q.label}">
+      <td style="font-weight:${isCurrentPeriod?'700':'500'}">${q.label}</td>
+      <td style="text-align:center">${q.count}</td>
+      <td style="text-align:center;color:#16a34a;font-weight:700">${q.awarded}</td>
+      <td style="text-align:center;color:#dc2626;font-weight:700">${q.not_awarded}</td>
+      <td style="min-width:120px">${rateBar}</td>
+      <td style="text-align:right">${fmtCompact(q.awarded_value)}</td>
+      <td style="text-align:right;color:var(--text-muted)">${fmtCompact(q.total_value)}</td>
+    </tr>`;
+  }).join('');
+
+  // ── Awarded / Not Awarded bid tables ──────────────────────
+  function bidHistoryTable(bids, emptyMsg) {
+    if (!bids.length) return `<div class="empty-state" style="padding:20px 0"><div class="empty-state-desc">${emptyMsg}</div></div>`;
+    return `<div class="table-wrapper" style="margin:0">
+      <table>
+        <thead><tr>
+          <th>Project</th><th>Customer</th><th>Amount</th>
+          <th>Est.</th><th>Sales</th><th>Date</th>
+        </tr></thead>
+        <tbody>${bids.map(b => `
+          <tr class="clickable-row" onclick="openJobPanel(${b.id})">
+            <td class="td-project">${esc(b.project_name)}<small>${b.bid_number?'#'+esc(b.bid_number):''}</small></td>
+            <td class="td-customer">${esc(b.customer)||'—'}</td>
+            <td class="td-amount">${fmt(b.estimate_amount,'currency')}</td>
+            <td>${b.estimator_initials?`<span class="initials-pill">${esc(b.estimator_initials)}</span>`:'—'}</td>
+            <td>${b.salesperson_initials?`<span class="initials-pill" style="background:#dcfce7;color:#166534">${esc(b.salesperson_initials)}</span>`:'—'}</td>
+            <td style="color:var(--text-muted);font-size:12px">${fmt(b.award_date||b.date_received,'date')}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+  }
 
   main.innerHTML = `
     <div class="page-header">
       <div>
         <div class="page-title">📈 Analytics</div>
-        <div class="page-subtitle">Win rates, customer trends & pipeline intelligence · ${periodLabels[period]}</div>
+        <div class="page-subtitle">Win rates, customer trends & pipeline intelligence · ${periodLabel}</div>
       </div>
       <div style="display:flex;gap:8px;align-items:center">${periodSelect}</div>
     </div>
@@ -1346,7 +1424,7 @@ async function renderAnalytics(main) {
     </div>
 
     <!-- Charts Row -->
-    <div class="dashboard-grid">
+    <div class="dashboard-grid" style="margin-bottom:20px">
       <div class="card">
         <div class="section-title" style="margin-bottom:4px">📅 Monthly Bid Volume (Last 24 Months)</div>
         <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Bids received per month</div>
@@ -1358,6 +1436,39 @@ async function renderAnalytics(main) {
         <div class="section-title" style="margin-bottom:4px">🔵 Active Pipeline by Customer (Top 10)</div>
         <div style="font-size:11px;color:var(--text-muted);margin-bottom:12px">Current opportunities, active bids & change orders</div>
         ${pipeRows}
+      </div>
+    </div>
+
+    <!-- Quarterly trend -->
+    <div class="card" style="margin-bottom:20px">
+      <div class="section-title" style="margin-bottom:12px">📆 Quarterly Trend
+        <span style="font-size:12px;font-weight:400;color:var(--text-muted);margin-left:8px">Click any row to filter the whole page to that quarter</span>
+      </div>
+      ${qtRows ? `<div class="table-wrapper" style="margin:0"><table>
+        <thead><tr>
+          <th>Quarter</th><th style="text-align:center">Bids</th>
+          <th style="text-align:center">Won</th><th style="text-align:center">Lost</th>
+          <th>Win Rate</th><th style="text-align:right">Won Value</th><th style="text-align:right">Total Value</th>
+        </tr></thead>
+        <tbody>${qtRows}</tbody>
+      </table></div>` : '<div class="empty-state"><div class="empty-state-desc">Not enough historical data yet.</div></div>'}
+    </div>
+
+    <!-- Awarded & Not Awarded sections -->
+    <div class="dashboard-grid">
+      <div class="card">
+        <div class="section-title" style="color:#16a34a;margin-bottom:12px">
+          ✅ Awarded Projects
+          <span style="font-size:12px;font-weight:400;color:var(--text-muted);margin-left:6px">${awardedBids.length} · ${fmtCompact(awardedBids.reduce((s,b)=>s+(b.estimate_amount||0),0))} · ${periodLabel}</span>
+        </div>
+        ${bidHistoryTable(awardedBids, 'No awarded bids in this period')}
+      </div>
+      <div class="card">
+        <div class="section-title" style="color:#dc2626;margin-bottom:12px">
+          ❌ Not Awarded
+          <span style="font-size:12px;font-weight:400;color:var(--text-muted);margin-left:6px">${notAwardedBids.length} · ${fmtCompact(notAwardedBids.reduce((s,b)=>s+(b.estimate_amount||0),0))} · ${periodLabel}</span>
+        </div>
+        ${bidHistoryTable(notAwardedBids, 'No lost bids in this period')}
       </div>
     </div>`;
 }

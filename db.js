@@ -552,13 +552,17 @@ async function logFollowup(bidId, { followup_date, contacted_by, contact_method,
 
 // ── Analytics ─────────────────────────────────────────────────────────────────
 
-async function getAnalytics(since) {
+async function getAnalytics(since, until) {
   const DECIDED = ['awarded', 'not_awarded'];
   const ACTIVE   = ['opportunity', 'active_bid', 'active_co', 'follow_up'];
 
   // Base match for decided bids (optionally filtered by date_received)
   const baseDecided = { is_deleted: 0, stage: { $in: DECIDED } };
-  if (since) baseDecided.date_received = { $gte: since };
+  if (since || until) {
+    baseDecided.date_received = {};
+    if (since) baseDecided.date_received.$gte = since;
+    if (until) baseDecided.date_received.$lte = until;
+  }
 
   // Fill last 24 months for volume chart
   const volumeMonths = [];
@@ -577,6 +581,9 @@ async function getAnalytics(since) {
     bySalespersonRaw,
     rawVolume,
     topActivePipeline,
+    quarterlyTrendRaw,
+    awardedBids,
+    notAwardedBids,
   ] = await Promise.all([
 
     // Overall win/loss totals
@@ -651,6 +658,43 @@ async function getAnalytics(since) {
       { $sort: { pipeline_value: -1 } },
       { $limit: 10 },
     ]),
+
+    // Quarterly trend — last 8 quarters by date_received
+    Bid.aggregate([
+      { $match: { is_deleted: 0, stage: { $in: DECIDED },
+                  date_received: { $type: 'string', $gte: (() => {
+                    const d = new Date(); d.setMonth(d.getMonth() - 24); d.setDate(1);
+                    return d.toISOString().split('T')[0];
+                  })() } } },
+      { $addFields: {
+        _year:    { $toInt: { $substr: ['$date_received', 0, 4] } },
+        _month:   { $toInt: { $substr: ['$date_received', 5, 2] } },
+      }},
+      { $addFields: { _quarter: { $ceil: { $divide: ['$_month', 3] } } } },
+      { $group: {
+        _id:           { year: '$_year', quarter: '$_quarter' },
+        count:         { $sum: 1 },
+        awarded:       { $sum: { $cond: [{ $eq: ['$stage','awarded'] }, 1, 0] } },
+        not_awarded:   { $sum: { $cond: [{ $eq: ['$stage','not_awarded'] }, 1, 0] } },
+        awarded_value: { $sum: { $cond: [{ $eq: ['$stage','awarded'] }, { $ifNull: ['$estimate_amount',0] }, 0] } },
+        total_value:   { $sum: { $ifNull: ['$estimate_amount', 0] } },
+      }},
+      { $sort: { '_id.year': 1, '_id.quarter': 1 } },
+    ]),
+
+    // Awarded bids in period
+    Bid.aggregate([
+      { $match: Object.assign({}, baseDecided, { stage: 'awarded' }) },
+      ...BID_PIPELINE,
+      { $sort: { award_date: -1 } },
+    ]).then(r => r.map(formatBid)),
+
+    // Not-awarded bids in period
+    Bid.aggregate([
+      { $match: Object.assign({}, baseDecided, { stage: 'not_awarded' }) },
+      ...BID_PIPELINE,
+      { $sort: { updated_at: -1 } },
+    ]).then(r => r.map(formatBid)),
   ]);
 
   // Resolve team members for estimator/salesperson lookups
@@ -706,6 +750,19 @@ async function getAnalytics(since) {
     bySalesperson: formatPersonRates(bySalespersonRaw, ['salesperson', 'estimator/pm']),
     monthlyVolume,
     topActivePipeline,
+    quarterlyTrend: quarterlyTrendRaw.map(q => ({
+      label:        `Q${q._id.quarter} ${q._id.year}`,
+      year:          q._id.year,
+      quarter:       q._id.quarter,
+      count:         q.count,
+      awarded:       q.awarded,
+      not_awarded:   q.not_awarded,
+      win_rate:      (q.awarded + q.not_awarded) > 0 ? q.awarded / (q.awarded + q.not_awarded) : null,
+      awarded_value: q.awarded_value,
+      total_value:   q.total_value,
+    })),
+    awardedBids,
+    notAwardedBids,
   };
 }
 

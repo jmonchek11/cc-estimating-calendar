@@ -281,7 +281,7 @@ app.get('/api/my-stats', async (req, res) => {
 
 // ── ANALYTICS ─────────────────────────────────────────────────────────────────
 app.get('/api/analytics', async (req, res) => {
-  try { res.json(await db.getAnalytics(req.query.since || null)); }
+  try { res.json(await db.getAnalytics(req.query.since || null, req.query.until || null)); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
