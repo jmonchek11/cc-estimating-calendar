@@ -2145,37 +2145,63 @@ const CHECKLIST = [
 
 const CHECKLIST_TOTAL = CHECKLIST.reduce((s, sec) => s + sec.items.length, 0);
 
+function parseChecklist(raw) {
+  const checked = new Set(), na = new Set();
+  (raw || []).forEach(id => id.startsWith('na:') ? na.add(id.slice(3)) : checked.add(id));
+  return { checked, na };
+}
+
+function clPct(checked, na) {
+  const denom = CHECKLIST_TOTAL - na.size;
+  return denom > 0 ? checked.size / denom : 1;
+}
+
+function clSummaryText(checked, na) {
+  const denom = CHECKLIST_TOTAL - na.size;
+  const pct   = Math.round(clPct(checked, na) * 100);
+  return `${checked.size}/${denom} · ${pct}%${na.size ? ` · ${na.size} N/A` : ''}`;
+}
+
 function renderChecklistSection(bid) {
-  const checked = new Set(bid.checklist || []);
-  const totalChecked = checked.size;
-  const pct = Math.round(totalChecked / CHECKLIST_TOTAL * 100);
-  const isCO = !!bid.job_number; // Change orders still get checklist but it's less relevant
+  const { checked, na } = parseChecklist(bid.checklist);
+  const pct = Math.round(clPct(checked, na) * 100);
 
   const sections = CHECKLIST.map(sec => {
-    const secChecked = sec.items.filter(i => checked.has(i.id)).length;
+    const secDone = sec.items.filter(i => checked.has(i.id)).length;
+    const secNA   = sec.items.filter(i => na.has(i.id)).length;
+    const secDenom = sec.items.length - secNA;
     return `
       <div class="cl-section">
         <div class="cl-section-hdr">
           <span class="cl-section-name">${esc(sec.label)}</span>
-          <span class="cl-section-count">${secChecked}/${sec.items.length}</span>
+          <span class="cl-section-count">${secDone}/${secDenom}${secNA ? ` · ${secNA} N/A` : ''}</span>
         </div>
-        ${sec.items.map(item => `
-          <label class="cl-item${checked.has(item.id) ? ' cl-item-done' : ''}">
+        ${sec.items.map(item => {
+          const isChecked = checked.has(item.id);
+          const isNA      = na.has(item.id);
+          const state     = isChecked ? 'checked' : isNA ? 'na' : '';
+          return `
+          <div class="cl-item${isChecked ? ' cl-item-done' : isNA ? ' cl-item-na' : ''}"
+               data-bid-id="${bid.id}" data-item-id="${item.id}" data-state="${state}">
             <input type="checkbox" class="cl-checkbox"
-                   data-bid-id="${bid.id}" data-item-id="${item.id}"
-                   ${checked.has(item.id) ? 'checked' : ''}
-                   onchange="toggleChecklistItem(this)" />
+                   ${isChecked ? 'checked' : ''} ${isNA ? 'disabled' : ''}
+                   onchange="toggleChecklistItem(this,${bid.id},'${item.id}')" />
             <span class="cl-item-label">${esc(item.label)}</span>
-          </label>`).join('')}
+            ${isNA
+              ? `<span class="cl-na-tag" onclick="toggleChecklistNA(event,${bid.id},'${item.id}')">N/A</span>`
+              : `<button class="cl-na-btn" type="button"
+                         onclick="toggleChecklistNA(event,${bid.id},'${item.id}')">N/A</button>`}
+          </div>`;
+        }).join('')}
       </div>`;
   }).join('');
 
   return `
     <div class="jp-section" id="cl-section-${bid.id}">
       <div class="cl-header" onclick="toggleChecklistOpen(${bid.id})">
-        <div>
+        <div style="flex:1;min-width:0">
           <div class="jp-section-title" style="margin:0">Bid Checklist
-            <span class="cl-summary">${totalChecked}/${CHECKLIST_TOTAL} · ${pct}%</span>
+            <span class="cl-summary" id="cl-summary-${bid.id}">${clSummaryText(checked, na)}</span>
           </div>
           <div class="cl-progress-bar-wrap">
             <div class="cl-progress-bar-fill" id="cl-bar-${bid.id}" style="width:${pct}%"></div>
@@ -2200,37 +2226,88 @@ function toggleChecklistOpen(bidId) {
 
 let _clSaveTimer = null;
 
-async function toggleChecklistItem(checkbox) {
-  const bidId  = Number(checkbox.dataset.bidId);
-  const itemId = checkbox.dataset.itemId;
-  const checked = checkbox.checked;
+// Collect current checklist array from DOM state for a given bid
+function getChecklistFromDOM(bidId) {
+  const items = document.querySelectorAll(`.cl-item[data-bid-id="${bidId}"]`);
+  const result = [];
+  items.forEach(el => {
+    const state  = el.dataset.state;
+    const itemId = el.dataset.itemId;
+    if (state === 'checked') result.push(itemId);
+    if (state === 'na')      result.push('na:' + itemId);
+  });
+  return result;
+}
 
-  // Update label style instantly
-  const label = checkbox.closest('.cl-item');
-  if (label) label.classList.toggle('cl-item-done', checked);
-
-  // Collect all currently checked items for this bid from the DOM
-  const allCheckboxes = document.querySelectorAll(`.cl-checkbox[data-bid-id="${bidId}"]`);
-  const checklist = Array.from(allCheckboxes).filter(cb => cb.checked).map(cb => cb.dataset.itemId);
-  const pct = Math.round(checklist.length / CHECKLIST_TOTAL * 100) / 100;
-
-  // Update the summary and bar immediately
-  const sectionEl = document.getElementById(`cl-section-${bidId}`);
-  const summaryEl = sectionEl?.querySelector('.cl-summary');
+function updateChecklistUI(bidId) {
+  const items   = document.querySelectorAll(`.cl-item[data-bid-id="${bidId}"]`);
+  const checked = new Set(), na = new Set();
+  items.forEach(el => {
+    if (el.dataset.state === 'checked') checked.add(el.dataset.itemId);
+    if (el.dataset.state === 'na')      na.add(el.dataset.itemId);
+  });
+  const pct = clPct(checked, na);
+  const summaryEl = document.getElementById(`cl-summary-${bidId}`);
   const barEl     = document.getElementById(`cl-bar-${bidId}`);
-  if (summaryEl) summaryEl.textContent = `${checklist.length}/${CHECKLIST_TOTAL} · ${Math.round(pct*100)}%`;
-  if (barEl)     barEl.style.width = `${Math.round(pct*100)}%`;
+  if (summaryEl) summaryEl.textContent = clSummaryText(checked, na);
+  if (barEl)     barEl.style.width = `${Math.round(pct * 100)}%`;
+  return { checklist: getChecklistFromDOM(bidId), pct };
+}
 
-  // Debounce the API call — save 800ms after last change
+function saveChecklist(bidId) {
   clearTimeout(_clSaveTimer);
   _clSaveTimer = setTimeout(async () => {
+    const { checklist, pct } = updateChecklistUI(bidId);
     try {
       await api.put(`/api/bids/${bidId}`, { checklist, estimate_pct_complete: pct });
-      // Update the progress bar in the panel header if visible
-      const progressEl = document.querySelector(`.jp-progress-fill[data-bid-id="${bidId}"]`);
-      if (progressEl) progressEl.style.width = `${Math.round(pct*100)}%`;
     } catch (e) { console.error('Checklist save failed:', e.message); }
   }, 800);
+}
+
+function toggleChecklistItem(checkbox, bidId, itemId) {
+  const row = checkbox.closest('.cl-item');
+  if (!row) return;
+  if (checkbox.checked) {
+    row.dataset.state = 'checked';
+    row.classList.add('cl-item-done');
+    row.classList.remove('cl-item-na');
+  } else {
+    row.dataset.state = '';
+    row.classList.remove('cl-item-done');
+  }
+  updateChecklistUI(bidId);
+  saveChecklist(bidId);
+}
+
+function toggleChecklistNA(event, bidId, itemId) {
+  event.preventDefault(); event.stopPropagation();
+  const row = document.querySelector(`.cl-item[data-bid-id="${bidId}"][data-item-id="${itemId}"]`);
+  if (!row) return;
+
+  const currentState = row.dataset.state;
+  if (currentState === 'na') {
+    // Remove N/A → back to unchecked
+    row.dataset.state = '';
+    row.classList.remove('cl-item-na');
+    // Restore checkbox + N/A button
+    const cb = row.querySelector('.cl-checkbox');
+    if (cb) { cb.checked = false; cb.disabled = false; }
+    const tag = row.querySelector('.cl-na-tag');
+    if (tag) tag.outerHTML = `<button class="cl-na-btn" type="button"
+                                       onclick="toggleChecklistNA(event,${bidId},'${itemId}')">N/A</button>`;
+  } else {
+    // Set N/A — uncheck if checked
+    const cb = row.querySelector('.cl-checkbox');
+    if (cb) { cb.checked = false; cb.disabled = true; }
+    row.dataset.state = 'na';
+    row.classList.remove('cl-item-done');
+    row.classList.add('cl-item-na');
+    const btn = row.querySelector('.cl-na-btn');
+    if (btn) btn.outerHTML = `<span class="cl-na-tag">N/A</span>`;
+  }
+
+  updateChecklistUI(bidId);
+  saveChecklist(bidId);
 }
 
 // ─────────────────────────────────────────────
