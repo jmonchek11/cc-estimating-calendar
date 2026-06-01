@@ -3395,11 +3395,57 @@ async function saveStage() {
   try {
     await api.put(`/api/bids/${bidId}`, data);
     closeStageModal();
+    if (stage === 'awarded') celebrateAward();
     const panelId = State.currentPanelBidId;
     await renderPage(State.currentPage);
     await updateBadges();
     if (panelId) openJobPanel(panelId);
   } catch (e) { alert('Error: ' + e.message); }
+}
+
+// ─────────────────────────────────────────────
+// AWARD CELEBRATION 🎉
+// ─────────────────────────────────────────────
+function celebrateAward() {
+  // Bell ring — animate the nav sidebar logo
+  const logo = document.querySelector('.logo img');
+  if (logo) {
+    logo.classList.remove('bell-ringing');
+    // Force reflow so re-adding the class retriggers the animation
+    void logo.offsetWidth;
+    logo.classList.add('bell-ringing');
+    logo.addEventListener('animationend', () => logo.classList.remove('bell-ringing'), { once: true });
+  }
+
+  // Confetti — only if the library loaded
+  if (typeof confetti !== 'function') return;
+
+  // First burst from the left
+  confetti({
+    particleCount: 80,
+    angle: 60,
+    spread: 55,
+    origin: { x: 0, y: 0.65 },
+    colors: ['#3b82f6','#16a34a','#f59e0b','#ec4899','#8b5cf6'],
+  });
+  // Second burst from the right
+  confetti({
+    particleCount: 80,
+    angle: 120,
+    spread: 55,
+    origin: { x: 1, y: 0.65 },
+    colors: ['#3b82f6','#16a34a','#f59e0b','#ec4899','#8b5cf6'],
+  });
+  // Third burst — straight up from center, delayed for drama
+  setTimeout(() => {
+    confetti({
+      particleCount: 120,
+      spread: 80,
+      startVelocity: 45,
+      origin: { x: 0.5, y: 0.7 },
+      colors: ['#fbbf24','#34d399','#60a5fa','#f472b6','#a78bfa'],
+    });
+  }, 350);
 }
 
 // ─────────────────────────────────────────────
