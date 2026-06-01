@@ -3,6 +3,7 @@
 // ─────────────────────────────────────────────
 const State = {
   team: [],
+  settings: { fu_initial_days: 3, fu_recurring_days: 7 },
   currentPage: '',
   currentUser: null,
   mineOnly: false,
@@ -1566,6 +1567,21 @@ async function renderDigest(main) {
 
   const weekRange = d.weekRange ? `${fmt(d.weekRange.from, 'date')} – ${fmt(d.weekRange.to, 'date')}` : '';
 
+  const reminderRows = (d.upcomingReminders || []).map(r => {
+    const daysAway = Math.round((new Date(r.remind_on + 'T00:00:00') - new Date()) / 86400000);
+    const label    = daysAway === 0 ? 'Today' : daysAway === 1 ? 'Tomorrow' : `in ${daysAway}d`;
+    const color    = daysAway <= 1 ? '#dc2626' : daysAway <= 7 ? '#d97706' : '#16a34a';
+    return `
+      <div style="padding:8px 0;border-bottom:1px solid var(--border);font-size:13px">
+        <div style="display:flex;align-items:baseline;gap:8px">
+          <span style="font-weight:700;color:${color};white-space:nowrap">${fmt(r.remind_on,'date')} <em style="font-weight:400">(${label})</em></span>
+          <strong>${esc(r.project_name)}</strong>
+          ${r.bid_number ? `<span style="color:var(--text-muted)">#${esc(r.bid_number)}</span>` : ''}
+        </div>
+        <div style="color:var(--text-muted);margin-top:2px">📌 ${esc(r.note)}</div>
+      </div>`;
+  }).join('');
+
   main.innerHTML = `
     <div class="page-header">
       <div>
@@ -1591,6 +1607,12 @@ async function renderDigest(main) {
           </tbody>
         </table>
       </div>
+
+      ${(d.upcomingReminders||[]).length ? `
+      <div class="digest-section">
+        <div class="digest-section-title" style="color:#d97706">📌 Upcoming Reminders (${d.upcomingReminders.length}) — Next 14 Days</div>
+        ${reminderRows}
+      </div>` : ''}
 
       <div class="digest-section">
         <div class="digest-section-title">⚠️ Overdue Follow-ups (${(d.overdueFollowups || []).length})</div>
@@ -2011,6 +2033,29 @@ async function renderSettings(main) {
 
     ${isAdmin ? `
     <div class="card" style="max-width:640px;margin-top:20px">
+      <div class="section-title">⏰ Follow-up Timelines</div>
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px">
+        Set the default number of days used to auto-suggest the next follow-up date
+        when logging a contact on a bid.
+      </p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px">
+        <div class="form-group">
+          <label class="form-label">Initial Follow-up (days after submission)</label>
+          <input class="form-input" type="number" id="s-fu-initial" min="1" max="90"
+                 value="${State.settings.fu_initial_days ?? 3}" style="width:100%" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Recurring Follow-up (days between contacts)</label>
+          <input class="form-input" type="number" id="s-fu-recurring" min="1" max="90"
+                 value="${State.settings.fu_recurring_days ?? 7}" style="width:100%" />
+        </div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="saveFollowupSettings()">Save Intervals</button>
+      <span id="s-fu-saved" style="display:none;margin-left:10px;font-size:13px;color:#16a34a">✓ Saved</span>
+    </div>` : ''}
+
+    ${isAdmin ? `
+    <div class="card" style="max-width:640px;margin-top:20px">
       <div class="section-title">📥 Import Excel File</div>
       <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px">
         Upload the latest <strong>Estimating Calendar.xlsx</strong> to sync all bids into the database.
@@ -2101,6 +2146,16 @@ async function resetMemberPassword(id, name) {
     await api.post(`/api/team/${id}/reset-password`, { temp_password: tempPw });
     alert(`Temporary password set for ${name}. They will be prompted to change it on next login.`);
   } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function saveFollowupSettings() {
+  const initial   = Number(document.getElementById('s-fu-initial')?.value) || 3;
+  const recurring = Number(document.getElementById('s-fu-recurring')?.value) || 7;
+  try {
+    State.settings = await api.put('/api/settings', { fu_initial_days: initial, fu_recurring_days: recurring });
+    const saved = document.getElementById('s-fu-saved');
+    if (saved) { saved.style.display = 'inline'; setTimeout(() => { saved.style.display = 'none'; }, 2000); }
+  } catch (e) { alert('Save failed: ' + e.message); }
 }
 
 async function toggleTeamMember(id, currentActive) {
@@ -3104,8 +3159,28 @@ async function openFollowupModal(bidId) {
   document.getElementById('fu-customer_contact').value = '';
   document.getElementById('fu-method').value = '';
 
-  const defaultFollowup = new Date(Date.now() + 3 * 86400000).toISOString().split('T')[0];
-  document.getElementById('fu-next_date').value = bid.next_followup_date || defaultFollowup;
+  // Smart follow-up default based on company settings
+  const s = State.settings || {};
+  const initialDays    = s.fu_initial_days    ?? 3;
+  const recurringDays  = s.fu_recurring_days  ?? 7;
+  // Use initial interval if bid was just submitted and has no follow-up set yet;
+  // otherwise use recurring interval
+  const isFirstFollowup = bid.date_estimate_sent && !bid.next_followup_date;
+  const daysToAdd = isFirstFollowup ? initialDays : recurringDays;
+  const smartDefault = new Date(Date.now() + daysToAdd * 86400000).toISOString().split('T')[0];
+  document.getElementById('fu-next_date').value = smartDefault;
+
+  // Populate quick-pick buttons
+  const quickPickEl = document.getElementById('fu-quick-picks');
+  if (quickPickEl) {
+    const picks = [3, 7, 14, 30];
+    quickPickEl.innerHTML = picks.map(d => {
+      const date = new Date(Date.now() + d * 86400000).toISOString().split('T')[0];
+      return `<button type="button" class="btn btn-ghost btn-sm fu-quick-btn"
+                      onclick="document.getElementById('fu-next_date').value='${date}'">+${d}d</button>`;
+    }).join('')
+      + `<span style="font-size:11px;color:var(--text-muted);margin-left:4px">suggested: +${daysToAdd}d</span>`;
+  }
 
   populateTeamDropdownSingle('fu-contacted_by');
   // Auto-select current user as "Contacted By"
@@ -3697,6 +3772,7 @@ function renderJobPanelContent(bid, followups, contacts = []) {
       </div>
     </div>
     ${contactsSection}
+    ${renderRemindersSection(bid)}
     ${detailFields ? `<div class="jp-section"><div class="jp-section-title">Details</div>${detailFields}</div>` : ''}
     ${dateFields ? `<div class="jp-section"><div class="jp-section-title">Dates</div>${dateFields}</div>` : ''}
     ${progressSection}
@@ -3704,6 +3780,89 @@ function renderJobPanelContent(bid, followups, contacts = []) {
     ${notesSection}
     ${awardSection}
     ${followupHistory}`;
+}
+
+// ── Bid Reminders ────────────────────────────────────────────────────────────
+
+function renderRemindersSection(bid) {
+  const reminders = (bid.reminders || []).sort((a, b) => a.remind_on.localeCompare(b.remind_on));
+  const cards = reminders.map(r => {
+    const daysAway = Math.round((new Date(r.remind_on + 'T00:00:00') - new Date()) / 86400000);
+    const isPast   = daysAway < 0;
+    const isToday  = daysAway === 0;
+    const isSoon   = daysAway <= 7;
+    const color    = isPast || isToday ? '#dc2626' : isSoon ? '#d97706' : '#16a34a';
+    const label    = isPast ? `${Math.abs(daysAway)}d ago` : isToday ? 'Today' : `in ${daysAway}d`;
+    return `
+      <div class="jp-reminder-card">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12px;font-weight:700;color:${color};margin-bottom:2px">
+            📅 ${fmt(r.remind_on, 'date')} <span style="font-weight:400;opacity:.8">(${label})</span>
+          </div>
+          <div style="font-size:13px;color:var(--text)">${esc(r.note)}</div>
+        </div>
+        <button class="btn btn-ghost btn-sm" style="color:var(--text-muted);flex-shrink:0"
+                onclick="deleteReminderFromPanel(${bid.id},'${r.rid}')" title="Remove">✕</button>
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="jp-section">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div class="jp-section-title" style="margin:0">📌 Reminders${reminders.length ? ` (${reminders.length})` : ''}</div>
+        <button class="btn btn-ghost btn-sm" onclick="toggleAddReminder(${bid.id})">+ Add</button>
+      </div>
+      <div id="jp-reminders-list-${bid.id}">
+        ${cards || '<div style="font-size:13px;color:var(--text-muted)">No reminders set.</div>'}
+      </div>
+      <div id="jp-add-reminder-${bid.id}" style="display:none;margin-top:10px;padding:10px;background:#f8fafc;border-radius:6px;border:1px solid var(--border)">
+        <div class="form-group" style="margin-bottom:8px">
+          <label class="form-label">Reminder Date</label>
+          <input type="date" class="form-input" id="jp-rem-date-${bid.id}" />
+        </div>
+        <div class="form-group" style="margin-bottom:10px">
+          <label class="form-label">Note</label>
+          <input type="text" class="form-input" id="jp-rem-note-${bid.id}"
+                 placeholder="e.g. Check for updated drawings — GC said August" />
+        </div>
+        <div style="display:flex;gap:6px;justify-content:flex-end">
+          <button class="btn btn-secondary btn-sm" onclick="toggleAddReminder(${bid.id})">Cancel</button>
+          <button class="btn btn-primary btn-sm" onclick="saveReminder(${bid.id})">Save Reminder</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function toggleAddReminder(bidId) {
+  const box = document.getElementById(`jp-add-reminder-${bidId}`);
+  if (!box) return;
+  const opening = box.style.display === 'none';
+  box.style.display = opening ? 'block' : 'none';
+  if (opening) {
+    // Default to 30 days from now
+    const d = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0];
+    const dateEl = document.getElementById(`jp-rem-date-${bidId}`);
+    if (dateEl) { dateEl.value = d; }
+    document.getElementById(`jp-rem-note-${bidId}`)?.focus();
+  }
+}
+
+async function saveReminder(bidId) {
+  const note     = document.getElementById(`jp-rem-note-${bidId}`)?.value.trim();
+  const remind_on = document.getElementById(`jp-rem-date-${bidId}`)?.value;
+  if (!note)      { alert('Please enter a note for this reminder.'); return; }
+  if (!remind_on) { alert('Please select a reminder date.'); return; }
+  try {
+    await api.post(`/api/bids/${bidId}/reminders`, { note, remind_on });
+    openJobPanel(bidId);
+  } catch (e) { alert('Failed to save reminder: ' + e.message); }
+}
+
+async function deleteReminderFromPanel(bidId, rid) {
+  try {
+    await api.del(`/api/bids/${bidId}/reminders/${rid}`);
+    openJobPanel(bidId);
+  } catch (e) { alert('Failed to remove reminder: ' + e.message); }
 }
 
 // ── Bid contact link/unlink/quick-create ─────────────────────────────────────
@@ -3987,7 +4146,10 @@ function openStageModalFromPanel() {
 // ─────────────────────────────────────────────
 async function init() {
   // Team data may return 401 if no session yet — suppress and let login refetch
-  State.team = await api.get('/api/team').catch(() => []);
+  [State.team, State.settings] = await Promise.all([
+    api.get('/api/team').catch(() => []),
+    api.get('/api/settings').catch(() => ({ fu_initial_days: 3, fu_recurring_days: 7 })),
+  ]);
   window.addEventListener('hashchange', onHashChange);
 
   // Ctrl/Cmd+K → focus global search

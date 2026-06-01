@@ -216,6 +216,36 @@ app.delete('/api/bids/:id', async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── SETTINGS ──────────────────────────────────────────────────────────────────
+app.get('/api/settings', async (req, res) => {
+  try { res.json(await db.getSettings()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/settings', async (req, res) => {
+  try {
+    const admin = await db.getMember(req.session.userId);
+    if (!admin || !admin.is_admin) return res.status(403).json({ error: 'Admin only.' });
+    res.json(await db.updateSettings(req.body));
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// ── BID REMINDERS ─────────────────────────────────────────────────────────────
+app.post('/api/bids/:id/reminders', async (req, res) => {
+  try { res.json(await db.addReminder(req.params.id, req.body)); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.put('/api/bids/:id/reminders/:rid/dismiss', async (req, res) => {
+  try { res.json(await db.dismissReminder(req.params.id, req.params.rid)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/bids/:id/reminders/:rid', async (req, res) => {
+  try { res.json(await db.deleteReminder(req.params.id, req.params.rid)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── CONTACT & COMPANY PROFILES ───────────────────────────────────────────────
 app.get('/api/contacts/:id/bids', async (req, res) => {
   try { res.json(await db.getContactBids(req.params.id)); }

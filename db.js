@@ -5,6 +5,7 @@ const TeamMember = require('./models/TeamMember');
 const Bid = require('./models/Bid');
 const Followup = require('./models/Followup');
 const Contact = require('./models/Contact');
+const Settings = require('./models/Settings');
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -76,6 +77,11 @@ function formatBid(b) {
     sub_estimators: (o.sub_estimators || []).map(se => ({
       estimator_id: se.estimator_id,
       scope:        se.scope || null,
+    })),
+    reminders: (o.reminders || []).filter(r => !r.dismissed).map(r => ({
+      rid:       r.rid,
+      note:      r.note,
+      remind_on: r.remind_on,
     })),
     checklist: o.checklist ?? [],
     is_deleted: o.is_deleted ?? 0,
@@ -307,10 +313,11 @@ async function getStats() {
 }
 
 async function getDigest() {
-  const todayStr    = new Date().toISOString().split('T')[0];
-  const weekAgo     = new Date(Date.now() -  7 * 86400000).toISOString().split('T')[0];
-  const twoWeeksAgo = new Date(Date.now() - 14 * 86400000).toISOString().split('T')[0];
-  const weekAhead   = new Date(Date.now() +  7 * 86400000).toISOString().split('T')[0];
+  const todayStr      = new Date().toISOString().split('T')[0];
+  const weekAgo       = new Date(Date.now() -  7 * 86400000).toISOString().split('T')[0];
+  const twoWeeksAgo   = new Date(Date.now() - 14 * 86400000).toISOString().split('T')[0];
+  const weekAhead     = new Date(Date.now() +  7 * 86400000).toISOString().split('T')[0];
+  const twoWeeksAhead = new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0];
   const CLOSED = ['awarded', 'not_awarded', 'closed'];
 
   const [pipelineSummary, bidsForEstimators, estimators, bidsForSalespeople, salespeople,
@@ -410,6 +417,24 @@ async function getDigest() {
     overdue_followups: spMap[s._id]?.overdue_followups ?? 0,
   })).sort((a, b) => b.overdue_followups - a.overdue_followups || b.bid_count - a.bid_count);
 
+  // Upcoming reminders — undismissed, remind_on within next 14 days
+  const reminderBids = await Bid.find({
+    is_deleted: 0,
+    reminders: { $elemMatch: { dismissed: { $ne: 1 }, remind_on: { $gte: todayStr, $lte: twoWeeksAhead } } }
+  }).lean();
+  const upcomingReminders = [];
+  for (const bid of reminderBids) {
+    for (const r of (bid.reminders || [])) {
+      if (!r.dismissed && r.remind_on >= todayStr && r.remind_on <= twoWeeksAhead) {
+        upcomingReminders.push({
+          bid_id: bid._id, project_name: bid.project_name, bid_number: bid.bid_number || null,
+          rid: r.rid, note: r.note, remind_on: r.remind_on,
+        });
+      }
+    }
+  }
+  upcomingReminders.sort((a, b) => a.remind_on.localeCompare(b.remind_on));
+
   return {
     generatedAt: new Date().toISOString(),
     weekRange: { from: weekAgo, to: todayStr },
@@ -422,7 +447,53 @@ async function getDigest() {
     notAwardedThisWeek,
     upcomingDueDates,
     overdueFollowups,
+    upcomingReminders,
   };
+}
+
+// ── Settings ──────────────────────────────────────────────────────────────────
+
+async function getSettings() {
+  const doc = await Settings.findById('company').lean();
+  return doc || { _id: 'company', fu_initial_days: 3, fu_recurring_days: 7 };
+}
+
+async function updateSettings(data) {
+  const allowed = ['fu_initial_days', 'fu_recurring_days'];
+  const upd = {};
+  for (const k of allowed) {
+    if (k in data) upd[k] = Number(data[k]) || 0;
+  }
+  await Settings.findByIdAndUpdate('company', { $set: upd }, { upsert: true, new: true });
+  return getSettings();
+}
+
+// ── Bid Reminders ─────────────────────────────────────────────────────────────
+
+async function addReminder(bidId, { note, remind_on }) {
+  if (!note || !remind_on) throw new Error('note and remind_on required');
+  const rid = Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+  await Bid.updateOne(
+    { _id: Number(bidId) },
+    { $push: { reminders: { rid, note, remind_on, dismissed: 0 } }, $set: { updated_at: nowStr() } }
+  );
+  return getBid(bidId);
+}
+
+async function dismissReminder(bidId, rid) {
+  await Bid.updateOne(
+    { _id: Number(bidId), 'reminders.rid': rid },
+    { $set: { 'reminders.$.dismissed': 1, updated_at: nowStr() } }
+  );
+  return getBid(bidId);
+}
+
+async function deleteReminder(bidId, rid) {
+  await Bid.updateOne(
+    { _id: Number(bidId) },
+    { $pull: { reminders: { rid } }, $set: { updated_at: nowStr() } }
+  );
+  return getBid(bidId);
 }
 
 // ── Bids ──────────────────────────────────────────────────────────────────────
@@ -1140,6 +1211,8 @@ module.exports = {
   getFollowups, logFollowup,
   getStats, getDigest, getAnalytics,
   findOrphanEstimators, fixOrphanEstimators,
+  getSettings, updateSettings,
+  addReminder, dismissReminder, deleteReminder,
   getContactBids, getCompanyBids,
   getBidContacts, addBidContact, removeBidContact,
   getContacts, getContact, createContact, updateContact, deleteContact, importContacts,

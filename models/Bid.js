@@ -30,6 +30,7 @@ const bidSchema = new mongoose.Schema({
   status: { type: String, default: 'Open' },
   next_followup_date: { type: String, default: null },
   sub_estimators:    { type: [{ estimator_id: Number, scope: String }], default: [] },
+  reminders:         { type: [{ rid: String, note: String, remind_on: String, dismissed: { type: Number, default: 0 } }], default: [] },
   customer_contacts: { type: [{ customer_name: String, contact_id: Number }], default: [] },
   checklist: { type: [String], default: [] },
   is_deleted: { type: Number, default: 0 },
