@@ -2123,11 +2123,11 @@ function buildCalendarGrid(year, month, bids, filterType) {
     const chips = shown.map(({ bid, type }) => {
       if (type === 'due') {
         const c = estimatorColor(bid.estimator_id);
-        // hex → rgba at 25% opacity for readable background fill
-        const bg = c + '40';
+        // hex color at 65% opacity — dark enough for white text to pop
+        const bg = c + 'a6';
         return `<div class="cal-chip" style="background:${bg};border-left-color:${c}">
           <span class="cal-chip-txt">${esc(bid.project_name)}</span>
-          ${bid.estimator_initials ? `<span class="cal-chip-ini" style="color:${c}">${esc(bid.estimator_initials)}</span>` : ''}
+          ${bid.estimator_initials ? `<span class="cal-chip-ini" style="color:#fff">${esc(bid.estimator_initials)}</span>` : ''}
         </div>`;
       }
       return `<div class="cal-chip cal-chip-fu">
