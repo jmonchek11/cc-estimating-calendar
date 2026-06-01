@@ -185,7 +185,7 @@ async function getMyStats(userId) {
     Bid.aggregate([
       { $match: {
         is_deleted: 0,
-        $or: [{ estimator_id: uid }, { salesperson_id: uid }],
+        $or: [{ estimator_id: uid }, { salesperson_id: uid }, { 'sub_estimators.estimator_id': uid }],
         stage: { $nin: CLOSED }
       }},
       { $group: {
@@ -199,7 +199,7 @@ async function getMyStats(userId) {
     Bid.aggregate([
       { $match: {
         is_deleted: 0,
-        $or: [{ estimator_id: uid }, { salesperson_id: uid }],
+        $or: [{ estimator_id: uid }, { salesperson_id: uid }, { 'sub_estimators.estimator_id': uid }],
         next_followup_date: { $type: 'string', $lt: todayStr },
         stage: { $nin: CLOSED }
       }},
@@ -210,7 +210,7 @@ async function getMyStats(userId) {
     Bid.aggregate([
       { $match: {
         is_deleted: 0,
-        $or: [{ estimator_id: uid }, { salesperson_id: uid }],
+        $or: [{ estimator_id: uid }, { salesperson_id: uid }, { 'sub_estimators.estimator_id': uid }],
         estimate_due_date: { $gte: todayStr, $lte: weekAhead },
         stage: { $in: ['opportunity', 'active_bid', 'active_co'] }
       }},
@@ -221,7 +221,7 @@ async function getMyStats(userId) {
     Bid.aggregate([
       { $match: {
         is_deleted: 0,
-        $or: [{ estimator_id: uid }, { salesperson_id: uid }],
+        $or: [{ estimator_id: uid }, { salesperson_id: uid }, { 'sub_estimators.estimator_id': uid }],
         stage: { $nin: CLOSED }
       }},
       { $sort: { updated_at: -1 } },
