@@ -3168,36 +3168,57 @@ function renderJobPanelContent(bid, followups, contacts = []) {
         </div>`).join('')}
     </div>` : '';
 
-  // ── Customer Contacts section ─────────────────────────────────────────────
-  const contactCards = contacts.map(c => `
-    <div class="jp-contact-card">
-      <div class="jp-contact-info">
-        <div class="jp-contact-name">${esc(c.full_name)}</div>
-        ${c.company ? `<div class="jp-contact-co">${esc(c.company)}</div>` : ''}
-        <div class="jp-contact-meta">
-          ${c.phone ? `<a href="tel:${esc(c.phone)}" style="color:var(--text-muted)">${fmtPhone(c.phone)}</a>` : ''}
-          ${c.phone && c.email ? ' · ' : ''}
-          ${c.email ? `<a href="mailto:${esc(c.email)}" style="color:var(--primary)">${esc(c.email)}</a>` : ''}
+  // ── Customer Contacts section — one slot per customer ─────────────────────
+  const customers = [bid.customer, bid.customer2, bid.customer3, bid.customer4, bid.customer5].filter(Boolean);
+
+  // Build a lookup: customer_name → [linked contacts]
+  const contactsByCustomer = {};
+  contacts.forEach(({ customer_name, contact }) => {
+    if (!contactsByCustomer[customer_name]) contactsByCustomer[customer_name] = [];
+    contactsByCustomer[customer_name].push(contact);
+  });
+
+  const customerRows = customers.map(custName => {
+    const linked = contactsByCustomer[custName] || [];
+    const linkedCards = linked.map(c => `
+      <div class="jp-contact-card">
+        <div class="jp-contact-info">
+          <div class="jp-contact-name">${esc(c.full_name)}</div>
+          <div class="jp-contact-meta">
+            ${c.phone ? `<a href="tel:${esc(c.phone)}" class="jp-contact-link">${fmtPhone(c.phone)}</a>` : ''}
+            ${c.phone && c.email ? ' &nbsp;·&nbsp; ' : ''}
+            ${c.email ? `<a href="mailto:${esc(c.email)}" class="jp-contact-link" style="color:var(--primary)">${esc(c.email)}</a>` : ''}
+          </div>
         </div>
-      </div>
-      <button class="btn btn-ghost btn-sm" style="color:var(--text-muted)"
-              onclick="unlinkBidContact(${bid.id},${c.id})" title="Remove">✕</button>
-    </div>`).join('');
+        <button class="btn btn-ghost btn-sm" style="flex-shrink:0;color:var(--text-muted)"
+                onclick="unlinkBidContact(${bid.id},'${esc(custName)}',${c.id})" title="Remove">✕</button>
+      </div>`).join('');
+
+    const searchId = `jp-search-${bid.id}-${btoa(encodeURIComponent(custName)).replace(/[^a-z0-9]/gi,'')}`;
+    return `
+      <div class="jp-customer-block">
+        <div class="jp-customer-header">
+          <span class="jp-customer-name">${esc(custName)}</span>
+          <button class="btn btn-ghost btn-sm" onclick="toggleLinkSearch('${searchId}',${bid.id},'${esc(custName)}')">
+            ${linked.length ? '+ Add' : '+ Link Contact'}
+          </button>
+        </div>
+        ${linkedCards || '<div class="jp-no-contact">No contact linked</div>'}
+        <div id="${searchId}" style="display:none;margin-top:8px">
+          <input type="text" class="form-input" style="margin-bottom:6px"
+                 placeholder="Search by name, company, email…"
+                 oninput="filterLinkSearch(this,'${searchId}-results',${bid.id},'${esc(custName)}')" />
+          <div id="${searchId}-results" class="jp-ct-results-box"></div>
+        </div>
+      </div>`;
+  }).join('');
 
   const contactsSection = `
     <div class="jp-section">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-        <div class="jp-section-title" style="margin:0">Customer Contacts${contacts.length ? ` (${contacts.length})` : ''}</div>
-        <button class="btn btn-ghost btn-sm" onclick="showLinkContactSearch(${bid.id})">+ Link Contact</button>
-      </div>
-      <div id="jp-contacts-list">
-        ${contactCards || '<div style="font-size:13px;color:var(--text-muted)">No contacts linked yet.</div>'}
-      </div>
-      <div id="jp-contact-search" style="display:none;margin-top:10px">
-        <input id="jp-ct-input" type="text" class="form-input" placeholder="Search contacts by name, company, email…"
-               oninput="filterLinkSearch(${bid.id})" style="margin-bottom:6px" />
-        <div id="jp-ct-results" style="max-height:180px;overflow-y:auto;border:1px solid var(--border);border-radius:6px"></div>
-      </div>
+      <div class="jp-section-title">Customer Contacts</div>
+      ${customers.length
+        ? customerRows
+        : '<div style="font-size:13px;color:var(--text-muted)">No customers on this bid yet.</div>'}
     </div>`;
 
   return `
@@ -3218,60 +3239,140 @@ function renderJobPanelContent(bid, followups, contacts = []) {
     ${followupHistory}`;
 }
 
-// ── Bid contact link/unlink ───────────────────────────────────────────────────
+// ── Bid contact link/unlink/quick-create ─────────────────────────────────────
 let _allContactsForSearch = null; // lazy-loaded once
 
-async function showLinkContactSearch(bidId) {
-  const box = document.getElementById('jp-contact-search');
+async function ensureContactsLoaded() {
+  if (!_allContactsForSearch) _allContactsForSearch = await api.get('/api/contacts');
+}
+
+async function toggleLinkSearch(searchId, bidId, customerName) {
+  const box = document.getElementById(searchId);
   if (!box) return;
-  const visible = box.style.display !== 'none';
-  box.style.display = visible ? 'none' : 'block';
-  if (!visible) {
-    document.getElementById('jp-ct-input')?.focus();
-    if (!_allContactsForSearch) {
-      _allContactsForSearch = await api.get('/api/contacts');
-    }
-    filterLinkSearch(bidId);
+  const opening = box.style.display === 'none';
+  box.style.display = opening ? 'block' : 'none';
+  if (opening) {
+    await ensureContactsLoaded();
+    const input = box.querySelector('input');
+    if (input) { input.value = ''; input.focus(); }
+    renderLinkResults(searchId + '-results', bidId, customerName, '');
   }
 }
 
-function filterLinkSearch(bidId) {
-  const q = (document.getElementById('jp-ct-input')?.value || '').toLowerCase();
-  const results = document.getElementById('jp-ct-results');
+function filterLinkSearch(inputEl, resultsId, bidId, customerName) {
+  const q = (inputEl?.value || '').toLowerCase();
+  renderLinkResults(resultsId, bidId, customerName, q);
+}
+
+function renderLinkResults(resultsId, bidId, customerName, q) {
+  const results = document.getElementById(resultsId);
   if (!results || !_allContactsForSearch) return;
 
-  const matches = _allContactsForSearch
-    .filter(c =>
-      (c.full_name  || '').toLowerCase().includes(q) ||
-      (c.company    || '').toLowerCase().includes(q) ||
-      (c.email      || '').toLowerCase().includes(q)
-    ).slice(0, 20);
+  const matches = _allContactsForSearch.filter(c =>
+    (c.full_name || '').toLowerCase().includes(q) ||
+    (c.company   || '').toLowerCase().includes(q) ||
+    (c.email     || '').toLowerCase().includes(q)
+  ).slice(0, 15);
 
-  if (!matches.length) {
-    results.innerHTML = '<div style="padding:10px 12px;font-size:13px;color:var(--text-muted)">No contacts found.</div>';
-    return;
-  }
-  results.innerHTML = matches.map(c => `
-    <div class="jp-ct-result" onclick="linkBidContact(${bidId},${c.id})">
+  const rows = matches.map(c => `
+    <div class="jp-ct-result" onclick="linkBidContact(${bidId},'${esc(customerName)}',${c.id})">
       <div style="font-weight:600;font-size:13px">${esc(c.full_name)}</div>
       <div style="font-size:12px;color:var(--text-muted)">
-        ${c.company ? esc(c.company) + (c.email ? ' · ' : '') : ''}${c.email ? esc(c.email) : ''}
+        ${[c.company, c.email].filter(Boolean).map(esc).join(' · ')}
       </div>
     </div>`).join('');
+
+  // Always show "+ Create new contact" at the bottom
+  const createBtn = `
+    <div class="jp-ct-create" onclick="showQuickCreateContact('${esc(customerName)}',${bidId})">
+      <span style="font-size:16px;font-weight:700">+</span>
+      Create new contact${q ? ` for "${esc(q)}"` : ''}
+    </div>`;
+
+  results.innerHTML = rows + createBtn;
 }
 
-async function linkBidContact(bidId, contactId) {
+async function linkBidContact(bidId, customerName, contactId) {
   try {
-    await api.post(`/api/bids/${bidId}/contacts`, { contact_id: contactId });
-    openJobPanel(bidId); // refresh panel
+    await api.post(`/api/bids/${bidId}/contacts`, { customer_name: customerName, contact_id: contactId });
+    _allContactsForSearch = null; // refresh cache next time
+    openJobPanel(bidId);
   } catch (e) { alert('Failed to link: ' + e.message); }
 }
 
-async function unlinkBidContact(bidId, contactId) {
+async function unlinkBidContact(bidId, customerName, contactId) {
   try {
-    await api.del(`/api/bids/${bidId}/contacts/${contactId}`);
-    openJobPanel(bidId); // refresh panel
+    await api.post(`/api/bids/${bidId}/contacts/unlink`, { customer_name: customerName, contact_id: contactId });
+    openJobPanel(bidId);
   } catch (e) { alert('Failed to unlink: ' + e.message); }
+}
+
+// ── Quick-create contact from job panel ───────────────────────────────────────
+function showQuickCreateContact(customerName, bidId) {
+  // Inject a mini-form into the panel body (replaces the search area temporarily)
+  const existing = document.getElementById('jp-quick-create');
+  if (existing) existing.remove();
+
+  const div = document.createElement('div');
+  div.id = 'jp-quick-create';
+  div.style.cssText = 'position:fixed;bottom:0;right:0;width:500px;max-width:100vw;background:var(--card-bg);border-top:2px solid var(--primary);padding:20px;z-index:960;box-shadow:0 -4px 20px rgba(0,0,0,.15)';
+  div.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <strong style="font-size:14px">New Contact — ${esc(customerName)}</strong>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('jp-quick-create').remove()">✕</button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="form-group">
+        <label class="form-label">First Name*</label>
+        <input class="form-input" id="qc-first" placeholder="First" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Last Name*</label>
+        <input class="form-input" id="qc-last" placeholder="Last" />
+      </div>
+      <div class="form-group" style="grid-column:span 2">
+        <label class="form-label">Company</label>
+        <input class="form-input" id="qc-company" value="${esc(customerName)}" list="company-datalist" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Phone</label>
+        <input class="form-input" id="qc-phone" placeholder="2155551234" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Email</label>
+        <input class="form-input" id="qc-email" type="email" placeholder="email@company.com" />
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+      <button class="btn btn-secondary" onclick="document.getElementById('jp-quick-create').remove()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveQuickContact('${esc(customerName)}',${bidId})">Create &amp; Link</button>
+    </div>`;
+  document.body.appendChild(div);
+  document.getElementById('qc-first')?.focus();
+}
+
+async function saveQuickContact(customerName, bidId) {
+  const first = document.getElementById('qc-first')?.value.trim();
+  const last  = document.getElementById('qc-last')?.value.trim();
+  if (!first && !last) { alert('Enter at least a first or last name.'); return; }
+
+  const payload = {
+    first_name: first || null,
+    last_name:  last  || null,
+    company:    document.getElementById('qc-company')?.value.trim() || null,
+    phone:      document.getElementById('qc-phone')?.value.replace(/\D/g,'') || null,
+    email:      document.getElementById('qc-email')?.value.trim().toLowerCase() || null,
+  };
+
+  try {
+    const created = await api.post('/api/contacts', payload);
+    // Add to local cache immediately
+    if (_allContactsForSearch) _allContactsForSearch.unshift(created);
+    // Link to bid
+    await api.post(`/api/bids/${bidId}/contacts`, { customer_name: customerName, contact_id: created.id });
+    document.getElementById('jp-quick-create')?.remove();
+    openJobPanel(bidId);
+  } catch (e) { alert('Failed to create contact: ' + e.message); }
 }
 
 function openBidModalFromPanel() {

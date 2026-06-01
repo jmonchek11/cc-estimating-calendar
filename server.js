@@ -224,15 +224,18 @@ app.get('/api/bids/:id/contacts', async (req, res) => {
 
 app.post('/api/bids/:id/contacts', async (req, res) => {
   try {
-    const { contact_id } = req.body;
-    if (!contact_id) return res.status(400).json({ error: 'contact_id required' });
-    res.json(await db.addBidContact(req.params.id, contact_id));
+    const { customer_name, contact_id } = req.body;
+    if (!contact_id || !customer_name) return res.status(400).json({ error: 'customer_name and contact_id required' });
+    res.json(await db.addBidContact(req.params.id, customer_name, contact_id));
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-app.delete('/api/bids/:id/contacts/:contactId', async (req, res) => {
-  try { res.json(await db.removeBidContact(req.params.id, req.params.contactId)); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+app.post('/api/bids/:id/contacts/unlink', async (req, res) => {
+  try {
+    const { customer_name, contact_id } = req.body;
+    if (!contact_id || !customer_name) return res.status(400).json({ error: 'customer_name and contact_id required' });
+    res.json(await db.removeBidContact(req.params.id, customer_name, contact_id));
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ── FOLLOW-UPS ────────────────────────────────────────────────────────────────

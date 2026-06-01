@@ -332,22 +332,42 @@ tbody td {
 .badge-bid   { background: rgba(59,130,246,.15); color: #3b82f6; border: 1px solid rgba(59,130,246,.3); font-size: 11px; font-weight: 700; }
 .badge-co    { background: rgba(251,191,36,.15);  color: #d97706; border: 1px solid rgba(251,191,36,.3); font-size: 11px; font-weight: 700; }
 
-/* ── Job panel: contact cards ── */
+/* ── Job panel: customer contact blocks ── */
+.jp-customer-block {
+  margin-bottom: 12px; padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.jp-customer-block:last-child { border-bottom: none; margin-bottom: 0; }
+.jp-customer-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 6px;
+}
+.jp-customer-name { font-size: 13px; font-weight: 700; color: var(--text); }
+.jp-no-contact { font-size: 12px; color: var(--text-muted); padding: 2px 0; }
 .jp-contact-card {
   display: flex; align-items: flex-start; justify-content: space-between;
-  padding: 8px 10px; margin-bottom: 6px;
-  background: #f8fafc; border-radius: 6px;
-  border: 1px solid var(--border);
+  padding: 7px 10px; margin-bottom: 4px;
+  background: #f8fafc; border-radius: 6px; border: 1px solid var(--border);
 }
 .jp-contact-info { flex: 1; min-width: 0; }
-.jp-contact-name { font-size: 13px; font-weight: 600; color: var(--text); }
-.jp-contact-co   { font-size: 12px; color: var(--text-muted); margin-top: 1px; }
-.jp-contact-meta { font-size: 12px; color: var(--text-muted); margin-top: 3px; }
-.jp-ct-result {
-  padding: 9px 12px; cursor: pointer; border-bottom: 1px solid var(--border);
+.jp-contact-name { font-size: 13px; font-weight: 600; color: #0f172a; }
+.jp-contact-meta { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+.jp-contact-link { color: var(--text-muted); text-decoration: none; }
+.jp-contact-link:hover { text-decoration: underline; }
+.jp-ct-results-box {
+  max-height: 200px; overflow-y: auto;
+  border: 1px solid var(--border); border-radius: 6px; background: var(--card-bg);
 }
-.jp-ct-result:last-child { border-bottom: none; }
-.jp-ct-result:hover { background: var(--sidebar-hover-bg); }
+.jp-ct-result {
+  padding: 8px 12px; cursor: pointer; border-bottom: 1px solid var(--border);
+}
+.jp-ct-result:hover { background: #f1f5f9; }
+.jp-ct-create {
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 12px; cursor: pointer; color: var(--primary);
+  font-size: 13px; font-weight: 600; border-top: 1px solid var(--border);
+}
+.jp-ct-create:hover { background: rgba(37,99,235,.06); }
 
 /* ── Contacts page ── */
 .ct-company-name {

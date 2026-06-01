@@ -828,23 +828,36 @@ async function fixOrphanEstimators(fixes) {
 
 async function getBidContacts(bidId) {
   const bid = await Bid.findById(Number(bidId)).lean();
-  if (!bid || !bid.contact_ids?.length) return [];
-  const contacts = await Contact.find({ _id: { $in: bid.contact_ids }, is_deleted: 0 }).lean();
-  return contacts.map(fmtContact);
+  if (!bid || !bid.customer_contacts?.length) return [];
+  const ids = bid.customer_contacts.map(cc => cc.contact_id);
+  const contacts = await Contact.find({ _id: { $in: ids }, is_deleted: 0 }).lean();
+  const contactMap = {};
+  contacts.forEach(c => { contactMap[c._id] = fmtContact(c); });
+  // Return array of { customer_name, contact } preserving order
+  return bid.customer_contacts
+    .filter(cc => contactMap[cc.contact_id])
+    .map(cc => ({ customer_name: cc.customer_name, contact: contactMap[cc.contact_id] }));
 }
 
-async function addBidContact(bidId, contactId) {
+async function addBidContact(bidId, customerName, contactId) {
+  // Allow multiple contacts per customer; prevent exact duplicate
   await Bid.updateOne(
     { _id: Number(bidId) },
-    { $addToSet: { contact_ids: Number(contactId) }, $set: { updated_at: nowStr() } }
+    {
+      $addToSet: { customer_contacts: { customer_name: customerName, contact_id: Number(contactId) } },
+      $set: { updated_at: nowStr() }
+    }
   );
   return getBidContacts(bidId);
 }
 
-async function removeBidContact(bidId, contactId) {
+async function removeBidContact(bidId, customerName, contactId) {
   await Bid.updateOne(
     { _id: Number(bidId) },
-    { $pull: { contact_ids: Number(contactId) }, $set: { updated_at: nowStr() } }
+    {
+      $pull: { customer_contacts: { customer_name: customerName, contact_id: Number(contactId) } },
+      $set: { updated_at: nowStr() }
+    }
   );
   return getBidContacts(bidId);
 }
