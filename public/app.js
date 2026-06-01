@@ -3169,7 +3169,7 @@ function renderJobPanelContent(bid, followups, contacts = []) {
     </div>` : '';
 
   // ── Customer Contacts section — one slot per customer ─────────────────────
-  const customers = [bid.customer, bid.customer2, bid.customer3, bid.customer4, bid.customer5].filter(Boolean);
+  const customerList = [bid.customer, bid.customer2, bid.customer3, bid.customer4, bid.customer5].filter(Boolean);
 
   // Build a lookup: customer_name → [linked contacts]
   const contactsByCustomer = {};
@@ -3178,7 +3178,7 @@ function renderJobPanelContent(bid, followups, contacts = []) {
     contactsByCustomer[customer_name].push(contact);
   });
 
-  const customerRows = customers.map(custName => {
+  const customerRows = customerList.map(custName => {
     const linked = contactsByCustomer[custName] || [];
     const linkedCards = linked.map(c => `
       <div class="jp-contact-card">
@@ -3216,7 +3216,7 @@ function renderJobPanelContent(bid, followups, contacts = []) {
   const contactsSection = `
     <div class="jp-section">
       <div class="jp-section-title">Customer Contacts</div>
-      ${customers.length
+      ${customerList.length
         ? customerRows
         : '<div style="font-size:13px;color:var(--text-muted)">No customers on this bid yet.</div>'}
     </div>`;
