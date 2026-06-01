@@ -2059,17 +2059,17 @@ function clearContactFilters() {
 }
 
 async function renderContacts(main) {
+  // Read filter values BEFORE wiping the DOM — they live inside main
+  const search     = document.getElementById('ct-search')?.value.toLowerCase()        || '';
+  const companyVal = document.getElementById('ct-company-filter')?.value               || '';
+  const noCompany  = document.getElementById('ct-no-company-btn')?.classList.contains('active') || false;
+
   main.innerHTML = '<div class="loading-screen"><div class="spinner"></div></div>';
 
-  // Always reload from server; use cache for re-renders triggered by filters
-  const freshLoad = !_contactsCache.length ||
-    (document.getElementById('ct-search') === null);
-  if (freshLoad) _contactsCache = await api.get('/api/contacts');
+  // Only hit the API on first load; subsequent filter changes use the cache
+  if (!_contactsCache.length) _contactsCache = await api.get('/api/contacts');
 
-  const search      = document.getElementById('ct-search')?.value.toLowerCase()  || '';
-  const companyVal  = document.getElementById('ct-company-filter')?.value         || '';
-  const noCompany   = document.getElementById('ct-no-company-btn')?.classList.contains('active') || false;
-  const isAdmin     = !!State.currentUser?.is_admin;
+  const isAdmin = !!State.currentUser?.is_admin;
 
   // Client-side filter
   let contacts = _contactsCache;
