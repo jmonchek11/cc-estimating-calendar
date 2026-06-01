@@ -944,7 +944,9 @@ async function seedTeamData() {
   for (const [name, role, initials] of TEAM_NAMES) {
     const existing = await TeamMember.findOne({ initials });
     if (existing) {
-      await TeamMember.findByIdAndUpdate(existing._id, { name, role });
+      // Only update the display name — never overwrite a role that was
+      // manually changed through the Settings UI.
+      await TeamMember.findByIdAndUpdate(existing._id, { name });
     } else {
       const id = await nextId('team_members');
       await TeamMember.create({ _id: id, name, initials, role, active: 1 });
