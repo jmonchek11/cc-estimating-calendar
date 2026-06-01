@@ -218,6 +218,7 @@ async function renderPage(page) {
       case 'history':       return await renderHistory(main);
       case 'cleanup':       return await renderCleanup(main);
       case 'calendar':      return await renderCalendar(main);
+      case 'contacts':      return await renderContacts(main);
       case 'settings':      return await renderSettings(main);
       default:              return await renderDashboard(main);
     }
@@ -2027,6 +2028,324 @@ async function importExcel() {
     }
   };
   reader.readAsArrayBuffer(file);
+}
+
+// ─────────────────────────────────────────────
+// CONTACTS PAGE
+// ─────────────────────────────────────────────
+let _contactsCache = [];   // full list; filtered client-side
+let _ctDebounce    = null;
+
+function fmtPhone(p) {
+  if (!p) return '—';
+  const d = String(p).replace(/\D/g, '');
+  if (d.length === 10) return `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}`;
+  if (d.length === 11 && d[0] === '1') return `(${d.slice(1,4)}) ${d.slice(4,7)}-${d.slice(7)}`;
+  return p;
+}
+
+function refreshContacts() { renderContacts(document.getElementById('main')); }
+function debounceContacts() {
+  clearTimeout(_ctDebounce);
+  _ctDebounce = setTimeout(refreshContacts, 250);
+}
+function clearContactFilters() {
+  ['ct-search','ct-company-filter'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.value = '';
+  });
+  const nb = document.getElementById('ct-no-company-btn');
+  if (nb) nb.classList.remove('active');
+  refreshContacts();
+}
+
+async function renderContacts(main) {
+  main.innerHTML = '<div class="loading-screen"><div class="spinner"></div></div>';
+
+  // Always reload from server; use cache for re-renders triggered by filters
+  const freshLoad = !_contactsCache.length ||
+    (document.getElementById('ct-search') === null);
+  if (freshLoad) _contactsCache = await api.get('/api/contacts');
+
+  const search      = document.getElementById('ct-search')?.value.toLowerCase()  || '';
+  const companyVal  = document.getElementById('ct-company-filter')?.value         || '';
+  const noCompany   = document.getElementById('ct-no-company-btn')?.classList.contains('active') || false;
+  const isAdmin     = !!State.currentUser?.is_admin;
+
+  // Client-side filter
+  let contacts = _contactsCache;
+  if (search) {
+    contacts = contacts.filter(c =>
+      (c.full_name  || '').toLowerCase().includes(search) ||
+      (c.company    || '').toLowerCase().includes(search) ||
+      (c.email      || '').toLowerCase().includes(search) ||
+      (c.phone      || '').includes(search.replace(/\D/g,''))
+    );
+  }
+  if (companyVal) contacts = contacts.filter(c => c.company === companyVal);
+  if (noCompany)  contacts = contacts.filter(c => !c.company);
+
+  // Stats
+  const total      = _contactsCache.length;
+  const withCo     = _contactsCache.filter(c => c.company).length;
+  const withoutCo  = total - withCo;
+  const companies  = [...new Set(_contactsCache.map(c => c.company).filter(Boolean))].sort();
+
+  const coOptions  = companies.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+  // Datalist for autocomplete in add/edit
+  const datalistOpts = companies.map(c => `<option value="${esc(c)}">`).join('');
+
+  const rows = contacts.map(c => {
+    const loc = [c.city, c.state].filter(Boolean).join(', ');
+    const coBadge = c.company
+      ? `<span class="ct-company-name" onclick="editContactCompany(${c.id},event)">${esc(c.company)}</span>`
+      : `<button class="ct-assign-btn" onclick="editContactCompany(${c.id},event)">+ Assign</button>`;
+    return `
+      <tr>
+        <td class="td-project" style="cursor:pointer" onclick="openContactModal(${c.id})">
+          <strong>${esc(c.full_name || '—')}</strong>
+        </td>
+        <td id="ct-co-cell-${c.id}">${coBadge}</td>
+        <td>${fmtPhone(c.phone)}</td>
+        <td>${c.email ? `<a href="mailto:${esc(c.email)}" style="color:var(--primary)">${esc(c.email)}</a>` : '—'}</td>
+        <td style="color:var(--text-muted);font-size:13px">${esc(loc) || '—'}</td>
+        <td><div class="actions">
+          <button class="btn btn-ghost btn-sm" onclick="openContactModal(${c.id})" title="Edit">✏️</button>
+          ${isAdmin ? `<button class="btn btn-ghost btn-sm" onclick="promptDeleteContact(${c.id},'${esc(c.full_name||'')}')" title="Delete">🗑️</button>` : ''}
+        </div></td>
+      </tr>`;
+  }).join('');
+
+  main.innerHTML = `
+    <datalist id="company-datalist">${datalistOpts}</datalist>
+
+    <div class="page-header">
+      <div>
+        <div class="page-title">👥 Contacts</div>
+        <div class="page-subtitle">
+          ${total} contacts · ${withCo} with company ·
+          <button class="btn-inline-link" onclick="toggleContactNoCompany()">
+            ${withoutCo} without company
+          </button>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${isAdmin ? `<button class="btn btn-secondary" onclick="importContactsCSV()">📥 Import CSV</button>` : ''}
+        <button class="btn btn-primary" onclick="openContactModal(null)">+ Add Contact</button>
+      </div>
+    </div>
+
+    <div class="filter-bar">
+      <input type="text" id="ct-search" placeholder="Search name, email, phone, company…"
+             value="${esc(search)}" oninput="debounceContacts()" />
+      <select id="ct-company-filter" onchange="refreshContacts()">
+        <option value="">All Companies</option>
+        ${coOptions}
+      </select>
+      <button id="ct-no-company-btn" class="mine-toggle${noCompany?' active':''}"
+              onclick="toggleContactNoCompany()">
+        <span class="toggle-dot"></span> No Company
+      </button>
+      <button class="btn btn-secondary btn-sm" onclick="clearContactFilters()">Clear</button>
+    </div>
+
+    <div class="table-wrapper">
+      ${contacts.length ? `
+      <table>
+        <thead><tr>
+          <th>Name</th><th>Company</th><th>Phone</th><th>Email</th>
+          <th>Location</th><th>Actions</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>` : `
+      <div class="empty-state">
+        <div class="empty-state-icon">👥</div>
+        <div class="empty-state-title">No contacts found</div>
+        <div class="empty-state-desc">Try adjusting your filters or import a CSV.</div>
+      </div>`}
+    </div>
+
+    <!-- Add/Edit modal (hidden) -->
+    <div id="contact-modal" class="modal-overlay" style="display:none" onclick="closeContactModal(event)">
+      <div class="modal-box" style="max-width:520px">
+        <div class="modal-header">
+          <span id="contact-modal-title">Add Contact</span>
+          <button class="modal-close" onclick="closeContactModalForce()">×</button>
+        </div>
+        <div id="contact-modal-body"></div>
+      </div>
+    </div>`;
+
+  // Restore filter values after render
+  if (companyVal) document.getElementById('ct-company-filter').value = companyVal;
+  if (noCompany)  document.getElementById('ct-no-company-btn').classList.add('active');
+}
+
+function toggleContactNoCompany() {
+  const btn = document.getElementById('ct-no-company-btn');
+  if (btn) btn.classList.toggle('active');
+  refreshContacts();
+}
+
+// ── Inline company edit ───────────────────────────────────────────────────────
+function editContactCompany(id, e) {
+  e.stopPropagation();
+  const cell = document.getElementById(`ct-co-cell-${id}`);
+  if (!cell || cell.querySelector('input')) return; // already editing
+  const current = _contactsCache.find(c => c.id === id)?.company || '';
+  cell.innerHTML = `
+    <div style="display:flex;gap:4px;align-items:center">
+      <input id="ct-co-input-${id}" type="text" list="company-datalist"
+             value="${esc(current)}" placeholder="Company name…"
+             style="flex:1;font-size:13px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;background:var(--input-bg);color:var(--text)"
+             onkeydown="if(event.key==='Enter')saveContactCompany(${id});if(event.key==='Escape')refreshContacts();" />
+      <button class="btn btn-primary btn-sm" style="white-space:nowrap" onclick="saveContactCompany(${id})">Save</button>
+      <button class="btn btn-ghost btn-sm" onclick="refreshContacts()">✕</button>
+    </div>`;
+  document.getElementById(`ct-co-input-${id}`)?.focus();
+}
+
+async function saveContactCompany(id) {
+  const input = document.getElementById(`ct-co-input-${id}`);
+  if (!input) return;
+  const company = input.value.trim() || null;
+  try {
+    await api.put(`/api/contacts/${id}`, { company });
+    const idx = _contactsCache.findIndex(c => c.id === id);
+    if (idx !== -1) _contactsCache[idx].company = company;
+    refreshContacts();
+  } catch (e) { alert('Save failed: ' + e.message); }
+}
+
+// ── Add / Edit modal ──────────────────────────────────────────────────────────
+function openContactModal(id) {
+  const modal = document.getElementById('contact-modal');
+  const title = document.getElementById('contact-modal-title');
+  const body  = document.getElementById('contact-modal-body');
+  if (!modal) return;
+
+  const c = id ? (_contactsCache.find(x => x.id === id) || {}) : {};
+  title.textContent = id ? 'Edit Contact' : 'Add Contact';
+
+  body.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:20px 0 0">
+      <div>
+        <label class="form-label">First Name</label>
+        <input class="form-input" id="cm-first" value="${esc(c.first_name||'')}" placeholder="First name" />
+      </div>
+      <div>
+        <label class="form-label">Last Name</label>
+        <input class="form-input" id="cm-last" value="${esc(c.last_name||'')}" placeholder="Last name" />
+      </div>
+      <div>
+        <label class="form-label">Suffix</label>
+        <input class="form-input" id="cm-suffix" value="${esc(c.suffix||'')}" placeholder="Jr, Sr, III…" />
+      </div>
+      <div>
+        <label class="form-label">Company</label>
+        <input class="form-input" id="cm-company" list="company-datalist"
+               value="${esc(c.company||'')}" placeholder="Company name" />
+      </div>
+      <div>
+        <label class="form-label">Phone</label>
+        <input class="form-input" id="cm-phone" value="${esc(c.phone||'')}" placeholder="2155551234" />
+      </div>
+      <div>
+        <label class="form-label">Email</label>
+        <input class="form-input" id="cm-email" type="email" value="${esc(c.email||'')}" placeholder="email@company.com" />
+      </div>
+      <div>
+        <label class="form-label">City</label>
+        <input class="form-input" id="cm-city" value="${esc(c.city||'')}" placeholder="Philadelphia" />
+      </div>
+      <div>
+        <label class="form-label">State</label>
+        <input class="form-input" id="cm-state" value="${esc(c.state||'')}" placeholder="PA" />
+      </div>
+      <div style="grid-column:span 2">
+        <label class="form-label">Notes</label>
+        <textarea class="form-input" id="cm-notes" rows="2" placeholder="Any notes…">${esc(c.notes||'')}</textarea>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;padding:16px 0 4px">
+      <button class="btn btn-secondary" onclick="closeContactModalForce()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveContactModal(${id||'null'})">
+        ${id ? 'Save Changes' : 'Add Contact'}
+      </button>
+    </div>`;
+
+  modal.style.display = 'flex';
+}
+
+function closeContactModal(e) { if (e.target === e.currentTarget) closeContactModalForce(); }
+function closeContactModalForce() {
+  const m = document.getElementById('contact-modal'); if (m) m.style.display = 'none';
+}
+
+async function saveContactModal(id) {
+  const payload = {
+    first_name: document.getElementById('cm-first')?.value.trim()   || null,
+    last_name:  document.getElementById('cm-last')?.value.trim()    || null,
+    suffix:     document.getElementById('cm-suffix')?.value.trim()  || null,
+    company:    document.getElementById('cm-company')?.value.trim() || null,
+    phone:      document.getElementById('cm-phone')?.value.replace(/\D/g,'') || null,
+    email:      document.getElementById('cm-email')?.value.trim()   || null,
+    city:       document.getElementById('cm-city')?.value.trim()    || null,
+    state:      document.getElementById('cm-state')?.value.trim()   || null,
+    notes:      document.getElementById('cm-notes')?.value.trim()   || null,
+  };
+  if (!payload.first_name && !payload.last_name) {
+    alert('Please enter at least a first or last name.'); return;
+  }
+  try {
+    if (id) {
+      const updated = await api.put(`/api/contacts/${id}`, payload);
+      const idx = _contactsCache.findIndex(c => c.id === id);
+      if (idx !== -1) _contactsCache[idx] = updated;
+    } else {
+      const created = await api.post('/api/contacts', payload);
+      _contactsCache.unshift(created);
+    }
+    closeContactModalForce();
+    refreshContacts();
+  } catch (e) { alert('Save failed: ' + e.message); }
+}
+
+async function promptDeleteContact(id, name) {
+  if (!confirm(`Delete contact "${name}"? This cannot be undone.`)) return;
+  try {
+    await api.del(`/api/contacts/${id}`);
+    _contactsCache = _contactsCache.filter(c => c.id !== id);
+    refreshContacts();
+  } catch (e) { alert('Delete failed: ' + e.message); }
+}
+
+// ── CSV import (admin) ────────────────────────────────────────────────────────
+async function importContactsCSV() {
+  const input = document.createElement('input');
+  input.type = 'file'; input.accept = '.csv';
+  input.onchange = async () => {
+    const file = input.files[0];
+    if (!file) return;
+    const loadingEl = document.querySelector('.page-subtitle');
+    if (loadingEl) loadingEl.textContent = '⏳ Importing…';
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const bytes = new Uint8Array(e.target.result);
+      let binary = '', chunk = 8192;
+      for (let i = 0; i < bytes.length; i += chunk)
+        binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+      const fileData = btoa(binary);
+      try {
+        const result = await api.post('/api/admin/import-contacts', { fileData });
+        alert(`✅ Import complete\nInserted: ${result.insert}\nUpdated: ${result.update}\nSkipped: ${result.skip}${result.error ? `\nErrors: ${result.error}` : ''}`);
+        _contactsCache = [];   // force reload
+        refreshContacts();
+      } catch (err) { alert('Import failed: ' + err.message); }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+  input.click();
 }
 
 // ─────────────────────────────────────────────

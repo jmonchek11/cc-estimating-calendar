@@ -4,6 +4,7 @@ const Counter = require('./models/Counter');
 const TeamMember = require('./models/TeamMember');
 const Bid = require('./models/Bid');
 const Followup = require('./models/Followup');
+const Contact = require('./models/Contact');
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -823,6 +824,166 @@ async function fixOrphanEstimators(fixes) {
   return { fixed: count };
 }
 
+// ── Contacts ──────────────────────────────────────────────────────────────────
+
+function fmtContact(c) {
+  const parts = [c.first_name, c.last_name].filter(Boolean);
+  return {
+    id:         c._id,
+    first_name: c.first_name || null,
+    last_name:  c.last_name  || null,
+    suffix:     c.suffix     || null,
+    full_name:  parts.join(' ') + (c.suffix ? ', ' + c.suffix : ''),
+    company:    c.company    || null,
+    city:       c.city       || null,
+    state:      c.state      || null,
+    phone:      c.phone      || null,
+    email:      c.email      || null,
+    domain:     c.domain     || null,
+    notes:      c.notes      || null,
+  };
+}
+
+async function getContacts({ search, company, no_company } = {}) {
+  const conds = [{ is_deleted: 0 }];
+  if (search) {
+    const re = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    conds.push({ $or: [{ first_name: re }, { last_name: re }, { email: re }, { phone: re }, { company: re }] });
+  }
+  if (company)    conds.push({ company });
+  if (no_company === 'true') conds.push({ $or: [{ company: null }, { company: '' }, { company: { $exists: false } }] });
+  const docs = await Contact.find({ $and: conds }).sort({ last_name: 1, first_name: 1 }).lean();
+  return docs.map(fmtContact);
+}
+
+async function getContact(id) {
+  const c = await Contact.findOne({ _id: Number(id), is_deleted: 0 }).lean();
+  return c ? fmtContact(c) : null;
+}
+
+async function createContact(data) {
+  const id = await nextId('contacts');
+  const now = nowStr();
+  const clean = {
+    first_name: data.first_name || null,
+    last_name:  data.last_name  || null,
+    suffix:     data.suffix     || null,
+    company:    data.company    || null,
+    city:       data.city       || null,
+    state:      data.state      || null,
+    phone:      data.phone      || null,
+    email:      data.email ? String(data.email).toLowerCase().trim() : null,
+    domain:     data.domain     || null,
+    notes:      data.notes      || null,
+  };
+  const doc = await Contact.create({ _id: id, ...clean, active: 1, is_deleted: 0, created_at: now, updated_at: now });
+  return fmtContact(doc);
+}
+
+async function updateContact(id, data) {
+  const now = nowStr();
+  const allowed = ['first_name','last_name','suffix','company','city','state','phone','email','domain','notes','active'];
+  const upd = { updated_at: now };
+  for (const k of allowed) {
+    if (Object.prototype.hasOwnProperty.call(data, k)) {
+      upd[k] = (k === 'email' && data[k]) ? String(data[k]).toLowerCase().trim() : (data[k] ?? null);
+    }
+  }
+  await Contact.updateOne({ _id: Number(id) }, { $set: upd });
+  return getContact(id);
+}
+
+async function deleteContact(id) {
+  await Contact.updateOne({ _id: Number(id) }, { $set: { is_deleted: 1, updated_at: nowStr() } });
+}
+
+// ── CSV parser (handles quoted commas) ───────────────────────────────────────
+function parseCSVLine(line) {
+  const result = [];
+  let cur = '', inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQ && line[i + 1] === '"') { cur += '"'; i++; }
+      else inQ = !inQ;
+    } else if (ch === ',' && !inQ) { result.push(cur); cur = ''; }
+    else if (ch !== '\r') { cur += ch; }
+  }
+  result.push(cur);
+  return result;
+}
+
+function parseContactCSV(content) {
+  const lines = content.split('\n').filter(l => l.trim());
+  const headers = parseCSVLine(lines[0]).map(h => h.trim().toLowerCase());
+  return lines.slice(1).map(line => {
+    const vals = parseCSVLine(line);
+    const obj = {};
+    headers.forEach((h, i) => { obj[h] = (vals[i] || '').trim(); });
+    return obj;
+  }).filter(r => headers.some(h => r[h]));
+}
+
+async function importContacts(buffer) {
+  const content = buffer.toString('utf-8');
+  const rows = parseContactCSV(content);
+  const stats = { insert: 0, update: 0, skip: 0, error: 0, errors: [] };
+  const now = nowStr();
+
+  // Build lookup maps from existing contacts
+  const existing = await Contact.find({ is_deleted: 0 }).lean();
+  const byEmail = {}, byName = {};
+  existing.forEach(c => {
+    if (c.email) byEmail[c.email.toLowerCase()] = c._id;
+    const nk = `${(c.first_name||'').toLowerCase()}|${(c.last_name||'').toLowerCase()}`;
+    if (nk !== '|') byName[nk] = c._id;
+  });
+
+  for (const row of rows) {
+    try {
+      const s = v => { const t = (v||'').trim(); return (t && t !== 'N/A') ? t : null; };
+      const data = {
+        first_name: s(row.first_name),
+        last_name:  s(row.last_name),
+        suffix:     s(row.suffix),
+        company:    s(row.company),
+        city:       s(row.city),
+        state:      s(row.state),
+        phone:      s(row.phone) ? String(row.phone).replace(/\D/g, '') || null : null,
+        email:      s(row.email) ? s(row.email).toLowerCase() : null,
+        domain:     s(row.domain),
+      };
+
+      if (!data.first_name && !data.last_name && !data.email) { stats.skip++; continue; }
+
+      let existId = null;
+      if (data.email) existId = byEmail[data.email] ?? null;
+      if (!existId) {
+        const nk = `${(data.first_name||'').toLowerCase()}|${(data.last_name||'').toLowerCase()}`;
+        if (nk !== '|') existId = byName[nk] ?? null;
+      }
+
+      if (existId) {
+        const upd = { updated_at: now };
+        for (const [k, v] of Object.entries(data)) { if (v !== null) upd[k] = v; }
+        await Contact.updateOne({ _id: existId }, { $set: upd });
+        stats.update++;
+      } else {
+        const id = await nextId('contacts');
+        await Contact.create({ _id: id, ...data, active: 1, is_deleted: 0, created_at: now, updated_at: now });
+        stats.insert++;
+        if (data.email) byEmail[data.email] = id;
+        const nk = `${(data.first_name||'').toLowerCase()}|${(data.last_name||'').toLowerCase()}`;
+        if (nk !== '|') byName[nk] = id;
+      }
+    } catch (e) {
+      stats.error++;
+      stats.errors.push({ name: `${row.first_name || ''} ${row.last_name || ''}`.trim(), message: e.message });
+    }
+  }
+  return stats;
+}
+
 module.exports = {
   getTeam, getAllTeam, createTeamMember, updateTeamMember,
   loginUser, getMember, setPassword, adminSetTempPassword, getMyStats,
@@ -830,5 +991,6 @@ module.exports = {
   getFollowups, logFollowup,
   getStats, getDigest, getAnalytics,
   findOrphanEstimators, fixOrphanEstimators,
+  getContacts, getContact, createContact, updateContact, deleteContact, importContacts,
   seedTeamData,
 };

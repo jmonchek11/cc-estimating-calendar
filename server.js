@@ -249,6 +249,38 @@ app.get('/api/analytics', async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── CONTACTS ──────────────────────────────────────────────────────────────────
+app.get('/api/contacts', async (req, res) => {
+  try { res.json(await db.getContacts(req.query)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/contacts', async (req, res) => {
+  try { res.json(await db.createContact(req.body)); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.get('/api/contacts/:id', async (req, res) => {
+  try {
+    const c = await db.getContact(req.params.id);
+    c ? res.json(c) : res.status(404).json({ error: 'Not found' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/contacts/:id', async (req, res) => {
+  try { res.json(await db.updateContact(req.params.id, req.body)); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.delete('/api/contacts/:id', async (req, res) => {
+  try {
+    const admin = await db.getMember(req.session.userId);
+    if (!admin || !admin.is_admin) return res.status(403).json({ error: 'Admin only.' });
+    await db.deleteContact(req.params.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── ADMIN: Excel import / sync ────────────────────────────────────────────────
 app.post('/api/admin/sync-excel', async (req, res) => {
   try {
@@ -261,6 +293,19 @@ app.post('/api/admin/sync-excel', async (req, res) => {
     const buffer = Buffer.from(fileData, 'base64');
     const { syncFromBuffer } = require('./sync-excel-lib');
     const stats = await syncFromBuffer(buffer);
+    res.json(stats);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── ADMIN: Contacts CSV import ────────────────────────────────────────────────
+app.post('/api/admin/import-contacts', async (req, res) => {
+  try {
+    const admin = await db.getMember(req.session.userId);
+    if (!admin || !admin.is_admin) return res.status(403).json({ error: 'Admin only.' });
+    const { fileData } = req.body;
+    if (!fileData) return res.status(400).json({ error: 'No fileData provided.' });
+    const buffer = Buffer.from(fileData, 'base64');
+    const stats = await db.importContacts(buffer);
     res.json(stats);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
