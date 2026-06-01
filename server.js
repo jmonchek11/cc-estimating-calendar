@@ -290,15 +290,17 @@ if (!MONGODB_URI) {
 }
 
 mongoose.connect(MONGODB_URI)
-  .then(async () => {
+  .then(() => {
     console.log('Connected to MongoDB');
-    await db.seedTeamData();
     const PORT = process.env.PORT || 3000;
+    // Open the port immediately so Render's health check passes,
+    // then run seed/migrations in the background.
     app.listen(PORT, '0.0.0.0', () => {
       console.log('\n========================================');
       console.log('  Liberty Estimating Calendar');
       console.log(`  http://localhost:${PORT}`);
       console.log('========================================\n');
+      db.seedTeamData().catch(err => console.error('seedTeamData error:', err.message));
     });
   })
   .catch(err => {
