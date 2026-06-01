@@ -336,7 +336,7 @@ tbody td {
 .jp-contact-card {
   display: flex; align-items: flex-start; justify-content: space-between;
   padding: 8px 10px; margin-bottom: 6px;
-  background: var(--sidebar-hover-bg); border-radius: 6px;
+  background: #f8fafc; border-radius: 6px;
   border: 1px solid var(--border);
 }
 .jp-contact-info { flex: 1; min-width: 0; }
