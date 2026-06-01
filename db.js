@@ -487,7 +487,8 @@ const BID_FIELDS = [
   'date_received', 'estimate_due_date', 'estimate_start_date', 'date_estimate_sent',
   'estimate_review_date', 'estimate_amount', 'estimate_pct_complete',
   'estimate_approved_by', 'bid_result', 'award_date', 'awarded_contractor',
-  'contract_reviewed_by', 'date_contract_signed', 'status', 'next_followup_date'
+  'contract_reviewed_by', 'date_contract_signed', 'status', 'next_followup_date',
+  'sub_estimators', 'checklist',
 ];
 
 async function createBid(data) {
