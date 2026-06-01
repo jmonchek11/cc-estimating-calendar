@@ -824,6 +824,31 @@ async function fixOrphanEstimators(fixes) {
   return { fixed: count };
 }
 
+// ── Bid ↔ Contact links ───────────────────────────────────────────────────────
+
+async function getBidContacts(bidId) {
+  const bid = await Bid.findById(Number(bidId)).lean();
+  if (!bid || !bid.contact_ids?.length) return [];
+  const contacts = await Contact.find({ _id: { $in: bid.contact_ids }, is_deleted: 0 }).lean();
+  return contacts.map(fmtContact);
+}
+
+async function addBidContact(bidId, contactId) {
+  await Bid.updateOne(
+    { _id: Number(bidId) },
+    { $addToSet: { contact_ids: Number(contactId) }, $set: { updated_at: nowStr() } }
+  );
+  return getBidContacts(bidId);
+}
+
+async function removeBidContact(bidId, contactId) {
+  await Bid.updateOne(
+    { _id: Number(bidId) },
+    { $pull: { contact_ids: Number(contactId) }, $set: { updated_at: nowStr() } }
+  );
+  return getBidContacts(bidId);
+}
+
 // ── Contacts ──────────────────────────────────────────────────────────────────
 
 function fmtContact(c) {
@@ -991,6 +1016,7 @@ module.exports = {
   getFollowups, logFollowup,
   getStats, getDigest, getAnalytics,
   findOrphanEstimators, fixOrphanEstimators,
+  getBidContacts, addBidContact, removeBidContact,
   getContacts, getContact, createContact, updateContact, deleteContact, importContacts,
   seedTeamData,
 };

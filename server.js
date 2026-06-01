@@ -216,6 +216,25 @@ app.delete('/api/bids/:id', async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── BID CONTACTS ──────────────────────────────────────────────────────────────
+app.get('/api/bids/:id/contacts', async (req, res) => {
+  try { res.json(await db.getBidContacts(req.params.id)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/bids/:id/contacts', async (req, res) => {
+  try {
+    const { contact_id } = req.body;
+    if (!contact_id) return res.status(400).json({ error: 'contact_id required' });
+    res.json(await db.addBidContact(req.params.id, contact_id));
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.delete('/api/bids/:id/contacts/:contactId', async (req, res) => {
+  try { res.json(await db.removeBidContact(req.params.id, req.params.contactId)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── FOLLOW-UPS ────────────────────────────────────────────────────────────────
 app.get('/api/bids/:id/followups', async (req, res) => {
   try { res.json(await db.getFollowups(req.params.id)); }

@@ -2227,46 +2227,46 @@ function openContactModal(id) {
   title.textContent = id ? 'Edit Contact' : 'Add Contact';
 
   body.innerHTML = `
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:20px 0 0">
-      <div>
+    <div style="padding:20px 24px;display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      <div class="form-group">
         <label class="form-label">First Name</label>
         <input class="form-input" id="cm-first" value="${esc(c.first_name||'')}" placeholder="First name" />
       </div>
-      <div>
+      <div class="form-group">
         <label class="form-label">Last Name</label>
         <input class="form-input" id="cm-last" value="${esc(c.last_name||'')}" placeholder="Last name" />
       </div>
-      <div>
+      <div class="form-group">
         <label class="form-label">Suffix</label>
         <input class="form-input" id="cm-suffix" value="${esc(c.suffix||'')}" placeholder="Jr, Sr, III…" />
       </div>
-      <div>
+      <div class="form-group">
         <label class="form-label">Company</label>
         <input class="form-input" id="cm-company" list="company-datalist"
                value="${esc(c.company||'')}" placeholder="Company name" />
       </div>
-      <div>
+      <div class="form-group">
         <label class="form-label">Phone</label>
         <input class="form-input" id="cm-phone" value="${esc(c.phone||'')}" placeholder="2155551234" />
       </div>
-      <div>
+      <div class="form-group">
         <label class="form-label">Email</label>
         <input class="form-input" id="cm-email" type="email" value="${esc(c.email||'')}" placeholder="email@company.com" />
       </div>
-      <div>
+      <div class="form-group">
         <label class="form-label">City</label>
         <input class="form-input" id="cm-city" value="${esc(c.city||'')}" placeholder="Philadelphia" />
       </div>
-      <div>
+      <div class="form-group">
         <label class="form-label">State</label>
         <input class="form-input" id="cm-state" value="${esc(c.state||'')}" placeholder="PA" />
       </div>
-      <div style="grid-column:span 2">
+      <div class="form-group" style="grid-column:span 2">
         <label class="form-label">Notes</label>
         <textarea class="form-input" id="cm-notes" rows="2" placeholder="Any notes…">${esc(c.notes||'')}</textarea>
       </div>
     </div>
-    <div style="display:flex;gap:8px;justify-content:flex-end;padding:16px 0 4px">
+    <div style="display:flex;gap:8px;justify-content:flex-end;padding:0 24px 20px">
       <button class="btn btn-secondary" onclick="closeContactModalForce()">Cancel</button>
       <button class="btn btn-primary" onclick="saveContactModal(${id||'null'})">
         ${id ? 'Save Changes' : 'Add Contact'}
@@ -3091,12 +3091,13 @@ async function openJobPanel(bidId) {
   overlay.style.display = 'block';
   panel.classList.add('open');
   try {
-    const [bid, followups] = await Promise.all([
+    const [bid, followups, contacts] = await Promise.all([
       api.get(`/api/bids/${bidId}`),
-      api.get(`/api/bids/${bidId}/followups`)
+      api.get(`/api/bids/${bidId}/followups`),
+      api.get(`/api/bids/${bidId}/contacts`),
     ]);
     document.getElementById('job-panel-title').textContent = bid.project_name;
-    body.innerHTML = renderJobPanelContent(bid, followups);
+    body.innerHTML = renderJobPanelContent(bid, followups, contacts);
   } catch (e) {
     body.innerHTML = `<div class="text-danger" style="padding:16px">Error loading: ${esc(e.message)}</div>`;
   }
@@ -3111,7 +3112,7 @@ function closeJobPanel() {
   State.currentPanelBidId = null;
 }
 
-function renderJobPanelContent(bid, followups) {
+function renderJobPanelContent(bid, followups, contacts = []) {
   const customers = [bid.customer, bid.customer2, bid.customer3, bid.customer4, bid.customer5]
     .filter(Boolean).join(', ');
 
@@ -3167,6 +3168,38 @@ function renderJobPanelContent(bid, followups) {
         </div>`).join('')}
     </div>` : '';
 
+  // ── Customer Contacts section ─────────────────────────────────────────────
+  const contactCards = contacts.map(c => `
+    <div class="jp-contact-card">
+      <div class="jp-contact-info">
+        <div class="jp-contact-name">${esc(c.full_name)}</div>
+        ${c.company ? `<div class="jp-contact-co">${esc(c.company)}</div>` : ''}
+        <div class="jp-contact-meta">
+          ${c.phone ? `<a href="tel:${esc(c.phone)}" style="color:var(--text-muted)">${fmtPhone(c.phone)}</a>` : ''}
+          ${c.phone && c.email ? ' · ' : ''}
+          ${c.email ? `<a href="mailto:${esc(c.email)}" style="color:var(--primary)">${esc(c.email)}</a>` : ''}
+        </div>
+      </div>
+      <button class="btn btn-ghost btn-sm" style="color:var(--text-muted)"
+              onclick="unlinkBidContact(${bid.id},${c.id})" title="Remove">✕</button>
+    </div>`).join('');
+
+  const contactsSection = `
+    <div class="jp-section">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div class="jp-section-title" style="margin:0">Customer Contacts${contacts.length ? ` (${contacts.length})` : ''}</div>
+        <button class="btn btn-ghost btn-sm" onclick="showLinkContactSearch(${bid.id})">+ Link Contact</button>
+      </div>
+      <div id="jp-contacts-list">
+        ${contactCards || '<div style="font-size:13px;color:var(--text-muted)">No contacts linked yet.</div>'}
+      </div>
+      <div id="jp-contact-search" style="display:none;margin-top:10px">
+        <input id="jp-ct-input" type="text" class="form-input" placeholder="Search contacts by name, company, email…"
+               oninput="filterLinkSearch(${bid.id})" style="margin-bottom:6px" />
+        <div id="jp-ct-results" style="max-height:180px;overflow-y:auto;border:1px solid var(--border);border-radius:6px"></div>
+      </div>
+    </div>`;
+
   return `
     <div class="jp-section">
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:4px">
@@ -3176,12 +3209,69 @@ function renderJobPanelContent(bid, followups) {
         ${bid.job_number ? `<span style="font-size:12px;color:var(--text-muted)">Job: ${esc(bid.job_number)}</span>` : ''}
       </div>
     </div>
+    ${contactsSection}
     ${detailFields ? `<div class="jp-section"><div class="jp-section-title">Details</div>${detailFields}</div>` : ''}
     ${dateFields ? `<div class="jp-section"><div class="jp-section-title">Dates</div>${dateFields}</div>` : ''}
     ${progressSection}
     ${notesSection}
     ${awardSection}
     ${followupHistory}`;
+}
+
+// ── Bid contact link/unlink ───────────────────────────────────────────────────
+let _allContactsForSearch = null; // lazy-loaded once
+
+async function showLinkContactSearch(bidId) {
+  const box = document.getElementById('jp-contact-search');
+  if (!box) return;
+  const visible = box.style.display !== 'none';
+  box.style.display = visible ? 'none' : 'block';
+  if (!visible) {
+    document.getElementById('jp-ct-input')?.focus();
+    if (!_allContactsForSearch) {
+      _allContactsForSearch = await api.get('/api/contacts');
+    }
+    filterLinkSearch(bidId);
+  }
+}
+
+function filterLinkSearch(bidId) {
+  const q = (document.getElementById('jp-ct-input')?.value || '').toLowerCase();
+  const results = document.getElementById('jp-ct-results');
+  if (!results || !_allContactsForSearch) return;
+
+  const matches = _allContactsForSearch
+    .filter(c =>
+      (c.full_name  || '').toLowerCase().includes(q) ||
+      (c.company    || '').toLowerCase().includes(q) ||
+      (c.email      || '').toLowerCase().includes(q)
+    ).slice(0, 20);
+
+  if (!matches.length) {
+    results.innerHTML = '<div style="padding:10px 12px;font-size:13px;color:var(--text-muted)">No contacts found.</div>';
+    return;
+  }
+  results.innerHTML = matches.map(c => `
+    <div class="jp-ct-result" onclick="linkBidContact(${bidId},${c.id})">
+      <div style="font-weight:600;font-size:13px">${esc(c.full_name)}</div>
+      <div style="font-size:12px;color:var(--text-muted)">
+        ${c.company ? esc(c.company) + (c.email ? ' · ' : '') : ''}${c.email ? esc(c.email) : ''}
+      </div>
+    </div>`).join('');
+}
+
+async function linkBidContact(bidId, contactId) {
+  try {
+    await api.post(`/api/bids/${bidId}/contacts`, { contact_id: contactId });
+    openJobPanel(bidId); // refresh panel
+  } catch (e) { alert('Failed to link: ' + e.message); }
+}
+
+async function unlinkBidContact(bidId, contactId) {
+  try {
+    await api.del(`/api/bids/${bidId}/contacts/${contactId}`);
+    openJobPanel(bidId); // refresh panel
+  } catch (e) { alert('Failed to unlink: ' + e.message); }
 }
 
 function openBidModalFromPanel() {

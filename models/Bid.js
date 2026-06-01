@@ -29,6 +29,7 @@ const bidSchema = new mongoose.Schema({
   date_contract_signed: { type: String, default: null },
   status: { type: String, default: 'Open' },
   next_followup_date: { type: String, default: null },
+  contact_ids: { type: [Number], default: [] },
   is_deleted: { type: Number, default: 0 },
   created_at: { type: String, default: () => new Date().toISOString().replace('T', ' ').substring(0, 19) },
   updated_at: { type: String, default: () => new Date().toISOString().replace('T', ' ').substring(0, 19) }
