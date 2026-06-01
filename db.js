@@ -74,6 +74,7 @@ function formatBid(b) {
     date_contract_signed: o.date_contract_signed ?? null,
     status: o.status ?? 'Open',
     next_followup_date: o.next_followup_date ?? null,
+    jurisdiction:  o.jurisdiction  ?? null,
     parent_bid_id: o.parent_bid_id ?? null,
     phases: (o.phases || []).map(p => ({
       phase_num:    p.phase_num,
@@ -643,7 +644,7 @@ const BID_FIELDS = [
   'estimate_review_date', 'estimate_amount', 'estimate_pct_complete',
   'estimate_approved_by', 'bid_result', 'award_date', 'awarded_contractor',
   'contract_reviewed_by', 'date_contract_signed', 'status', 'next_followup_date',
-  'sub_estimators', 'checklist', 'parent_bid_id', 'phases',
+  'sub_estimators', 'checklist', 'parent_bid_id', 'phases', 'jurisdiction',
 ];
 
 async function createBid(data) {
@@ -739,6 +740,7 @@ async function getAnalytics(since, until) {
     quarterlyTrendRaw,
     awardedBids,
     notAwardedBids,
+    byJurisdictionRaw,
   ] = await Promise.all([
 
     // Overall win/loss totals
@@ -850,6 +852,19 @@ async function getAnalytics(since, until) {
       ...BID_PIPELINE,
       { $sort: { updated_at: -1 } },
     ]).then(r => r.map(formatBid)),
+
+    // Win rate by jurisdiction (local union)
+    Bid.aggregate([
+      { $match: Object.assign({}, baseDecided, { jurisdiction: { $nin: [null, ''] } }) },
+      { $group: {
+        _id:           '$jurisdiction',
+        awarded:       { $sum: { $cond: [{ $eq: ['$stage','awarded'] }, 1, 0] } },
+        not_awarded:   { $sum: { $cond: [{ $eq: ['$stage','not_awarded'] }, 1, 0] } },
+        awarded_value: { $sum: { $cond: [{ $eq: ['$stage','awarded'] }, { $ifNull: ['$estimate_amount',0] }, 0] } },
+      }},
+      { $addFields: { total: { $add: ['$awarded','$not_awarded'] } } },
+      { $sort: { total: -1 } },
+    ]),
   ]);
 
   // Resolve team members for estimator/salesperson lookups
@@ -918,6 +933,14 @@ async function getAnalytics(since, until) {
     })),
     awardedBids,
     notAwardedBids,
+    byJurisdiction: byJurisdictionRaw.map(r => ({
+      jurisdiction:  r._id,
+      awarded:       r.awarded,
+      not_awarded:   r.not_awarded,
+      total:         r.total,
+      win_rate:      r.total > 0 ? r.awarded / r.total : 0,
+      awarded_value: r.awarded_value,
+    })),
   };
 }
 

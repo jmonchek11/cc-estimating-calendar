@@ -46,6 +46,35 @@ function fmt(val, type = 'text') {
   return val;
 }
 
+// ── IBEW Local Unions ─────────────────────────────────────────────────────────
+const IBEW_LOCALS = [
+  { number: '98',  area: 'Philadelphia' },
+  { number: '102', area: 'Lehigh Valley / East PA' },
+  { number: '143', area: 'Harrisburg / Central PA' },
+  { number: '163', area: 'North Central PA' },
+  { number: '164', area: 'Northern NJ' },
+  { number: '229', area: 'York / Lancaster' },
+  { number: '269', area: 'South Jersey' },
+  { number: '351', area: 'South NJ / Atlantic City' },
+  { number: '375', area: 'Hazleton / East Central PA' },
+  { number: '400', area: 'Cape May / South NJ' },
+  { number: '456', area: 'Central NJ' },
+  { number: '607', area: 'Sunbury / Central PA' },
+  { number: '654', area: 'South Philadelphia / Delaware Co.' },
+  { number: '743', area: 'Reading / Berks County' },
+  { number: '812', area: 'Williamsport / North Central PA' },
+  { number: '81',  area: 'Northeast PA / Scranton' },
+];
+
+function jurisdictionBadge(number, opts = {}) {
+  if (!number) return '';
+  const local = IBEW_LOCALS.find(l => l.number === String(number));
+  const label = `Local ${number}`;
+  const title = local ? `${label} · ${local.area}` : label;
+  const size  = opts.small ? 'font-size:10px;padding:1px 5px' : 'font-size:11px;padding:2px 7px';
+  return `<span class="jurisdiction-badge" title="${esc(title)}" style="${size}">${label}</span>`;
+}
+
 // Compact currency for stat boxes — always fits in a small tile
 function fmtCompact(n) {
   if (!n) return '—';
@@ -443,17 +472,21 @@ async function renderBidTable(main, stage, title, icon) {
 
   const params = new URLSearchParams({ stage });
   const searchVal = document.getElementById(`search-${stage}`)?.value || '';
-  const estVal = document.getElementById(`est-${stage}`)?.value || '';
-  const salVal = document.getElementById(`sal-${stage}`)?.value || '';
+  const estVal    = document.getElementById(`est-${stage}`)?.value    || '';
+  const salVal    = document.getElementById(`sal-${stage}`)?.value    || '';
+  const jurisVal  = document.getElementById(`juris-${stage}`)?.value  || '';
   if (searchVal) params.set('search', searchVal);
-  if (estVal) params.set('estimator_id', estVal);
-  if (salVal) params.set('salesperson_id', salVal);
+  if (estVal)    params.set('estimator_id', estVal);
+  if (salVal)    params.set('salesperson_id', salVal);
   if (State.mineOnly && State.currentUser) params.set('mine_only', 'true');
 
-  const bids = await api.get('/api/bids?' + params.toString());
+  let bids = await api.get('/api/bids?' + params.toString());
+  // Client-side jurisdiction filter (not in server query params yet)
+  if (jurisVal) bids = bids.filter(b => b.jurisdiction === jurisVal);
 
-  const estOptions = estimators.map(m => `<option value="${m.id}">${esc(m.initials)} – ${esc(m.name)}</option>`).join('');
-  const salOptions = salespeople.map(m => `<option value="${m.id}">${esc(m.initials)} – ${esc(m.name)}</option>`).join('');
+  const estOptions   = estimators.map(m => `<option value="${m.id}">${esc(m.initials)} – ${esc(m.name)}</option>`).join('');
+  const salOptions   = salespeople.map(m => `<option value="${m.id}">${esc(m.initials)} – ${esc(m.name)}</option>`).join('');
+  const jurisOptions = IBEW_LOCALS.map(l => `<option value="${l.number}">Local ${l.number} · ${l.area}</option>`).join('');
 
   const todayStr = today();
   const weekAhead = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
@@ -470,6 +503,7 @@ async function renderBidTable(main, stage, title, icon) {
         <td class="td-project">
           ${esc(b.project_name)}
           <small>${b.bid_number ? '#' + esc(b.bid_number) : ''} ${b.job_number ? '· ' + esc(b.job_number) : ''}</small>
+          ${jurisdictionBadge(b.jurisdiction, { small: true })}
         </td>
         <td class="td-customer">${esc(b.customer) || '—'}</td>
         <td class="td-date">${fmt(b.date_received, 'date')}</td>
@@ -517,6 +551,10 @@ async function renderBidTable(main, stage, title, icon) {
         <option value="">All Salespeople</option>
         ${salOptions}
       </select>
+      <select id="juris-${stage}" onchange="refreshBidTable('${stage}','${title}','${icon}')">
+        <option value="">All Locals</option>
+        ${jurisOptions}
+      </select>
       ${State.currentUser ? `<button class="mine-toggle ${State.mineOnly ? 'active' : ''}" id="mine-toggle-${stage}" onclick="toggleMineOnly('${stage}','${title}','${icon}')"><span class="toggle-dot"></span> Mine Only</button>` : ''}
       <button class="btn btn-secondary btn-sm" onclick="clearFilters('${stage}','${title}','${icon}')">Clear</button>
     </div>
@@ -548,8 +586,9 @@ async function renderBidTable(main, stage, title, icon) {
     </div>`;
 
   // Restore filter values
-  if (estVal) document.getElementById(`est-${stage}`).value = estVal;
-  if (salVal) document.getElementById(`sal-${stage}`).value = salVal;
+  if (estVal)   document.getElementById(`est-${stage}`).value   = estVal;
+  if (salVal)   document.getElementById(`sal-${stage}`).value   = salVal;
+  if (jurisVal) document.getElementById(`juris-${stage}`).value = jurisVal;
 }
 
 let debounceTimer;
@@ -1389,6 +1428,33 @@ async function renderAnalytics(main) {
         </table>
       </div>` : `<div class="empty-state"><div class="empty-state-icon">📭</div><div class="empty-state-title">No decided bids for this period</div></div>`}
     </div>
+
+    <!-- Jurisdiction breakdown -->
+    ${(d.byJurisdiction||[]).length ? `
+    <div class="card" style="margin-bottom:20px">
+      <div class="section-title" style="margin-bottom:12px">📍 Win Rate by Jurisdiction · ${periodLabel}</div>
+      <div class="table-wrapper" style="margin:0"><table>
+        <thead><tr>
+          <th>Local Union</th><th>Area</th>
+          <th style="text-align:center">Won</th><th style="text-align:center">Lost</th>
+          <th>Win Rate</th><th style="text-align:right">Won Value</th><th style="text-align:center">Bids</th>
+        </tr></thead>
+        <tbody>${(d.byJurisdiction||[]).map(j => {
+          const rate  = Math.round(j.win_rate * 100);
+          const local = IBEW_LOCALS.find(l => l.number === j.jurisdiction);
+          return `<tr>
+            <td>${jurisdictionBadge(j.jurisdiction)}</td>
+            <td style="font-size:12px;color:var(--text-muted)">${esc(local?.area||'')}</td>
+            <td style="text-align:center;color:#16a34a;font-weight:700">${j.awarded}</td>
+            <td style="text-align:center;color:#dc2626;font-weight:700">${j.not_awarded}</td>
+            <td style="min-width:110px">${winRateBar(rate)}</td>
+            <td style="text-align:right">${fmt(j.awarded_value,'currency')}</td>
+            <td style="text-align:center;color:var(--text-muted)">${j.total}</td>
+          </tr>`;
+        }).join('')}
+        </tbody>
+      </table></div>
+    </div>` : ''}
 
     <!-- Salesperson & Estimator Win Rates -->
     <div class="dashboard-grid" style="margin-bottom:20px">
@@ -3049,6 +3115,7 @@ function openBidModal(bidId = null, defaultStage = 'opportunity', highlightIssue
       document.getElementById('f-notes').value = b.notes || '';
       document.getElementById('f-award_date').value = b.award_date || '';
       document.getElementById('f-awarded_contractor').value = b.awarded_contractor || '';
+      document.getElementById('f-jurisdiction').value = b.jurisdiction || '';
       loadSubEstimatorsIntoForm(b.sub_estimators || []);
       if (highlightIssues) highlightBidFormIssues(highlightIssues);
     });
@@ -3162,6 +3229,7 @@ async function saveBid() {
     notes: document.getElementById('f-notes').value.trim(),
     award_date: document.getElementById('f-award_date').value || null,
     awarded_contractor: document.getElementById('f-awarded_contractor').value.trim(),
+    jurisdiction:   document.getElementById('f-jurisdiction')?.value || null,
     sub_estimators: getSubEstimatorsFromForm(),
   };
 
@@ -3688,6 +3756,7 @@ function renderJobPanelContent(bid, followups, contacts = [], linkedCOs = []) {
 
   const detailFields = [
     customerList.length ? `<div class="jp-field"><span class="jp-label">Customer</span><span class="jp-value">${customerLinks}</span></div>` : '',
+    bid.jurisdiction ? `<div class="jp-field"><span class="jp-label">Jurisdiction</span><span class="jp-value">${jurisdictionBadge(bid.jurisdiction)} <span style="font-size:12px;color:var(--text-muted)">${IBEW_LOCALS.find(l=>l.number===bid.jurisdiction)?.area||''}</span></span></div>` : '',
     bid.estimate_amount ? `<div class="jp-field"><span class="jp-label">Estimate Amount</span><span class="jp-value">${fmt(bid.estimate_amount, 'currency')}</span></div>` : '',
     bid.estimator_initials ? `<div class="jp-field"><span class="jp-label">Estimator</span><span class="jp-value"><span class="initials-pill">${esc(bid.estimator_initials)}</span></span></div>` : '',
     (bid.sub_estimators||[]).length ? `<div class="jp-field"><span class="jp-label">Sub-Estimators</span><span class="jp-value">${

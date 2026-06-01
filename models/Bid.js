@@ -31,6 +31,7 @@ const bidSchema = new mongoose.Schema({
   next_followup_date: { type: String, default: null },
   sub_estimators:    { type: [{ estimator_id: Number, scope: String }], default: [] },
   reminders:         { type: [{ rid: String, note: String, remind_on: String, dismissed: { type: Number, default: 0 } }], default: [] },
+  jurisdiction:      { type: String, default: null },   // IBEW local union number
   parent_bid_id:     { type: Number, default: null },   // CO → awarded bid link
   phases: { type: [{
     phase_num:    Number,
