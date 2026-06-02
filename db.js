@@ -959,7 +959,7 @@ const TEAM_NAMES = [
   ['Pat McCreesh',      'estimator',   'PM'],
   ['Doug Pierno',       'estimator',   'DP'],
   ['Scott Yaffee',      'estimator',   'SY'],
-  ['Jonathon Chukinas', 'estimator',   'JC'],
+  ['Jonathan Chukinas', 'estimator',   'JC'],
   ['Joe Monchek',       'salesperson', 'JM'],
 ];
 

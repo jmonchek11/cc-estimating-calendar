@@ -48,6 +48,8 @@ function fmt(val, type = 'text') {
 
 // ── IBEW Local Unions ─────────────────────────────────────────────────────────
 const IBEW_LOCALS = [
+  { number: '98S', area: 'Philadelphia South' },
+  { number: '98N', area: 'Philadelphia North' },
   { number: '98',  area: 'Philadelphia' },
   { number: '102', area: 'Lehigh Valley / East PA' },
   { number: '143', area: 'Harrisburg / Central PA' },
@@ -471,19 +473,22 @@ async function renderBidTable(main, stage, title, icon) {
   const salespeople = team.filter(m => m.role === 'salesperson' || m.role === 'estimator/pm');
 
   const params = new URLSearchParams({ stage });
-  const searchVal = document.getElementById(`search-${stage}`)?.value || '';
-  const estVal    = document.getElementById(`est-${stage}`)?.value    || '';
-  const salVal    = document.getElementById(`sal-${stage}`)?.value    || '';
-  const jurisVal  = document.getElementById(`juris-${stage}`)?.value  || '';
+  const searchVal  = document.getElementById(`search-${stage}`)?.value  || '';
+  const peopleVal  = document.getElementById(`people-${stage}`)?.value  || '';
+  const jurisVal   = document.getElementById(`juris-${stage}`)?.value   || '';
   if (searchVal) params.set('search', searchVal);
-  if (estVal)    params.set('estimator_id', estVal);
-  if (salVal)    params.set('salesperson_id', salVal);
+  if (peopleVal.startsWith('est:')) params.set('estimator_id',   peopleVal.slice(4));
+  if (peopleVal.startsWith('sal:')) params.set('salesperson_id', peopleVal.slice(4));
   if (State.mineOnly && State.currentUser) params.set('mine_only', 'true');
 
   let bids = await api.get('/api/bids?' + params.toString());
-  // Client-side jurisdiction filter (not in server query params yet)
   if (jurisVal) bids = bids.filter(b => b.jurisdiction === jurisVal);
 
+  const allPeople  = State.team.filter(m => m.active);
+  const peopleOptions = [
+    `<optgroup label="Estimators">${estimators.map(m=>`<option value="est:${m.id}">${esc(m.initials)} – ${esc(m.name)}</option>`).join('')}</optgroup>`,
+    `<optgroup label="Salespeople">${salespeople.map(m=>`<option value="sal:${m.id}">${esc(m.initials)} – ${esc(m.name)}</option>`).join('')}</optgroup>`,
+  ].join('');
   const estOptions   = estimators.map(m => `<option value="${m.id}">${esc(m.initials)} – ${esc(m.name)}</option>`).join('');
   const salOptions   = salespeople.map(m => `<option value="${m.id}">${esc(m.initials)} – ${esc(m.name)}</option>`).join('');
   const jurisOptions = IBEW_LOCALS.map(l => `<option value="${l.number}">Local ${l.number} · ${l.area}</option>`).join('');
@@ -501,17 +506,14 @@ async function renderBidTable(main, stage, title, icon) {
     return `
       <tr class="${rowClass} clickable-row" data-id="${b.id}" onclick="openJobPanel(${b.id})">
         <td class="td-project">
-          ${esc(b.project_name)}
-          <small>${b.bid_number ? '#' + esc(b.bid_number) : ''} ${b.job_number ? '· ' + esc(b.job_number) : ''}</small>
+          <div>${esc(b.project_name)}</div>
+          <small>${b.bid_number ? '#' + esc(b.bid_number) : ''} ${b.job_number ? '· Job: ' + esc(b.job_number) : ''}</small>
           ${jurisdictionBadge(b.jurisdiction, { small: true })}
+          <div style="margin-top:3px;font-size:11px;color:var(--text-muted)">
+            ${[b.customer,b.customer2,b.customer3,b.customer4,b.customer5].filter(Boolean).join(' · ')}
+          </div>
         </td>
-        <td class="td-customer">${esc(b.customer) || '—'}</td>
-        <td class="td-date">${fmt(b.date_received, 'date')}</td>
-        <td class="td-amount">${fmt(b.estimate_amount, 'currency')}</td>
-        <td>
-          <div class="progress-bar"><div class="progress-fill ${pctWidth >= 100 ? 'complete' : ''}" style="width:${pctWidth}%"></div></div>
-          <small style="color:var(--text-muted);font-size:11px">${pctWidth}%</small>
-        </td>
+        <td class="td-date">${fmt(b.estimate_start_date, 'date')}</td>
         <td class="td-date ${dueDateClass}">${fmt(b.estimate_due_date, 'date')}</td>
         <td>
           ${b.estimator_initials ? `<span class="initials-pill">${esc(b.estimator_initials)}</span>` : '—'}
@@ -521,11 +523,10 @@ async function renderBidTable(main, stage, title, icon) {
           }).join('')}
         </td>
         <td>${b.salesperson_initials ? `<span class="initials-pill" style="background:#dcfce7;color:#166534">${esc(b.salesperson_initials)}</span>` : '—'}</td>
-        <td>${statusBadge(b.status)}</td>
         <td>
           <div class="actions" onclick="event.stopPropagation()">
-            <button class="btn btn-ghost btn-sm" onclick="openBidModal(${b.id})" title="Edit">✏️</button>
-            <button class="btn btn-ghost btn-sm" onclick="openFollowupModal(${b.id})" title="Log Follow-up">🔔</button>
+            <button class="btn btn-ghost btn-sm" onclick="openBidModal(${b.id})" title="Edit" style="color:var(--primary)">Edit</button>
+            <button class="btn btn-ghost btn-sm" onclick="openFollowupModal(${b.id})" title="Log Follow-up">📝</button>
             <button class="btn btn-ghost btn-sm" onclick="openStageModal(${b.id}, '${esc(b.stage)}')" title="Move Stage">➡️</button>
           </div>
         </td>
@@ -543,13 +544,9 @@ async function renderBidTable(main, stage, title, icon) {
 
     <div class="filter-bar">
       <input type="text" id="search-${stage}" placeholder="Search project, bid #, customer…" value="${esc(searchVal)}" oninput="debounceRefresh('${stage}','${title}','${icon}')" />
-      <select id="est-${stage}" onchange="refreshBidTable('${stage}','${title}','${icon}')">
-        <option value="">All Estimators</option>
-        ${estOptions}
-      </select>
-      <select id="sal-${stage}" onchange="refreshBidTable('${stage}','${title}','${icon}')">
-        <option value="">All Salespeople</option>
-        ${salOptions}
+      <select id="people-${stage}" onchange="refreshBidTable('${stage}','${title}','${icon}')">
+        <option value="">All People</option>
+        ${peopleOptions}
       </select>
       <select id="juris-${stage}" onchange="refreshBidTable('${stage}','${title}','${icon}')">
         <option value="">All Locals</option>
@@ -564,15 +561,11 @@ async function renderBidTable(main, stage, title, icon) {
       <table>
         <thead>
           <tr>
-            <th>Project</th>
-            <th>Customer</th>
-            <th>Received</th>
-            <th>Amount</th>
-            <th>Progress</th>
+            <th>Project &amp; Customers</th>
+            <th>Start Date</th>
             <th>Due Date</th>
             <th>Est.</th>
             <th>Sales</th>
-            <th>Status</th>
             <th>Actions</th>
           </tr>
         </thead>
@@ -586,9 +579,8 @@ async function renderBidTable(main, stage, title, icon) {
     </div>`;
 
   // Restore filter values
-  if (estVal)   document.getElementById(`est-${stage}`).value   = estVal;
-  if (salVal)   document.getElementById(`sal-${stage}`).value   = salVal;
-  if (jurisVal) document.getElementById(`juris-${stage}`).value = jurisVal;
+  if (peopleVal) document.getElementById(`people-${stage}`)?.value && (document.getElementById(`people-${stage}`).value = peopleVal);
+  if (jurisVal)  document.getElementById(`juris-${stage}`)?.value  && (document.getElementById(`juris-${stage}`).value  = jurisVal);
 }
 
 let debounceTimer;
@@ -650,8 +642,8 @@ async function renderBidTableWithFilters(main, stage, title, icon) {
         <td>${b.salesperson_initials ? `<span class="initials-pill" style="background:#dcfce7;color:#166534">${esc(b.salesperson_initials)}</span>` : '—'}</td>
         <td>${statusBadge(b.status)}</td>
         <td><div class="actions" onclick="event.stopPropagation()">
-          <button class="btn btn-ghost btn-sm" onclick="openBidModal(${b.id})" title="Edit">✏️</button>
-          <button class="btn btn-ghost btn-sm" onclick="openFollowupModal(${b.id})" title="Log Follow-up">🔔</button>
+          <button class="btn btn-ghost btn-sm" onclick="openBidModal(${b.id})" title="Edit" style="color:var(--primary)">Edit</button>
+          <button class="btn btn-ghost btn-sm" onclick="openFollowupModal(${b.id})" title="Log Follow-up">📝</button>
           <button class="btn btn-ghost btn-sm" onclick="openStageModal(${b.id},'${esc(b.stage)}')" title="Move Stage">➡️</button>
         </div></td>
       </tr>`;
@@ -664,12 +656,10 @@ async function renderBidTableWithFilters(main, stage, title, icon) {
 }
 
 function clearFilters(stage, title, icon) {
-  const searchEl = document.getElementById(`search-${stage}`);
-  const estEl = document.getElementById(`est-${stage}`);
-  const salEl = document.getElementById(`sal-${stage}`);
-  if (searchEl) searchEl.value = '';
-  if (estEl) estEl.value = '';
-  if (salEl) salEl.value = '';
+  ['search','people','juris'].forEach(k => {
+    const el = document.getElementById(`${k}-${stage}`);
+    if (el) el.value = '';
+  });
   State.mineOnly = false;
   renderBidTableWithFilters(document.getElementById('main'), stage, title, icon);
 }
@@ -829,8 +819,8 @@ async function renderFollowUps(main) {
         <td>${ownerCell(b)}</td>
         <td>${followupDueCell(b)}</td>
         <td><div class="actions" onclick="event.stopPropagation()">
-          <button class="btn btn-ghost btn-sm" onclick="openFollowupModal(${b.id})" title="Log Follow-up">🔔</button>
-          <button class="btn btn-ghost btn-sm" onclick="openBidModal(${b.id})" title="Edit">✏️</button>
+          <button class="btn btn-ghost btn-sm" onclick="openFollowupModal(${b.id})" title="Log Follow-up">📝</button>
+          <button class="btn btn-ghost btn-sm" onclick="openBidModal(${b.id})" title="Edit" style="color:var(--primary)">Edit</button>
           <button class="btn btn-ghost btn-sm" onclick="openStageModal(${b.id},'${esc(b.stage)}')" title="Move Stage">➡️</button>
         </div></td>
       </tr>`;
@@ -839,7 +829,7 @@ async function renderFollowUps(main) {
   main.innerHTML = `
     <div class="page-header">
       <div>
-        <div class="page-title">🔔 Follow Ups</div>
+        <div class="page-title">📝 Follow Ups</div>
         <div class="page-subtitle">
           ${bids.length} item${bids.length !== 1 ? 's' : ''}
           · <span class="badge badge-bid" style="font-size:11px">${bidCnt} Bid${bidCnt !== 1 ? 's' : ''}</span>
@@ -1020,7 +1010,7 @@ async function renderSearch(main) {
         <td>${b.salesperson_initials ? `<span class="initials-pill" style="background:#dcfce7;color:#166534">${esc(b.salesperson_initials)}</span>` : '—'}</td>
         <td onclick="event.stopPropagation()">
           <button class="btn btn-ghost btn-sm" onclick="openBidModal(${b.id})"      title="Edit">✏️</button>
-          <button class="btn btn-ghost btn-sm" onclick="openFollowupModal(${b.id})" title="Log Follow-up">🔔</button>
+          <button class="btn btn-ghost btn-sm" onclick="openFollowupModal(${b.id})" title="Log Follow-up">📝</button>
           <button class="btn btn-ghost btn-sm" onclick="openStageModal(${b.id},'${esc(b.stage)}')" title="Move Stage">➡️</button>
         </td>
       </tr>`).join('');
@@ -2593,14 +2583,14 @@ function clearContactFilters() {
 }
 
 async function renderContacts(main) {
-  // Read filter values BEFORE wiping the DOM — they live inside main
-  const search     = document.getElementById('ct-search')?.value.toLowerCase()        || '';
-  const companyVal = document.getElementById('ct-company-filter')?.value               || '';
-  const noCompany  = document.getElementById('ct-no-company-btn')?.classList.contains('active') || false;
+  // Read filter values BEFORE wiping the DOM — elements live inside main
+  const search     = (document.getElementById('ct-search')?.value     || '').toLowerCase();
+  const companyVal =  document.getElementById('ct-company-filter')?.value              || '';
+  const noCompany  =  document.getElementById('ct-no-company-btn')?.classList.contains('active') || false;
 
   main.innerHTML = '<div class="loading-screen"><div class="spinner"></div></div>';
 
-  // Only hit the API on first load; subsequent filter changes use the cache
+  // Only hit the API on first load or when cache is stale; filter changes use the cache
   if (!_contactsCache.length) _contactsCache = await api.get('/api/contacts');
 
   const isAdmin = !!State.currentUser?.is_admin;
@@ -3930,7 +3920,6 @@ function renderJobPanelContent(bid, followups, contacts = [], linkedCOs = []) {
     ${detailFields ? `<div class="jp-section"><div class="jp-section-title">Details</div>${detailFields}</div>` : ''}
     ${dateFields ? `<div class="jp-section"><div class="jp-section-title">Dates</div>${dateFields}</div>` : ''}
     ${progressSection}
-    ${renderChecklistSection(bid)}
     ${notesSection}
     ${awardSection}
     ${followupHistory}`;

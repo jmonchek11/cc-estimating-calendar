@@ -185,16 +185,6 @@
 
           <div class="form-grid-2">
             <div class="form-group">
-              <label>Status</label>
-              <select id="f-status">
-                <option value="Open">Open</option>
-                <option value="Pending Award">Pending Award</option>
-                <option value="Awarded">Awarded</option>
-                <option value="Not Awarded">Not Awarded</option>
-                <option value="Budget">Budget</option>
-              </select>
-            </div>
-            <div class="form-group">
               <label>Estimate Amount ($)</label>
               <input type="number" id="f-estimate_amount" placeholder="0" step="1000" min="0" />
             </div>
@@ -202,6 +192,13 @@
               <label>Jurisdiction (IBEW Local)</label>
               <select id="f-jurisdiction">
                 <option value="">— Select Local —</option>
+                <optgroup label="★ Common">
+                  <option value="98S">Local 98S · Philadelphia South</option>
+                  <option value="98N">Local 98N · Philadelphia North</option>
+                  <option value="269">Local 269 · South Jersey / Burlington</option>
+                  <option value="654">Local 654 · South Philadelphia / Delaware Co.</option>
+                </optgroup>
+                <optgroup label="All Locals">
                 <option value="98">Local 98 · Philadelphia</option>
                 <option value="102">Local 102 · Lehigh Valley / East PA / NJ Border</option>
                 <option value="143">Local 143 · Harrisburg / Central PA</option>
@@ -218,6 +215,7 @@
                 <option value="743">Local 743 · Reading / Berks County</option>
                 <option value="812">Local 812 · Williamsport / North Central PA</option>
                 <option value="81">Local 81 · Northeast PA / Scranton</option>
+                </optgroup>
               </select>
             </div>
           </div>
@@ -276,10 +274,7 @@
               <label>Date Estimate Sent</label>
               <input type="date" id="f-date_estimate_sent" />
             </div>
-            <div class="form-group">
-              <label>% Complete</label>
-              <input type="number" id="f-estimate_pct_complete" placeholder="0" min="0" max="100" />
-            </div>
+            <input type="hidden" id="f-estimate_pct_complete" value="" />
             <div class="form-group">
               <label>Estimate Approved By</label>
               <input type="text" id="f-estimate_approved_by" />

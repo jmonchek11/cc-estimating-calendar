@@ -720,13 +720,13 @@ textarea.form-input { resize: vertical; min-height: 60px; }
 
 .form-section-title {
   font-size: 11px;
-  font-weight: 700;
-  color: var(--text-muted);
+  font-weight: 800;
+  color: var(--text);
   text-transform: uppercase;
-  letter-spacing: 0.07em;
-  padding: 14px 0 6px;
-  border-top: 1px solid var(--border);
-  margin-top: 4px;
+  letter-spacing: 0.1em;
+  padding: 16px 0 8px;
+  border-top: 2px solid var(--border);
+  margin-top: 8px;
 }
 .form-section-title:first-child { border-top: none; padding-top: 0; }
 
@@ -1114,10 +1114,17 @@ textarea.form-input { resize: vertical; min-height: 60px; }
   border-top: 1px solid var(--border); background: #f8fafc;
   flex-shrink: 0;
 }
-.jp-section { margin-bottom: 18px; }
+.jp-section {
+  margin-bottom: 0;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+.jp-section:last-child { border-bottom: none; }
 .jp-section-title {
-  font-size: 11px; font-weight: 600; text-transform: uppercase;
-  letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 8px;
+  font-size: 11px; font-weight: 800; text-transform: uppercase;
+  letter-spacing: .1em; color: var(--text); margin-bottom: 10px;
+  padding-bottom: 6px; border-bottom: 2px solid var(--primary);
+  display: inline-block;
 }
 .jp-field {
   display: flex; gap: 8px; margin-bottom: 6px; font-size: 13px; align-items: flex-start;
