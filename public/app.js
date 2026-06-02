@@ -3161,12 +3161,18 @@ async function showCompanyAC(slot, input) {
 
   if (!matches.length) { resultsEl.style.display = 'none'; return; }
 
-  resultsEl.innerHTML = matches.map(c => `
-    <div class="company-ac-item"
-         data-company="${esc(c)}"
-         onmousedown="selectCompanyAC(${slot}, this.dataset.company)">
-      ${esc(c.replace(new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')})`, 'gi'), '<strong>$1</strong>'))}
-    </div>`).join('');
+  resultsEl.innerHTML = matches.map(c => {
+    // Escape first, then bold the matched portion on the escaped string
+    const escapedName = esc(c);
+    const escapedQ    = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const highlighted = escapedName.replace(new RegExp(`(${escapedQ})`, 'gi'), '<strong>$1</strong>');
+    return `
+      <div class="company-ac-item"
+           data-company="${escapedName}"
+           onmousedown="selectCompanyAC(${slot}, this.dataset.company)">
+        ${highlighted}
+      </div>`;
+  }).join('');
   resultsEl.style.display = 'block';
 }
 
@@ -3338,13 +3344,21 @@ async function saveQuickBidContact(slot) {
 
 function loadContactPickersForBid(bid) {
   _bidContactState = {};
-  // Map existing customer_contacts back to slots
   const customers = [bid.customer, bid.customer2, bid.customer3, bid.customer4, bid.customer5];
+
+  // Map existing customer_contacts back to slots by customer name
   (bid.customer_contacts || []).forEach(cc => {
     const slot = customers.findIndex(c => c === cc.customer_name);
     if (slot !== -1) _bidContactState[slot + 1] = cc.contact_id;
   });
-  // Render pickers for all slots
+
+  // Expand the additional customers section if any are populated
+  if (customers.slice(1).some(Boolean)) {
+    const details = document.getElementById('extra-customers-details');
+    if (details) details.open = true;
+  }
+
+  // Render contact pickers for each filled customer slot
   customers.forEach((c, i) => {
     if (c) updateContactPicker(i + 1);
   });
@@ -3432,10 +3446,17 @@ function loadSubEstimatorsIntoForm(subEstimators) {
 
 function closeBidModal() {
   highlightBidFormIssues([]);
+  // Close any open company autocomplete dropdowns
+  [1,2,3,4,5].forEach(s => hideCompanyAC(s));
   document.getElementById('bid-modal').style.display = 'none';
 }
 
 async function saveBid() {
+  // Close any open dropdowns that might be blocking the click
+  [1,2,3,4,5].forEach(s => {
+    const el = document.getElementById(`company-ac-${s}`);
+    if (el) el.style.display = 'none';
+  });
   const id = document.getElementById('bid-id').value;
   const pctRaw = document.getElementById('f-estimate_pct_complete').value;
   const data = {

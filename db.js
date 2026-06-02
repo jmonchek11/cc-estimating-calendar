@@ -74,9 +74,13 @@ function formatBid(b) {
     date_contract_signed: o.date_contract_signed ?? null,
     status: o.status ?? 'Open',
     next_followup_date: o.next_followup_date ?? null,
-    submitted_by:  o.submitted_by  ?? null,
-    created_by:    o.created_by    ?? null,
-    jurisdiction:  o.jurisdiction  ?? null,
+    submitted_by:      o.submitted_by  ?? null,
+    created_by:        o.created_by    ?? null,
+    jurisdiction:      o.jurisdiction  ?? null,
+    customer_contacts: (o.customer_contacts || []).map(cc => ({
+      customer_name: cc.customer_name,
+      contact_id:    cc.contact_id,
+    })),
     parent_bid_id: o.parent_bid_id ?? null,
     phases: (o.phases || []).map(p => ({
       phase_num:    p.phase_num,
