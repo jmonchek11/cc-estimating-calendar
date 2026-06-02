@@ -195,8 +195,11 @@ app.get('/api/bids', async (req, res) => {
 });
 
 app.post('/api/bids', async (req, res) => {
-  try { res.json(await db.createBid(req.body)); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  try {
+    const data = { ...req.body };
+    if (req.session.userId) data.created_by = req.session.userId;
+    res.json(await db.createBid(data));
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 app.get('/api/bids/:id', async (req, res) => {
@@ -315,6 +318,12 @@ app.get('/api/bids/:id/followups', async (req, res) => {
 app.post('/api/bids/:id/followups', async (req, res) => {
   try { res.json(await db.logFollowup(req.params.id, req.body)); }
   catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// ── ESTIMATOR PROFILE ─────────────────────────────────────────────────────────
+app.get('/api/estimators/:id/bids', async (req, res) => {
+  try { res.json(await db.getEstimatorBids(req.params.id)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ── STATS & DIGEST ────────────────────────────────────────────────────────────

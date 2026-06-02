@@ -28,6 +28,8 @@ const bidSchema = new mongoose.Schema({
   contract_reviewed_by: { type: String, default: null },
   date_contract_signed: { type: String, default: null },
   status: { type: String, default: 'Open' },
+  submitted_by:  { type: Number, default: null },   // team member id who submitted
+  created_by:    { type: Number, default: null },   // team member id who created
   next_followup_date: { type: String, default: null },
   sub_estimators:    { type: [{ estimator_id: Number, scope: String }], default: [] },
   reminders:         { type: [{ rid: String, note: String, remind_on: String, dismissed: { type: Number, default: 0 } }], default: [] },

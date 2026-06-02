@@ -74,6 +74,8 @@ function formatBid(b) {
     date_contract_signed: o.date_contract_signed ?? null,
     status: o.status ?? 'Open',
     next_followup_date: o.next_followup_date ?? null,
+    submitted_by:  o.submitted_by  ?? null,
+    created_by:    o.created_by    ?? null,
     jurisdiction:  o.jurisdiction  ?? null,
     parent_bid_id: o.parent_bid_id ?? null,
     phases: (o.phases || []).map(p => ({
@@ -645,6 +647,7 @@ const BID_FIELDS = [
   'estimate_approved_by', 'bid_result', 'award_date', 'awarded_contractor',
   'contract_reviewed_by', 'date_contract_signed', 'status', 'next_followup_date',
   'sub_estimators', 'checklist', 'parent_bid_id', 'phases', 'jurisdiction',
+  'submitted_by', 'created_by',
 ];
 
 async function createBid(data) {
@@ -704,6 +707,21 @@ async function logFollowup(bidId, { followup_date, contacted_by, contact_method,
   }
 
   return formatFollowup(doc);
+}
+
+// ── Estimator profile bids ────────────────────────────────────────────────────
+
+async function getEstimatorBids(estimatorId) {
+  const id = Number(estimatorId);
+  const bids = await Bid.aggregate([
+    { $match: { is_deleted: 0, $or: [
+      { estimator_id: id },
+      { 'sub_estimators.estimator_id': id },
+    ]}},
+    ...BID_PIPELINE,
+    { $sort: { created_at: -1 } },
+  ]).then(r => r.map(formatBid));
+  return { bids, stats: calcBidStats(bids) };
 }
 
 // ── Analytics ─────────────────────────────────────────────────────────────────
@@ -1320,6 +1338,7 @@ module.exports = {
   getFollowups, logFollowup,
   getStats, getDigest, getAnalytics,
   findOrphanEstimators, fixOrphanEstimators,
+  getEstimatorBids,
   savePhase, getLinkedCOs, linkCOToParent, checkDuplicateBidNumber,
   getSettings, updateSettings,
   addReminder, dismissReminder, deleteReminder,

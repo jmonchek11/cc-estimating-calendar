@@ -560,6 +560,10 @@ tbody td {
   text-align: center;
   line-height: 26px;
 }
+/* Clickable estimator pill */
+.est-pill-clickable { cursor: pointer; }
+.est-pill-clickable:hover { opacity: 0.75; outline: 2px solid var(--primary); outline-offset: 1px; }
+
 /* Sub-estimator pill — same shape, lighter fill to distinguish from main */
 .initials-pill-sub {
   background: #e0e7ff; color: #3730a3;

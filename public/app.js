@@ -68,6 +68,15 @@ const IBEW_LOCALS = [
   { number: '81',  area: 'Northeast PA / Scranton' },
 ];
 
+// Clickable estimator pill — used everywhere an estimator's initials appear
+function estPill(initials, estimatorId, opts = {}) {
+  if (!initials) return '—';
+  const style = opts.green ? 'background:#dcfce7;color:#166534' : '';
+  const id    = estimatorId ? `onclick="event.stopPropagation();openEstimatorProfile(${estimatorId})"` : '';
+  const title = estimatorId ? (State.team.find(t=>t.id===estimatorId)?.name || '') : '';
+  return `<span class="initials-pill est-pill-clickable" style="${style}" title="${esc(title)}" ${id}>${esc(initials)}</span>`;
+}
+
 function jurisdictionBadge(number, opts = {}) {
   if (!number) return '';
   const local = IBEW_LOCALS.find(l => l.number === String(number));
@@ -516,17 +525,18 @@ async function renderBidTable(main, stage, title, icon) {
         <td class="td-date">${fmt(b.estimate_start_date, 'date')}</td>
         <td class="td-date ${dueDateClass}">${fmt(b.estimate_due_date, 'date')}</td>
         <td>
-          ${b.estimator_initials ? `<span class="initials-pill">${esc(b.estimator_initials)}</span>` : '—'}
+          ${estPill(b.estimator_initials, b.estimator_id)}
           ${(b.sub_estimators||[]).map(se => {
             const m = State.team.find(t => t.id === se.estimator_id);
-            return m ? `<span class="initials-pill initials-pill-sub" title="${esc(m.name)}${se.scope?' · '+se.scope:''}">${esc(m.initials)}</span>` : '';
+            return m ? `<span class="initials-pill initials-pill-sub" title="${esc(m.name)}${se.scope?' · '+se.scope:''}" onclick="event.stopPropagation();openEstimatorProfile(${se.estimator_id})">${esc(m.initials)}</span>` : '';
           }).join('')}
         </td>
-        <td>${b.salesperson_initials ? `<span class="initials-pill" style="background:#dcfce7;color:#166534">${esc(b.salesperson_initials)}</span>` : '—'}</td>
+        <td>${estPill(b.salesperson_initials, b.salesperson_id, { green: true })}</td>
         <td>
           <div class="actions" onclick="event.stopPropagation()">
             <button class="btn btn-ghost btn-sm" onclick="openBidModal(${b.id})" title="Edit" style="color:var(--primary)">Edit</button>
             <button class="btn btn-ghost btn-sm" onclick="openFollowupModal(${b.id})" title="Log Follow-up">📝</button>
+            ${b.stage === 'active_bid' || b.stage === 'active_co' ? `<button class="btn btn-sm" style="background:#16a34a;color:#fff;font-weight:700" onclick="event.stopPropagation();openSubmitModal(${b.id})">Submit</button>` : ''}
             <button class="btn btn-ghost btn-sm" onclick="openStageModal(${b.id}, '${esc(b.stage)}')" title="Move Stage">➡️</button>
           </div>
         </td>
@@ -633,13 +643,13 @@ async function renderBidTableWithFilters(main, stage, title, icon) {
         <td><div class="progress-bar"><div class="progress-fill ${pctWidth >= 100 ? 'complete' : ''}" style="width:${pctWidth}%"></div></div><small style="color:var(--text-muted);font-size:11px">${pctWidth}%</small></td>
         <td class="td-date ${dueDateClass}">${fmt(b.estimate_due_date, 'date')}</td>
         <td>
-          ${b.estimator_initials ? `<span class="initials-pill">${esc(b.estimator_initials)}</span>` : '—'}
+          ${estPill(b.estimator_initials, b.estimator_id)}
           ${(b.sub_estimators||[]).map(se => {
             const m = State.team.find(t => t.id === se.estimator_id);
-            return m ? `<span class="initials-pill initials-pill-sub" title="${esc(m.name)}${se.scope?' · '+se.scope:''}">${esc(m.initials)}</span>` : '';
+            return m ? `<span class="initials-pill initials-pill-sub" title="${esc(m.name)}${se.scope?' · '+se.scope:''}" onclick="event.stopPropagation();openEstimatorProfile(${se.estimator_id})">${esc(m.initials)}</span>` : '';
           }).join('')}
         </td>
-        <td>${b.salesperson_initials ? `<span class="initials-pill" style="background:#dcfce7;color:#166534">${esc(b.salesperson_initials)}</span>` : '—'}</td>
+        <td>${estPill(b.salesperson_initials, b.salesperson_id, { green: true })}</td>
         <td>${statusBadge(b.status)}</td>
         <td><div class="actions" onclick="event.stopPropagation()">
           <button class="btn btn-ghost btn-sm" onclick="openBidModal(${b.id})" title="Edit" style="color:var(--primary)">Edit</button>
@@ -1256,7 +1266,7 @@ async function renderAnalytics(main) {
     return people.map(p => {
       const rate = Math.round(p.win_rate * 100);
       return `<tr class="clickable-row" data-type="${esc(type)}" data-value="${p.id}" data-name="${esc(p.name)}" onclick="analyticsDetailClick(this)" title="Click to see all bids for ${esc(p.name)}">
-        <td><span class="initials-pill" style="margin-right:4px">${esc(p.initials)}</span>${esc(p.name)}</td>
+        <td>${estPill(p.initials, p.id)} ${esc(p.name)}</td>
         <td style="text-align:center;color:#16a34a;font-weight:700">${p.awarded}</td>
         <td style="text-align:center;color:#dc2626;font-weight:700">${p.not_awarded}</td>
         <td style="min-width:110px">${winRateBar(rate, 6)}</td>
@@ -1346,8 +1356,8 @@ async function renderAnalytics(main) {
             <td class="td-project">${esc(b.project_name)}<small>${b.bid_number?'#'+esc(b.bid_number):''}</small></td>
             <td class="td-customer">${esc(b.customer)||'—'}</td>
             <td class="td-amount">${fmt(b.estimate_amount,'currency')}</td>
-            <td>${b.estimator_initials?`<span class="initials-pill">${esc(b.estimator_initials)}</span>`:'—'}</td>
-            <td>${b.salesperson_initials?`<span class="initials-pill" style="background:#dcfce7;color:#166534">${esc(b.salesperson_initials)}</span>`:'—'}</td>
+            <td>${estPill(b.estimator_initials, b.estimator_id)}</td>
+            <td>${estPill(b.salesperson_initials, b.salesperson_id, { green: true })}</td>
             <td style="color:var(--text-muted);font-size:12px">${fmt(b.award_date||b.date_received,'date')}</td>
           </tr>`).join('')}
         </tbody>
@@ -3767,6 +3777,11 @@ async function openJobPanel(bidId) {
     ]);
     document.getElementById('job-panel-title').textContent = bid.project_name;
     body.innerHTML = renderJobPanelContent(bid, followups, contacts, linkedCOs);
+    // Show/hide Submit button based on stage
+    const submitBtn = document.getElementById('panel-submit-btn');
+    if (submitBtn) {
+      submitBtn.style.display = (bid.stage === 'active_bid' || bid.stage === 'active_co') ? '' : 'none';
+    }
   } catch (e) {
     body.innerHTML = `<div class="text-danger" style="padding:16px">Error loading: ${esc(e.message)}</div>`;
   }
@@ -3794,15 +3809,24 @@ function renderJobPanelContent(bid, followups, contacts = [], linkedCOs = []) {
     customerList.length ? `<div class="jp-field"><span class="jp-label">Customer</span><span class="jp-value">${customerLinks}</span></div>` : '',
     bid.jurisdiction ? `<div class="jp-field"><span class="jp-label">Jurisdiction</span><span class="jp-value">${jurisdictionBadge(bid.jurisdiction)} <span style="font-size:12px;color:var(--text-muted)">${IBEW_LOCALS.find(l=>l.number===bid.jurisdiction)?.area||''}</span></span></div>` : '',
     bid.estimate_amount ? `<div class="jp-field"><span class="jp-label">Estimate Amount</span><span class="jp-value">${fmt(bid.estimate_amount, 'currency')}</span></div>` : '',
-    bid.estimator_initials ? `<div class="jp-field"><span class="jp-label">Estimator</span><span class="jp-value"><span class="initials-pill">${esc(bid.estimator_initials)}</span></span></div>` : '',
+    bid.estimator_initials ? `<div class="jp-field"><span class="jp-label">Estimator</span><span class="jp-value">${estPill(bid.estimator_initials, bid.estimator_id)}</span></div>` : '',
     (bid.sub_estimators||[]).length ? `<div class="jp-field"><span class="jp-label">Sub-Estimators</span><span class="jp-value">${
       bid.sub_estimators.map(se => {
         const m = State.team.find(t => t.id === se.estimator_id);
         if (!m) return '';
-        return `<span class="initials-pill initials-pill-sub" title="${esc(m.name)}">${esc(m.initials)}</span>${se.scope ? `<span style="font-size:12px;color:var(--text-muted);margin-left:4px">${esc(se.scope)}</span>` : ''}`;
+        return `${estPill(m.initials, se.estimator_id)}${se.scope ? `<span style="font-size:12px;color:var(--text-muted);margin-left:4px">${esc(se.scope)}</span>` : ''}`;
       }).join('<span style="margin:0 6px;color:var(--border)">·</span>')
     }</span></div>` : '',
-    bid.salesperson_initials ? `<div class="jp-field"><span class="jp-label">Salesperson</span><span class="jp-value"><span class="initials-pill" style="background:#dcfce7;color:#166534">${esc(bid.salesperson_initials)}</span></span></div>` : '',
+    bid.salesperson_initials ? `<div class="jp-field"><span class="jp-label">Salesperson</span><span class="jp-value">${estPill(bid.salesperson_initials, bid.salesperson_id, { green: true })}</span></div>` : '',
+    (() => {
+      if (!bid.submitted_by && !bid.created_by) return '';
+      const sub = bid.submitted_by ? State.team.find(t => t.id === bid.submitted_by) : null;
+      const cre = bid.created_by  ? State.team.find(t => t.id === bid.created_by)  : null;
+      return [
+        sub ? `<div class="jp-field"><span class="jp-label">Submitted By</span><span class="jp-value">${estPill(sub.initials, sub.id)}</span></div>` : '',
+        cre ? `<div class="jp-field"><span class="jp-label">Created By</span><span class="jp-value">${estPill(cre.initials, cre.id)}</span></div>` : '',
+      ].join('');
+    })(),
   ].filter(Boolean).join('');
 
   const dateFields = [
@@ -4270,6 +4294,17 @@ async function unlinkBidContact(bidId, customerName, contactId) {
 
 // ── Contact & Company Profile Modal ──────────────────────────────────────────
 
+async function openEstimatorProfile(estimatorId) {
+  const m = State.team.find(t => t.id === Number(estimatorId));
+  if (!m) return;
+  showProfileModal({
+    title:    m.name,
+    subtitle: `${m.role} · ${m.initials}`,
+    fetchUrl: `/api/estimators/${estimatorId}/bids`,
+    icon:     '👷',
+  });
+}
+
 async function openContactProfile(contactId) {
   const id = Number(contactId);
   // Look up contact details from cache or fetch
@@ -4457,6 +4492,116 @@ async function saveQuickContact(customerName, bidId) {
     document.getElementById('jp-quick-create')?.remove();
     openJobPanel(bidId);
   } catch (e) { alert('Failed to create contact: ' + e.message); }
+}
+
+// ── Submit Bid Modal ──────────────────────────────────────────────────────────
+
+async function openSubmitModal(bidId) {
+  const bid = await api.get(`/api/bids/${bidId}`);
+  const isActive = bid.stage === 'active_bid' || bid.stage === 'active_co';
+  if (!isActive) return; // only show for active bids/COs
+
+  const existing = document.getElementById('submit-modal-overlay');
+  if (existing) existing.remove();
+
+  // Jurisdiction options (pinned + all)
+  const jurisOpts = [
+    `<optgroup label="★ Common">
+      <option value="98S">Local 98S · Philadelphia South</option>
+      <option value="98N">Local 98N · Philadelphia North</option>
+      <option value="269">Local 269 · South Jersey</option>
+      <option value="654">Local 654 · South Philadelphia / Delaware Co.</option>
+    </optgroup>
+    <optgroup label="All Locals">`,
+    ...IBEW_LOCALS.filter(l => !['98S','98N','269','654'].includes(l.number))
+      .map(l => `<option value="${l.number}">Local ${l.number} · ${l.area}</option>`),
+    `</optgroup>`,
+  ].join('');
+
+  const overlay = document.createElement('div');
+  overlay.id = 'submit-modal-overlay';
+  overlay.className = 'modal-overlay';
+  overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+
+  overlay.innerHTML = `
+    <div class="modal-box modal-small">
+      <div class="modal-header">
+        <div>
+          <div style="font-weight:800;font-size:15px">✅ Submit Bid</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:2px">${esc(bid.project_name)}</div>
+        </div>
+        <button class="modal-close" onclick="document.getElementById('submit-modal-overlay').remove()">×</button>
+      </div>
+      <div style="padding:20px 24px;display:flex;flex-direction:column;gap:14px">
+        <div class="form-group">
+          <label class="form-label">Estimate Amount ($) <span style="color:var(--danger)">*</span></label>
+          <input class="form-input" type="number" id="sub-amount" value="${bid.estimate_amount || ''}" placeholder="0" min="0" step="1000" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Date Submitted <span style="color:var(--danger)">*</span></label>
+          <input class="form-input" type="date" id="sub-date" value="${today()}" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Jurisdiction (IBEW Local) <span style="color:var(--danger)">*</span></label>
+          <select class="form-input" id="sub-juris">
+            <option value="">— Select Local —</option>
+            ${jurisOpts}
+          </select>
+        </div>
+        <div style="background:#f8fafc;border:1px solid var(--border);border-radius:6px;padding:10px 12px;font-size:12px;color:var(--text-muted)">
+          Submitted by: <strong style="color:var(--text)">${esc(State.currentUser?.name || 'You')}</strong>
+        </div>
+      </div>
+      <div style="padding:0 24px 20px;display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn btn-secondary" onclick="document.getElementById('submit-modal-overlay').remove()">Cancel</button>
+        <button class="btn btn-sm" style="background:#16a34a;color:#fff;font-weight:700;padding:8px 18px"
+                onclick="confirmSubmitBid(${bidId})">Submit Bid →</button>
+      </div>
+    </div>`;
+
+  document.body.appendChild(overlay);
+
+  // Pre-fill jurisdiction if already set
+  if (bid.jurisdiction) {
+    const sel = document.getElementById('sub-juris');
+    if (sel) sel.value = bid.jurisdiction;
+  }
+}
+
+function openSubmitModalFromPanel() {
+  if (State.currentPanelBidId) openSubmitModal(State.currentPanelBidId);
+}
+
+async function confirmSubmitBid(bidId) {
+  const amount   = document.getElementById('sub-amount')?.value;
+  const date     = document.getElementById('sub-date')?.value;
+  const juris    = document.getElementById('sub-juris')?.value;
+
+  // Validate required fields
+  const errors = [];
+  if (!amount || Number(amount) <= 0) errors.push('Estimate amount is required');
+  if (!date)   errors.push('Date submitted is required');
+  if (!juris)  errors.push('Local union / jurisdiction is required');
+
+  if (errors.length) {
+    alert('Please fill in required fields:\n• ' + errors.join('\n• '));
+    return;
+  }
+
+  try {
+    await api.put(`/api/bids/${bidId}`, {
+      stage:              'follow_up',
+      status:             'Pending Award',
+      estimate_amount:    Number(amount),
+      date_estimate_sent: date,
+      jurisdiction:       juris,
+      submitted_by:       State.currentUser?.id || null,
+    });
+    document.getElementById('submit-modal-overlay')?.remove();
+    if (State.currentPanelBidId === bidId) closeJobPanel();
+    await renderPage(State.currentPage);
+    await updateBadges();
+  } catch (e) { alert('Submit failed: ' + e.message); }
 }
 
 function openBidModalFromPanel() {
