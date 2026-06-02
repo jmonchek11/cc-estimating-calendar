@@ -536,7 +536,6 @@ async function renderBidTable(main, stage, title, icon) {
           <div class="actions" onclick="event.stopPropagation()">
             <button class="btn btn-ghost btn-sm" onclick="openBidModal(${b.id})" title="Edit" style="color:var(--primary)">Edit</button>
             <button class="btn btn-ghost btn-sm" onclick="openFollowupModal(${b.id})" title="Log Follow-up">📝</button>
-            ${b.stage === 'active_bid' || b.stage === 'active_co' ? `<button class="btn btn-sm" style="background:#16a34a;color:#fff;font-weight:700" onclick="event.stopPropagation();openSubmitModal(${b.id})">Submit</button>` : ''}
             <button class="btn btn-ghost btn-sm" onclick="openStageModal(${b.id}, '${esc(b.stage)}')" title="Move Stage">➡️</button>
           </div>
         </td>
