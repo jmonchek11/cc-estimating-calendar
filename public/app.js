@@ -3456,11 +3456,12 @@ function closeBidModal() {
 }
 
 async function saveBid() {
-  // Close any open dropdowns that might be blocking the click
+  // Close any open dropdowns first
   [1,2,3,4,5].forEach(s => {
     const el = document.getElementById(`company-ac-${s}`);
     if (el) el.style.display = 'none';
   });
+
   const id = document.getElementById('bid-id').value;
   const pctRaw = document.getElementById('f-estimate_pct_complete').value;
   const data = {
@@ -3468,7 +3469,6 @@ async function saveBid() {
     job_number: document.getElementById('f-job_number').value.trim(),
     stage: document.getElementById('f-stage').value,
     project_name: document.getElementById('f-project_name').value.trim(),
-    status: document.getElementById('f-status').value,
     estimate_amount: document.getElementById('f-estimate_amount').value || null,
     estimator_id: document.getElementById('f-estimator_id').value || null,
     salesperson_id: document.getElementById('f-salesperson_id').value || null,
