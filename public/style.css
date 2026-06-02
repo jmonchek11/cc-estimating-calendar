@@ -359,6 +359,16 @@ tbody td {
   vertical-align: middle;
 }
 
+/* ── Customer contact picker in bid form ── */
+.contact-picker-wrap { margin-top: 5px; }
+.cp-row { display: flex; gap: 5px; align-items: center; }
+.cp-row .cp-select { flex: 1; }
+.cp-clear { flex-shrink: 0; }
+.cp-selected {
+  margin-top: 4px; font-size: 12px; color: #16a34a; font-weight: 600;
+  padding: 3px 8px; background: #dcfce7; border-radius: 4px; display: inline-block;
+}
+
 /* ── Bid lifecycle timeline ── */
 .lifecycle-phase {
   display: flex; gap: 10px; align-items: flex-start;

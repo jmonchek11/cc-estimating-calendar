@@ -242,17 +242,35 @@
             <button type="button" class="btn btn-ghost btn-sm" onclick="addSubEstimatorRow()">+ Add Sub-Estimator</button>
           </div>
 
+          <div class="form-section-title">Customers &amp; Contacts</div>
           <div class="form-group">
             <label>Primary Customer / GC</label>
-            <input type="text" id="f-customer" placeholder="Customer name" />
+            <input type="text" id="f-customer" placeholder="Customer name" oninput="scheduleContactPickerUpdate(1)" />
+            <div id="contact-picker-1" class="contact-picker-wrap"></div>
           </div>
-          <details class="extra-customers">
-            <summary>Additional Customers</summary>
-            <div class="form-grid-2" style="margin-top:8px">
-              <div class="form-group"><label>Customer 2</label><input type="text" id="f-customer2" /></div>
-              <div class="form-group"><label>Customer 3</label><input type="text" id="f-customer3" /></div>
-              <div class="form-group"><label>Customer 4</label><input type="text" id="f-customer4" /></div>
-              <div class="form-group"><label>Customer 5</label><input type="text" id="f-customer5" /></div>
+          <details class="extra-customers" id="extra-customers-details">
+            <summary>Additional Customers (click to expand)</summary>
+            <div style="margin-top:10px;display:flex;flex-direction:column;gap:12px">
+              <div class="form-group">
+                <label>Customer 2</label>
+                <input type="text" id="f-customer2" oninput="scheduleContactPickerUpdate(2)" />
+                <div id="contact-picker-2" class="contact-picker-wrap"></div>
+              </div>
+              <div class="form-group">
+                <label>Customer 3</label>
+                <input type="text" id="f-customer3" oninput="scheduleContactPickerUpdate(3)" />
+                <div id="contact-picker-3" class="contact-picker-wrap"></div>
+              </div>
+              <div class="form-group">
+                <label>Customer 4</label>
+                <input type="text" id="f-customer4" oninput="scheduleContactPickerUpdate(4)" />
+                <div id="contact-picker-4" class="contact-picker-wrap"></div>
+              </div>
+              <div class="form-group">
+                <label>Customer 5</label>
+                <input type="text" id="f-customer5" oninput="scheduleContactPickerUpdate(5)" />
+                <div id="contact-picker-5" class="contact-picker-wrap"></div>
+              </div>
             </div>
           </details>
 

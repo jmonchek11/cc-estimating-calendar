@@ -3086,6 +3086,11 @@ function openBidModal(bidId = null, defaultStage = 'opportunity', highlightIssue
 
   populateTeamDropdowns('f-estimator_id', 'f-salesperson_id');
   loadSubEstimatorsIntoForm([]);  // clear any previous rows
+  _bidContactState = {};
+  [1,2,3,4,5].forEach(slot => {
+    const el = document.getElementById(`contact-picker-${slot}`);
+    if (el) el.innerHTML = '';
+  });
 
   if (bidId) {
     api.get(`/api/bids/${bidId}`).then(b => {
@@ -3116,6 +3121,7 @@ function openBidModal(bidId = null, defaultStage = 'opportunity', highlightIssue
       document.getElementById('f-awarded_contractor').value = b.awarded_contractor || '';
       document.getElementById('f-jurisdiction').value = b.jurisdiction || '';
       loadSubEstimatorsIntoForm(b.sub_estimators || []);
+      loadContactPickersForBid(b);
       if (highlightIssues) highlightBidFormIssues(highlightIssues);
     });
   } else {
@@ -3124,6 +3130,180 @@ function openBidModal(bidId = null, defaultStage = 'opportunity', highlightIssue
   }
 
   modal.style.display = 'flex';
+}
+
+// ── Customer contact pickers in bid form ─────────────────────────────────────
+let _bidContactState = {};  // slot (1-5) → contact_id
+let _cpDebounce = null;
+
+function scheduleContactPickerUpdate(slot) {
+  clearTimeout(_cpDebounce);
+  _cpDebounce = setTimeout(() => updateContactPicker(slot), 300);
+}
+
+async function updateContactPicker(slot) {
+  const fieldId    = slot === 1 ? 'f-customer' : `f-customer${slot}`;
+  const pickerEl   = document.getElementById(`contact-picker-${slot}`);
+  const customerName = document.getElementById(fieldId)?.value.trim() || '';
+
+  if (!pickerEl) return;
+
+  if (!customerName) {
+    pickerEl.innerHTML = '';
+    return;
+  }
+
+  // Lazy-load contact cache
+  if (!_allContactsForSearch) {
+    _allContactsForSearch = await api.get('/api/contacts').catch(() => []);
+  }
+
+  const matches = (_allContactsForSearch || []).filter(c =>
+    c.company && c.company.toLowerCase() === customerName.toLowerCase()
+  );
+
+  const currentId = _bidContactState[slot];
+  const opts = matches.map(c =>
+    `<option value="${c.id}" ${c.id === currentId ? 'selected' : ''}>${esc(c.full_name)}${c.email ? ' · ' + esc(c.email) : ''}</option>`
+  ).join('');
+
+  pickerEl.innerHTML = `
+    <div class="cp-row">
+      <select class="form-input cp-select" style="font-size:12px"
+              onchange="setBidContactFromPicker(${slot}, this.value)">
+        <option value="">— Contact at ${esc(customerName)} —</option>
+        ${opts}
+        <option value="__search__">🔍 Search all contacts…</option>
+        <option value="__new__">+ Add new contact…</option>
+      </select>
+      ${currentId ? `<button type="button" class="btn btn-ghost btn-sm cp-clear" onclick="clearBidContact(${slot})" title="Clear">✕</button>` : ''}
+    </div>
+    ${currentId ? (() => {
+      const c = (_allContactsForSearch||[]).find(x => x.id === currentId);
+      return c ? `<div class="cp-selected">✓ ${esc(c.full_name)}${c.email?' · '+esc(c.email):''}</div>` : '';
+    })() : ''}
+    <div id="cp-search-${slot}" style="display:none;margin-top:6px">
+      <input type="text" class="form-input" style="font-size:12px;margin-bottom:4px"
+             placeholder="Search contacts…" oninput="filterCPSearch(this,${slot})" />
+      <div id="cp-results-${slot}" class="jp-ct-results-box"></div>
+    </div>`;
+}
+
+function setBidContactFromPicker(slot, value) {
+  if (value === '__new__') {
+    const fieldId  = slot === 1 ? 'f-customer' : `f-customer${slot}`;
+    const company  = document.getElementById(fieldId)?.value.trim() || '';
+    quickCreateBidContact(slot, company);
+  } else if (value === '__search__') {
+    document.querySelector(`#contact-picker-${slot} select`).value = '';
+    const box = document.getElementById(`cp-search-${slot}`);
+    if (box) { box.style.display = 'block'; box.querySelector('input')?.focus(); }
+    filterCPSearch(box?.querySelector('input'), slot);
+  } else if (value) {
+    _bidContactState[slot] = Number(value);
+    updateContactPicker(slot);
+  }
+}
+
+function clearBidContact(slot) {
+  delete _bidContactState[slot];
+  updateContactPicker(slot);
+}
+
+function filterCPSearch(input, slot) {
+  const q = (input?.value || '').toLowerCase();
+  const resultsEl = document.getElementById(`cp-results-${slot}`);
+  if (!resultsEl || !_allContactsForSearch) return;
+  const matches = _allContactsForSearch
+    .filter(c =>
+      (c.full_name||'').toLowerCase().includes(q) ||
+      (c.company  ||'').toLowerCase().includes(q) ||
+      (c.email    ||'').toLowerCase().includes(q)
+    ).slice(0, 12);
+  resultsEl.innerHTML = matches.map(c => `
+    <div class="jp-ct-result" onclick="selectCPResult(${slot},${c.id})">
+      <div style="font-weight:600;font-size:13px">${esc(c.full_name)}</div>
+      <div style="font-size:12px;color:var(--text-muted)">${[c.company,c.email].filter(Boolean).map(esc).join(' · ')}</div>
+    </div>`).join('') ||
+    '<div style="padding:10px 12px;font-size:13px;color:var(--text-muted)">No contacts found.</div>';
+}
+
+function selectCPResult(slot, contactId) {
+  _bidContactState[slot] = contactId;
+  document.getElementById(`cp-search-${slot}`).style.display = 'none';
+  updateContactPicker(slot);
+}
+
+function quickCreateBidContact(slot, company) {
+  // Reuse the showQuickCreateContact pattern but wired to bid form
+  const existing = document.getElementById('jp-quick-create');
+  if (existing) existing.remove();
+
+  const div = document.createElement('div');
+  div.id = 'jp-quick-create';
+  div.style.cssText = 'position:fixed;bottom:0;right:0;width:480px;max-width:100vw;background:var(--card-bg);border-top:2px solid var(--primary);padding:20px;z-index:2000;box-shadow:0 -4px 20px rgba(0,0,0,.15)';
+  div.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <strong style="font-size:14px">New Contact — ${esc(company)}</strong>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('jp-quick-create').remove()">✕</button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="form-group"><label class="form-label">First Name*</label><input class="form-input" id="qc-first" placeholder="First" /></div>
+      <div class="form-group"><label class="form-label">Last Name*</label><input class="form-input" id="qc-last" placeholder="Last" /></div>
+      <div class="form-group" style="grid-column:span 2"><label class="form-label">Company</label><input class="form-input" id="qc-company" value="${esc(company)}" list="company-datalist" /></div>
+      <div class="form-group"><label class="form-label">Phone</label><input class="form-input" id="qc-phone" placeholder="2155551234" /></div>
+      <div class="form-group"><label class="form-label">Email</label><input class="form-input" id="qc-email" type="email" placeholder="email@company.com" /></div>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+      <button class="btn btn-secondary" onclick="document.getElementById('jp-quick-create').remove()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveQuickBidContact(${slot})">Create &amp; Select</button>
+    </div>`;
+  document.body.appendChild(div);
+  document.getElementById('qc-first')?.focus();
+}
+
+async function saveQuickBidContact(slot) {
+  const first = document.getElementById('qc-first')?.value.trim();
+  const last  = document.getElementById('qc-last')?.value.trim();
+  if (!first && !last) { alert('Enter at least a first or last name.'); return; }
+  const payload = {
+    first_name: first || null, last_name: last || null,
+    company:    document.getElementById('qc-company')?.value.trim() || null,
+    phone:      document.getElementById('qc-phone')?.value.replace(/\D/g,'') || null,
+    email:      document.getElementById('qc-email')?.value.trim().toLowerCase() || null,
+  };
+  try {
+    const created = await api.post('/api/contacts', payload);
+    if (_allContactsForSearch) _allContactsForSearch.unshift(created);
+    _bidContactState[slot] = created.id;
+    document.getElementById('jp-quick-create')?.remove();
+    updateContactPicker(slot);
+  } catch (e) { alert('Failed: ' + e.message); }
+}
+
+function loadContactPickersForBid(bid) {
+  _bidContactState = {};
+  // Map existing customer_contacts back to slots
+  const customers = [bid.customer, bid.customer2, bid.customer3, bid.customer4, bid.customer5];
+  (bid.customer_contacts || []).forEach(cc => {
+    const slot = customers.findIndex(c => c === cc.customer_name);
+    if (slot !== -1) _bidContactState[slot + 1] = cc.contact_id;
+  });
+  // Render pickers for all slots
+  customers.forEach((c, i) => {
+    if (c) updateContactPicker(i + 1);
+  });
+}
+
+function getCustomerContactsFromForm() {
+  const results = [];
+  [1,2,3,4,5].forEach(slot => {
+    const fieldId = slot === 1 ? 'f-customer' : `f-customer${slot}`;
+    const name    = document.getElementById(fieldId)?.value.trim();
+    const id      = _bidContactState[slot];
+    if (name && id) results.push({ customer_name: name, contact_id: id });
+  });
+  return results;
 }
 
 // ── Duplicate bid number detection ───────────────────────────────────────────
@@ -3228,8 +3408,9 @@ async function saveBid() {
     notes: document.getElementById('f-notes').value.trim(),
     award_date: document.getElementById('f-award_date').value || null,
     awarded_contractor: document.getElementById('f-awarded_contractor').value.trim(),
-    jurisdiction:   document.getElementById('f-jurisdiction')?.value || null,
-    sub_estimators: getSubEstimatorsFromForm(),
+    jurisdiction:      document.getElementById('f-jurisdiction')?.value || null,
+    sub_estimators:    getSubEstimatorsFromForm(),
+    customer_contacts: getCustomerContactsFromForm(),
   };
 
   if (!data.project_name) { alert('Project name is required.'); return; }
