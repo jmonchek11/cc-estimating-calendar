@@ -3132,6 +3132,61 @@ function openBidModal(bidId = null, defaultStage = 'opportunity', highlightIssue
   modal.style.display = 'flex';
 }
 
+// ── Company autocomplete for customer fields ──────────────────────────────────
+let _companyList = null;
+
+async function ensureCompanyList() {
+  if (_companyList) return;
+  if (!_allContactsForSearch) {
+    _allContactsForSearch = await api.get('/api/contacts').catch(() => []);
+  }
+  const names = new Set((_allContactsForSearch || []).map(c => c.company).filter(Boolean));
+  _companyList = [...names].sort((a, b) => a.localeCompare(b));
+}
+
+async function showCompanyAC(slot, input) {
+  await ensureCompanyList();
+  const q = (input.value || '').trim().toLowerCase();
+  const resultsEl = document.getElementById(`company-ac-${slot}`);
+  if (!resultsEl) return;
+
+  // Also update contact picker as they type
+  scheduleContactPickerUpdate(slot);
+
+  if (!q || q.length < 1) { resultsEl.style.display = 'none'; return; }
+
+  const matches = (_companyList || [])
+    .filter(c => c.toLowerCase().includes(q))
+    .slice(0, 10);
+
+  if (!matches.length) { resultsEl.style.display = 'none'; return; }
+
+  resultsEl.innerHTML = matches.map(c => `
+    <div class="company-ac-item"
+         data-company="${esc(c)}"
+         onmousedown="selectCompanyAC(${slot}, this.dataset.company)">
+      ${esc(c.replace(new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')})`, 'gi'), '<strong>$1</strong>'))}
+    </div>`).join('');
+  resultsEl.style.display = 'block';
+}
+
+function selectCompanyAC(slot, company) {
+  const fieldId = slot === 1 ? 'f-customer' : `f-customer${slot}`;
+  const input = document.getElementById(fieldId);
+  if (input) input.value = company;
+  hideCompanyAC(slot);
+  // Immediately update contact picker with the selected company
+  updateContactPicker(slot);
+}
+
+function hideCompanyAC(slot) {
+  // Small delay so mousedown on an item fires before blur hides it
+  setTimeout(() => {
+    const el = document.getElementById(`company-ac-${slot}`);
+    if (el) el.style.display = 'none';
+  }, 180);
+}
+
 // ── Customer contact pickers in bid form ─────────────────────────────────────
 let _bidContactState = {};  // slot (1-5) → contact_id
 let _cpDebounce = null;

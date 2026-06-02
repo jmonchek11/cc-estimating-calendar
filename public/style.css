@@ -359,6 +359,22 @@ tbody td {
   vertical-align: middle;
 }
 
+/* ── Company autocomplete ── */
+.company-ac-wrap { position: relative; }
+.company-ac-results {
+  position: absolute; z-index: 1500; top: calc(100% + 2px); left: 0; right: 0;
+  background: var(--card-bg); border: 1px solid var(--primary);
+  border-radius: 6px; box-shadow: 0 6px 20px rgba(0,0,0,.12);
+  max-height: 220px; overflow-y: auto;
+}
+.company-ac-item {
+  padding: 9px 12px; cursor: pointer; font-size: 13px; color: var(--text);
+  border-bottom: 1px solid var(--border);
+}
+.company-ac-item:last-child { border-bottom: none; }
+.company-ac-item:hover { background: #f1f5f9; }
+.company-ac-item strong { color: var(--primary); }
+
 /* ── Customer contact picker in bid form ── */
 .contact-picker-wrap { margin-top: 5px; }
 .cp-row { display: flex; gap: 5px; align-items: center; }
