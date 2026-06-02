@@ -3093,13 +3093,17 @@ function openBidModal(bidId = null, defaultStage = 'opportunity', highlightIssue
   });
 
   if (bidId) {
+    // Show a loading state immediately, then fill + display once the API returns
+    document.getElementById('bid-modal-title').textContent = 'Loading…';
+    modal.style.display = 'flex';
+
     api.get(`/api/bids/${bidId}`).then(b => {
+      document.getElementById('bid-modal-title').textContent = 'Edit Bid';
       document.getElementById('bid-id').value = b.id;
       document.getElementById('f-bid_number').value = b.bid_number || '';
       document.getElementById('f-job_number').value = b.job_number || '';
       document.getElementById('f-stage').value = b.stage;
       document.getElementById('f-project_name').value = b.project_name;
-      document.getElementById('f-status').value = b.status || 'Open';
       document.getElementById('f-estimate_amount').value = b.estimate_amount || '';
       document.getElementById('f-estimator_id').value = b.estimator_id || '';
       document.getElementById('f-salesperson_id').value = b.salesperson_id || '';
@@ -3112,7 +3116,6 @@ function openBidModal(bidId = null, defaultStage = 'opportunity', highlightIssue
       document.getElementById('f-estimate_due_date').value = b.estimate_due_date || '';
       document.getElementById('f-estimate_start_date').value = b.estimate_start_date || '';
       document.getElementById('f-date_estimate_sent').value = b.date_estimate_sent || '';
-      document.getElementById('f-estimate_pct_complete').value = b.estimate_pct_complete ? Math.round(b.estimate_pct_complete * 100) : '';
       document.getElementById('f-estimate_approved_by').value = b.estimate_approved_by || '';
       document.getElementById('f-bid_result').value = b.bid_result || '';
       document.getElementById('f-next_followup_date').value = b.next_followup_date || '';
@@ -3123,13 +3126,15 @@ function openBidModal(bidId = null, defaultStage = 'opportunity', highlightIssue
       loadSubEstimatorsIntoForm(b.sub_estimators || []);
       loadContactPickersForBid(b);
       if (highlightIssues) highlightBidFormIssues(highlightIssues);
+    }).catch(e => {
+      closeBidModal();
+      alert('Error loading bid: ' + e.message);
     });
   } else {
     document.getElementById('f-stage').value = defaultStage;
     document.getElementById('f-date_received').value = today();
+    modal.style.display = 'flex';
   }
-
-  modal.style.display = 'flex';
 }
 
 // ── Company autocomplete for customer fields ──────────────────────────────────
@@ -3186,11 +3191,10 @@ function selectCompanyAC(slot, company) {
 }
 
 function hideCompanyAC(slot) {
-  // Small delay so mousedown on an item fires before blur hides it
-  setTimeout(() => {
-    const el = document.getElementById(`company-ac-${slot}`);
-    if (el) el.style.display = 'none';
-  }, 180);
+  // Immediate hide — dropdown items use onmousedown which fires before onblur,
+  // so selections still register even with instant close on blur.
+  const el = document.getElementById(`company-ac-${slot}`);
+  if (el) el.style.display = 'none';
 }
 
 // ── Customer contact pickers in bid form ─────────────────────────────────────
