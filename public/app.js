@@ -269,6 +269,7 @@ async function renderPage(page) {
       case 'history':       return await renderHistory(main);
       case 'cleanup':       return await renderCleanup(main);
       case 'calendar':      return await renderCalendar(main);
+      case 'projects':      return await renderProjects(main);
       case 'contacts':      return await renderContacts(main);
       case 'settings':      return await renderSettings(main);
       default:              return await renderDashboard(main);
@@ -2097,6 +2098,17 @@ async function renderSettings(main) {
 
     ${isAdmin ? `
     <div class="card" style="max-width:640px;margin-top:20px">
+      <div class="section-title">🏗️ Project Auto-Grouping</div>
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">
+        Automatically creates a Project for each unique project name in the database and links all existing bids to it.
+        Safe to run multiple times. Review the groupings and merge any duplicates after.
+      </p>
+      <button class="btn btn-primary btn-sm" onclick="runProjectMigration()">Run Auto-Grouping</button>
+      <div id="migration-result" style="margin-top:14px"></div>
+    </div>` : ''}
+
+    ${isAdmin ? `
+    <div class="card" style="max-width:640px;margin-top:20px">
       <div class="section-title">⏰ Follow-up Timelines</div>
       <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px">
         Set the default number of days used to auto-suggest the next follow-up date
@@ -2560,6 +2572,296 @@ function toggleChecklistNA(event, bidId, itemId) {
 
   updateChecklistUI(bidId);
   saveChecklist(bidId);
+}
+
+// ─────────────────────────────────────────────
+// PROJECTS PAGE
+// ─────────────────────────────────────────────
+let _projectsCache = [];
+let _projectSearchTimer = null;
+
+async function renderProjects(main) {
+  const search = document.getElementById('proj-search')?.value || '';
+  main.innerHTML = '<div class="loading-screen"><div class="spinner"></div></div>';
+
+  const params = search ? `?search=${encodeURIComponent(search)}` : '';
+  _projectsCache = await api.get('/api/projects' + params);
+
+  // For each project load bid counts from cache or fetch
+  const rows = _projectsCache.map(p => `
+    <div class="proj-row" onclick="openProjectPanel(${p.id})">
+      <div class="proj-name">${esc(p.name)}</div>
+      <div class="proj-actions" onclick="event.stopPropagation()">
+        <button class="btn btn-ghost btn-sm" style="color:var(--primary)"
+                onclick="openRebidModal(${p.id},'${esc(p.name)}')">+ Re-bid</button>
+      </div>
+    </div>`).join('');
+
+  main.innerHTML = `
+    <div class="page-header">
+      <div>
+        <div class="page-title">🏗️ Projects</div>
+        <div class="page-subtitle">${_projectsCache.length} projects</div>
+      </div>
+    </div>
+    <div class="filter-bar">
+      <input type="text" id="proj-search" placeholder="Search projects…"
+             value="${esc(search)}" oninput="debounceProjects()" />
+    </div>
+    <div class="card" style="padding:0">
+      ${_projectsCache.length
+        ? rows
+        : '<div class="empty-state"><div class="empty-state-icon">🏗️</div><div class="empty-state-title">No projects yet</div><div class="empty-state-desc">Run the project migration in Settings to auto-group existing bids.</div></div>'}
+    </div>`;
+}
+
+function debounceProjects() {
+  clearTimeout(_projectSearchTimer);
+  _projectSearchTimer = setTimeout(() => renderProjects(document.getElementById('main')), 300);
+}
+
+async function openProjectPanel(projectId) {
+  const [project, bids] = await Promise.all([
+    api.get(`/api/projects/${projectId}`),
+    api.get(`/api/projects/${projectId}/bids`),
+  ]);
+
+  const ACTIVE = ['opportunity','active_bid','active_co','follow_up'];
+  const activeBids  = bids.filter(b => ACTIVE.includes(b.stage));
+  const closedBids  = bids.filter(b => !ACTIVE.includes(b.stage));
+  const totalValue  = bids.reduce((s,b) => s + (b.estimate_amount||0), 0);
+  const wonValue    = bids.filter(b=>b.stage==='awarded').reduce((s,b)=>s+(b.estimate_amount||0),0);
+
+  function bidCard(b) {
+    const estM = State.team.find(t => t.id === b.estimator_id);
+    const stageColor = b.stage==='awarded'?'#16a34a':b.stage==='not_awarded'?'#dc2626':b.stage==='closed'?'#64748b':'var(--primary)';
+    return `
+      <div class="proj-bid-card clickable-row" onclick="openJobPanel(${b.id})">
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:700;font-size:13px">${esc(b.project_name)}
+            ${b.bid_number?`<span style="color:var(--text-muted);font-weight:400;font-size:12px"> #${esc(b.bid_number)}</span>`:''}
+          </div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:2px">
+            <span style="color:${stageColor};font-weight:600">${stageName(b.stage)}</span>
+            ${b.estimate_amount ? ' · ' + fmt(b.estimate_amount,'currency') : ''}
+            ${estM ? ' · ' + estPill(estM.initials, estM.id) : ''}
+            ${b.estimate_due_date ? ' · Due ' + fmt(b.estimate_due_date,'date') : ''}
+          </div>
+        </div>
+        ${jurisdictionBadge(b.jurisdiction,{small:true})}
+      </div>`;
+  }
+
+  const overlay = _buildModal('project-panel');
+  overlay.innerHTML = `
+    <div class="modal-box" style="max-width:680px;max-height:88vh;overflow:hidden;display:flex;flex-direction:column">
+      <div class="modal-header">
+        <div>
+          <div style="font-size:18px;font-weight:800">🏗️ ${esc(project.name)}</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:2px">
+            ${bids.length} bid${bids.length!==1?'s':''} total
+            · ${fmtCompact(totalValue)} pipeline
+            ${wonValue ? ' · ' + fmtCompact(wonValue) + ' won' : ''}
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="btn btn-primary btn-sm" onclick="openRebidModal(${project.id},'${esc(project.name)}')">+ Re-bid</button>
+          <button class="modal-close" onclick="document.getElementById('project-panel').remove()">×</button>
+        </div>
+      </div>
+      <div style="flex:1;overflow-y:auto;padding:16px 24px">
+        ${activeBids.length ? `
+          <div class="jp-section-title" style="margin-bottom:10px">Active (${activeBids.length})</div>
+          ${activeBids.map(bidCard).join('')}` : ''}
+        ${closedBids.length ? `
+          <div class="jp-section-title" style="margin-top:16px;margin-bottom:10px">Closed / Decided (${closedBids.length})</div>
+          ${closedBids.map(bidCard).join('')}` : ''}
+        ${!bids.length ? '<div class="empty-state" style="padding:20px 0"><div class="empty-state-desc">No bids linked to this project yet.</div></div>' : ''}
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+// ── Project picker in bid form ────────────────────────────────────────────────
+let _projectPickerCache = null;
+let _selectedProjectId = null;
+
+async function showProjectAC(input) {
+  if (!_projectPickerCache) {
+    _projectPickerCache = await api.get('/api/projects').catch(() => []);
+  }
+  const q = (input.value || '').trim().toLowerCase();
+  const resultsEl = document.getElementById('project-ac-results');
+  if (!resultsEl) return;
+
+  if (!q) { resultsEl.style.display = 'none'; return; }
+
+  const matches = (_projectPickerCache || [])
+    .filter(p => p.name.toLowerCase().includes(q))
+    .slice(0, 8);
+
+  const escapedQ = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const rows = matches.map(p => {
+    const hl = esc(p.name).replace(new RegExp(`(${escapedQ})`, 'gi'), '<strong>$1</strong>');
+    return `<div class="company-ac-item" data-id="${p.id}" data-name="${esc(p.name)}"
+                 onmousedown="selectProjectAC(this.dataset.id, this.dataset.name)">${hl}</div>`;
+  }).join('');
+
+  // Always show "Create new project" option
+  const createRow = `<div class="company-ac-item" style="color:var(--primary);font-weight:600"
+                          onmousedown="createAndSelectProject('${esc(input.value.trim())}')">
+    + Create project "${esc(input.value.trim())}"
+  </div>`;
+
+  resultsEl.innerHTML = rows + createRow;
+  resultsEl.style.display = 'block';
+}
+
+function hideProjectAC() {
+  const el = document.getElementById('project-ac-results');
+  if (el) el.style.display = 'none';
+}
+
+function selectProjectAC(id, name) {
+  _selectedProjectId = Number(id);
+  document.getElementById('f-project_id').value = id;
+  document.getElementById('f-project_name_search').value = name;
+  document.getElementById('f-project_name').value = name;
+  hideProjectAC();
+  // Show confirmation badge
+  const badge = document.getElementById('project-selected-badge');
+  if (badge) {
+    badge.style.display = 'block';
+    badge.innerHTML = `<span style="font-size:12px;color:#16a34a;font-weight:600">✓ Linked to existing project</span>
+      <button type="button" class="btn btn-ghost btn-sm" style="font-size:11px;margin-left:8px"
+              onclick="clearProjectSelection()">Change</button>`;
+  }
+}
+
+async function createAndSelectProject(name) {
+  if (!name) return;
+  try {
+    const p = await api.post('/api/projects', { name });
+    if (_projectPickerCache) _projectPickerCache.unshift(p);
+    selectProjectAC(p.id, p.name);
+  } catch (e) { alert('Failed to create project: ' + e.message); }
+}
+
+function clearProjectSelection() {
+  _selectedProjectId = null;
+  document.getElementById('f-project_id').value = '';
+  document.getElementById('f-project_name_search').value = '';
+  const badge = document.getElementById('project-selected-badge');
+  if (badge) badge.style.display = 'none';
+}
+
+function loadProjectForBid(bid) {
+  _selectedProjectId = bid.project_id || null;
+  document.getElementById('f-project_id').value = bid.project_id || '';
+  document.getElementById('f-project_name_search').value = bid.project_name || '';
+  const badge = document.getElementById('project-selected-badge');
+  if (badge) {
+    if (bid.project_id) {
+      badge.style.display = 'block';
+      badge.innerHTML = `<span style="font-size:12px;color:var(--text-muted)">Project ID #${bid.project_id}</span>
+        <button type="button" class="btn btn-ghost btn-sm" style="font-size:11px;margin-left:8px"
+                onclick="openProjectPanel(${bid.project_id})">View →</button>`;
+    } else {
+      badge.style.display = 'none';
+    }
+  }
+}
+
+// ── Re-bid Modal ──────────────────────────────────────────────────────────────
+async function openRebidModal(projectId, projectName) {
+  document.getElementById('project-panel')?.remove();
+
+  // Pre-fill a new bid form linked to this project
+  openBidModal(null, 'active_bid');
+
+  // Wait a tick for modal to open, then pre-fill project
+  setTimeout(() => {
+    selectProjectAC(projectId, projectName);
+    document.getElementById('f-project_name').value = projectName;
+    // Expand so user knows it's a fresh bid under the same project
+    document.getElementById('bid-modal-title').textContent = `Re-bid — ${projectName}`;
+  }, 50);
+}
+
+// ── Migration admin UI (called from settings page) ────────────────────────────
+let _migrationResult = null;
+
+async function runProjectMigration() {
+  const btn = event.target;
+  btn.disabled = true; btn.textContent = 'Running…';
+  try {
+    _migrationResult = await api.post('/api/admin/migrate-projects', {});
+    renderProjectMigrationResult(_migrationResult);
+  } catch (e) {
+    alert('Migration failed: ' + e.message);
+    btn.disabled = false; btn.textContent = 'Run Auto-Grouping';
+  }
+}
+
+function renderProjectMigrationResult(result) {
+  const el = document.getElementById('migration-result');
+  if (!el) return;
+
+  // Flag possible duplicate project names (edit distance ≤ 3 or one is a substring of other)
+  const projects = result.projects || [];
+  const suspects = [];
+  for (let i = 0; i < projects.length; i++) {
+    for (let j = i+1; j < projects.length; j++) {
+      const a = projects[i].name.toLowerCase().replace(/[^a-z0-9]/g,'');
+      const b = projects[j].name.toLowerCase().replace(/[^a-z0-9]/g,'');
+      if (a.includes(b) || b.includes(a) || levenshtein(a,b) <= 3) {
+        suspects.push([projects[i], projects[j]]);
+      }
+    }
+  }
+
+  const suspectHtml = suspects.slice(0,20).map(([a,b]) => `
+    <div style="padding:8px 0;border-bottom:1px solid var(--border);font-size:13px">
+      <strong>${esc(a.name)}</strong> (${a.bid_count} bids) &amp;
+      <strong>${esc(b.name)}</strong> (${b.bid_count} bids)
+      <div style="margin-top:4px;display:flex;gap:6px">
+        <button class="btn btn-ghost btn-sm" onclick="mergeIntoProject(${a._id},${b._id},'${esc(a.name)}')">
+          Keep "${esc(a.name)}"
+        </button>
+        <button class="btn btn-ghost btn-sm" onclick="mergeIntoProject(${b._id},${a._id},'${esc(b.name)}')">
+          Keep "${esc(b.name)}"
+        </button>
+      </div>
+    </div>`).join('');
+
+  el.innerHTML = `
+    <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:12px 16px;margin-bottom:12px;font-size:13px">
+      ✅ Migration complete — <strong>${result.created}</strong> projects created,
+      <strong>${result.linked}</strong> bids linked.
+    </div>
+    ${suspects.length ? `
+    <div style="font-size:13px;font-weight:700;margin-bottom:8px;color:#d97706">
+      ⚠️ ${suspects.length} possible duplicate${suspects.length>1?'s':''} — review and merge if needed:
+    </div>
+    ${suspectHtml}` : '<div style="font-size:13px;color:#16a34a">✓ No duplicate project names detected.</div>'}`;
+}
+
+async function mergeIntoProject(keepId, absorbId, keepName) {
+  if (!confirm(`Merge all bids from the other project into "${keepName}"?`)) return;
+  try {
+    await api.post('/api/admin/merge-projects', { keep_id: keepId, absorb_ids: [absorbId] });
+    // Re-run to refresh
+    _migrationResult = await api.post('/api/admin/migrate-projects', {});
+    renderProjectMigrationResult(_migrationResult);
+  } catch (e) { alert('Merge failed: ' + e.message); }
+}
+
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  const d = Array.from({length: m+1}, (_,i) => Array.from({length: n+1}, (_,j) => i === 0 ? j : j === 0 ? i : 0));
+  for (let i = 1; i <= m; i++) for (let j = 1; j <= n; j++)
+    d[i][j] = a[i-1]===b[j-1] ? d[i-1][j-1] : 1 + Math.min(d[i-1][j], d[i][j-1], d[i-1][j-1]);
+  return d[m][n];
 }
 
 // ─────────────────────────────────────────────
@@ -3086,6 +3388,11 @@ function openBidModal(bidId = null, defaultStage = 'opportunity', highlightIssue
   populateTeamDropdowns('f-estimator_id', 'f-salesperson_id');
   loadSubEstimatorsIntoForm([]);  // clear any previous rows
   _bidContactState = {};
+  _selectedProjectId = null;
+  document.getElementById('f-project_id').value = '';
+  document.getElementById('f-project_name_search').value = '';
+  const projBadge = document.getElementById('project-selected-badge');
+  if (projBadge) projBadge.style.display = 'none';
   [1,2,3,4,5].forEach(slot => {
     const el = document.getElementById(`contact-picker-${slot}`);
     if (el) el.innerHTML = '';
@@ -3138,6 +3445,7 @@ function openBidModal(bidId = null, defaultStage = 'opportunity', highlightIssue
       document.getElementById('f-jurisdiction').value = b.jurisdiction || '';
       loadSubEstimatorsIntoForm(b.sub_estimators || []);
       loadContactPickersForBid(b);
+      loadProjectForBid(b);
       if (highlightIssues) highlightBidFormIssues(highlightIssues);
     }).catch(e => {
       closeBidModal();
@@ -3480,8 +3788,9 @@ async function saveBid() {
   const data = {
     bid_number: document.getElementById('f-bid_number').value.trim(),
     job_number: document.getElementById('f-job_number').value.trim(),
-    stage: document.getElementById('f-stage').value,
-    project_name: document.getElementById('f-project_name').value.trim(),
+    project_id:   Number(document.getElementById('f-project_id')?.value) || null,
+    stage:        document.getElementById('f-stage').value,
+    project_name: document.getElementById('f-project_name_search')?.value.trim() || document.getElementById('f-project_name').value.trim(),
     estimate_amount: document.getElementById('f-estimate_amount').value || null,
     estimator_id: document.getElementById('f-estimator_id').value || null,
     salesperson_id: document.getElementById('f-salesperson_id').value || null,
@@ -4210,6 +4519,7 @@ function renderJobPanelContent(bid, followups, contacts = [], linkedCOs = []) {
         ${statusBadge(bid.status)}
         ${bid.bid_number ? `<span style="font-size:12px;color:var(--text-muted)">#${esc(bid.bid_number)}</span>` : ''}
         ${bid.job_number ? `<span style="font-size:12px;color:var(--text-muted)">Job: ${esc(bid.job_number)}</span>` : ''}
+        ${bid.project_id ? `<button class="btn-inline-link" style="font-size:12px" onclick="openProjectPanel(${bid.project_id})">🏗️ View Project</button>` : ''}
       </div>
     </div>
     ${renderLifecycleSection(bid, linkedCOs)}

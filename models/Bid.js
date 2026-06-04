@@ -27,6 +27,7 @@ const bidSchema = new mongoose.Schema({
   awarded_contractor: { type: String, default: null },
   contract_reviewed_by: { type: String, default: null },
   date_contract_signed: { type: String, default: null },
+  project_id: { type: Number, default: null },
   status: { type: String, default: 'Open' },
   close_reason:     { type: String, default: null },
   date_not_awarded: { type: String, default: null },

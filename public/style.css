@@ -385,6 +385,22 @@ tbody td {
   padding: 3px 8px; background: #dcfce7; border-radius: 4px; display: inline-block;
 }
 
+/* ── Projects page ── */
+.proj-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 20px; border-bottom: 1px solid var(--border);
+  cursor: pointer; transition: background .1s;
+}
+.proj-row:last-child { border-bottom: none; }
+.proj-row:hover { background: #f8fafc; }
+.proj-name { font-size: 14px; font-weight: 600; color: var(--text); }
+.proj-bid-card {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px; margin-bottom: 6px;
+  background: #f8fafc; border-radius: 6px; border: 1px solid var(--border);
+}
+.proj-bid-card:hover { border-color: var(--primary); }
+
 /* ── Bid lifecycle timeline ── */
 .lifecycle-phase {
   display: flex; gap: 10px; align-items: flex-start;

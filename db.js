@@ -6,6 +6,7 @@ const Bid = require('./models/Bid');
 const Followup = require('./models/Followup');
 const Contact = require('./models/Contact');
 const Settings = require('./models/Settings');
+const Project = require('./models/Project');
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -74,6 +75,7 @@ function formatBid(b) {
     date_contract_signed: o.date_contract_signed ?? null,
     status: o.status ?? 'Open',
     next_followup_date: o.next_followup_date ?? null,
+    project_id:         o.project_id          ?? null,
     submitted_by:       o.submitted_by       ?? null,
     created_by:         o.created_by         ?? null,
     close_reason:       o.close_reason        ?? null,
@@ -545,6 +547,87 @@ async function checkDuplicateBidNumber(bidNumber) {
   return existing;
 }
 
+// ── Projects ──────────────────────────────────────────────────────────────────
+
+function fmtProject(p) {
+  if (!p) return null;
+  const o = p.toObject ? p.toObject() : p;
+  return { id: o._id, name: o.name, created_by: o.created_by ?? null, created_at: o.created_at ?? null };
+}
+
+async function getProjects({ search } = {}) {
+  const q = {};
+  if (search) q.name = { $regex: search.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'), $options: 'i' };
+  const projects = await Project.find(q).sort({ name: 1 }).lean();
+  return projects.map(fmtProject);
+}
+
+async function getProject(id) {
+  const p = await Project.findById(Number(id)).lean();
+  return p ? fmtProject(p) : null;
+}
+
+async function createProject(name, createdBy) {
+  const existing = await Project.findOne({ name }).lean();
+  if (existing) return fmtProject(existing);
+  const id = await nextId('projects');
+  const now = nowStr();
+  const doc = await Project.create({ _id: id, name, created_by: createdBy || null, created_at: now, updated_at: now });
+  return fmtProject(doc);
+}
+
+async function updateProject(id, { name }) {
+  await Project.updateOne({ _id: Number(id) }, { $set: { name, updated_at: nowStr() } });
+  return getProject(id);
+}
+
+async function getProjectBids(projectId) {
+  const bids = await Bid.aggregate([
+    { $match: { is_deleted: 0, project_id: Number(projectId) } },
+    ...BID_PIPELINE,
+    { $sort: { created_at: 1 } },
+  ]).then(r => r.map(formatBid));
+  return bids;
+}
+
+async function mergeProjects(keepId, absorbIds) {
+  // Move all bids from absorbIds → keepId, then delete absorbed projects
+  await Bid.updateMany({ project_id: { $in: absorbIds.map(Number) } }, { $set: { project_id: Number(keepId), updated_at: nowStr() } });
+  await Project.deleteMany({ _id: { $in: absorbIds.map(Number) } });
+  return getProject(keepId);
+}
+
+async function runProjectMigration() {
+  // Find distinct project names from bids that have no project_id yet
+  const unlinked = await Bid.find({ is_deleted: 0, project_id: null }, { project_name: 1 }).lean();
+  const nameSet = new Set(unlinked.map(b => b.project_name).filter(Boolean));
+
+  let created = 0, linked = 0;
+  for (const name of nameSet) {
+    let project = await Project.findOne({ name }).lean();
+    if (!project) {
+      const id = await nextId('projects');
+      const now = nowStr();
+      project = await Project.create({ _id: id, name, created_at: now, updated_at: now });
+      created++;
+    }
+    const res = await Bid.updateMany(
+      { project_name: name, is_deleted: 0, project_id: null },
+      { $set: { project_id: project._id, updated_at: nowStr() } }
+    );
+    linked += res.modifiedCount;
+  }
+
+  // Return all projects for review (with bid count)
+  const allProjects = await Project.aggregate([
+    { $lookup: { from: 'bids', localField: '_id', foreignField: 'project_id', as: 'bids' } },
+    { $addFields: { bid_count: { $size: '$bids' } } },
+    { $project: { name: 1, bid_count: 1 } },
+    { $sort: { name: 1 } },
+  ]);
+  return { created, linked, projects: allProjects };
+}
+
 // ── Settings ──────────────────────────────────────────────────────────────────
 
 async function getSettings() {
@@ -653,7 +736,7 @@ const BID_FIELDS = [
   'estimate_review_date', 'estimate_amount', 'estimate_pct_complete',
   'estimate_approved_by', 'bid_result', 'award_date', 'awarded_contractor',
   'contract_reviewed_by', 'date_contract_signed', 'status', 'next_followup_date',
-  'sub_estimators', 'checklist', 'parent_bid_id', 'phases', 'jurisdiction',
+  'project_id', 'sub_estimators', 'checklist', 'parent_bid_id', 'phases', 'jurisdiction',
   'submitted_by', 'created_by', 'customer_contacts',
   'close_reason', 'date_not_awarded', 'not_awarded_notes',
 ];
@@ -1346,6 +1429,7 @@ module.exports = {
   getFollowups, logFollowup,
   getStats, getDigest, getAnalytics,
   findOrphanEstimators, fixOrphanEstimators,
+  getProjects, getProject, createProject, updateProject, getProjectBids, mergeProjects, runProjectMigration,
   getEstimatorBids,
   savePhase, getLinkedCOs, linkCOToParent, checkDuplicateBidNumber,
   getSettings, updateSettings,

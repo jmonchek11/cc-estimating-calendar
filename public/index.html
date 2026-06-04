@@ -124,6 +124,9 @@
         <span class="nav-icon">🧹</span> Data Cleanup
         <span class="nav-badge danger" id="badge-cleanup" style="display:none"></span>
       </a>
+      <a class="nav-item" data-page="projects" href="#projects">
+        <span class="nav-icon">🏗️</span> Projects
+      </a>
       <a class="nav-item" data-page="contacts" href="#contacts">
         <span class="nav-icon">👥</span> Contacts
       </a>
@@ -152,6 +155,20 @@
       <div class="modal-body">
         <form id="bid-form" onsubmit="return false">
           <input type="hidden" id="bid-id" />
+
+          <div class="form-section-title">Project</div>
+          <div class="form-group">
+            <label>Project <span style="color:var(--danger)">*</span></label>
+            <input type="hidden" id="f-project_id" />
+            <div class="company-ac-wrap">
+              <input type="text" id="f-project_name_search"
+                     placeholder="Search existing project or type new project name…"
+                     oninput="showProjectAC(this)" onblur="hideProjectAC()"
+                     autocomplete="off" />
+              <div id="project-ac-results" class="company-ac-results" style="display:none"></div>
+            </div>
+            <div id="project-selected-badge" style="display:none;margin-top:5px"></div>
+          </div>
 
           <div class="form-section-title">Basic Information</div>
           <div class="form-grid-3">

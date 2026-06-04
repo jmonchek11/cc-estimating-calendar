@@ -348,6 +348,51 @@ app.get('/api/analytics', async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── PROJECTS ──────────────────────────────────────────────────────────────────
+app.get('/api/projects', async (req, res) => {
+  try { res.json(await db.getProjects(req.query)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/projects', async (req, res) => {
+  try { res.json(await db.createProject(req.body.name, req.session.userId || null)); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.get('/api/projects/:id', async (req, res) => {
+  try {
+    const p = await db.getProject(req.params.id);
+    p ? res.json(p) : res.status(404).json({ error: 'Not found' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/projects/:id', async (req, res) => {
+  try { res.json(await db.updateProject(req.params.id, req.body)); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.get('/api/projects/:id/bids', async (req, res) => {
+  try { res.json(await db.getProjectBids(req.params.id)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/admin/migrate-projects', async (req, res) => {
+  try {
+    const admin = await db.getMember(req.session.userId);
+    if (!admin || !admin.is_admin) return res.status(403).json({ error: 'Admin only.' });
+    res.json(await db.runProjectMigration());
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/admin/merge-projects', async (req, res) => {
+  try {
+    const admin = await db.getMember(req.session.userId);
+    if (!admin || !admin.is_admin) return res.status(403).json({ error: 'Admin only.' });
+    const { keep_id, absorb_ids } = req.body;
+    res.json(await db.mergeProjects(keep_id, absorb_ids || []));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── CONTACTS ──────────────────────────────────────────────────────────────────
 app.get('/api/contacts', async (req, res) => {
   try { res.json(await db.getContacts(req.query)); }
