@@ -164,17 +164,15 @@
               <label>Job #</label>
               <input type="text" id="f-job_number" placeholder="12345" />
             </div>
-            <div class="form-group">
+            <div class="form-group" id="f-stage-group">
               <label>Stage</label>
+              <!-- new bids: only 3 entry stages. Existing bids show stage as read-only. -->
               <select id="f-stage">
                 <option value="opportunity">Opportunity</option>
                 <option value="active_bid">Active Bid</option>
-                <option value="active_co">Change Order</option>
-                <option value="follow_up">Follow Up</option>
-                <option value="awarded">Awarded</option>
-                <option value="not_awarded">Not Awarded</option>
-                <option value="closed">Closed</option>
+                <option value="active_co">Change Order (RFC)</option>
               </select>
+              <div id="f-stage-readonly" style="display:none;padding:6px 10px;background:var(--border);border-radius:6px;font-size:13px;font-weight:600"></div>
             </div>
           </div>
 
@@ -548,8 +546,7 @@
     <div class="job-panel-footer">
       <button class="btn btn-secondary btn-sm" onclick="openBidModalFromPanel()">Edit</button>
       <button class="btn btn-primary btn-sm" onclick="openFollowupModalFromPanel()">📝 Log Follow-up</button>
-      <button class="btn btn-sm" style="background:#16a34a;color:#fff;font-weight:700" onclick="openSubmitModalFromPanel()" id="panel-submit-btn">Submit</button>
-      <button class="btn btn-ghost btn-sm" onclick="openStageModalFromPanel()">➡️ Move Stage</button>
+      <div id="panel-stage-actions" style="display:flex;gap:6px;flex-wrap:wrap"></div>
     </div>
   </div>
 

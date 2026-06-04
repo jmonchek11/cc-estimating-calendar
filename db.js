@@ -74,8 +74,11 @@ function formatBid(b) {
     date_contract_signed: o.date_contract_signed ?? null,
     status: o.status ?? 'Open',
     next_followup_date: o.next_followup_date ?? null,
-    submitted_by:      o.submitted_by  ?? null,
-    created_by:        o.created_by    ?? null,
+    submitted_by:       o.submitted_by       ?? null,
+    created_by:         o.created_by         ?? null,
+    close_reason:       o.close_reason        ?? null,
+    date_not_awarded:   o.date_not_awarded    ?? null,
+    not_awarded_notes:  o.not_awarded_notes   ?? null,
     jurisdiction:      o.jurisdiction  ?? null,
     customer_contacts: (o.customer_contacts || []).map(cc => ({
       customer_name: cc.customer_name,
@@ -652,6 +655,7 @@ const BID_FIELDS = [
   'contract_reviewed_by', 'date_contract_signed', 'status', 'next_followup_date',
   'sub_estimators', 'checklist', 'parent_bid_id', 'phases', 'jurisdiction',
   'submitted_by', 'created_by', 'customer_contacts',
+  'close_reason', 'date_not_awarded', 'not_awarded_notes',
 ];
 
 async function createBid(data) {

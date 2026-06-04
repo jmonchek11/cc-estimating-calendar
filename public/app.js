@@ -536,7 +536,6 @@ async function renderBidTable(main, stage, title, icon) {
           <div class="actions" onclick="event.stopPropagation()">
             <button class="btn btn-ghost btn-sm" onclick="openBidModal(${b.id})" title="Edit" style="color:var(--primary)">Edit</button>
             <button class="btn btn-ghost btn-sm" onclick="openFollowupModal(${b.id})" title="Log Follow-up">📝</button>
-            <button class="btn btn-ghost btn-sm" onclick="openStageModal(${b.id}, '${esc(b.stage)}')" title="Move Stage">➡️</button>
           </div>
         </td>
       </tr>`;
@@ -3092,6 +3091,14 @@ function openBidModal(bidId = null, defaultStage = 'opportunity', highlightIssue
     if (el) el.innerHTML = '';
   });
 
+  // Stage field: editable for new bids, read-only for existing
+  const stageSelect   = document.getElementById('f-stage');
+  const stageReadonly = document.getElementById('f-stage-readonly');
+  if (!bidId) {
+    if (stageSelect)   stageSelect.style.display   = '';
+    if (stageReadonly) stageReadonly.style.display  = 'none';
+  }
+
   if (bidId) {
     // Show a loading state immediately, then fill + display once the API returns
     document.getElementById('bid-modal-title').textContent = 'Loading…';
@@ -3119,6 +3126,12 @@ function openBidModal(bidId = null, defaultStage = 'opportunity', highlightIssue
       document.getElementById('f-estimate_approved_by').value = b.estimate_approved_by || '';
       document.getElementById('f-bid_result').value = b.bid_result || '';
       document.getElementById('f-next_followup_date').value = b.next_followup_date || '';
+      // Stage: show as read-only for existing bids
+      if (stageSelect)   stageSelect.style.display   = 'none';
+      if (stageReadonly) {
+        stageReadonly.style.display = '';
+        stageReadonly.textContent   = stageName(b.stage);
+      }
       document.getElementById('f-notes').value = b.notes || '';
       document.getElementById('f-award_date').value = b.award_date || '';
       document.getElementById('f-awarded_contractor').value = b.awarded_contractor || '';
@@ -4037,11 +4050,10 @@ async function openJobPanel(bidId) {
     ]);
     document.getElementById('job-panel-title').textContent = bid.project_name;
     body.innerHTML = renderJobPanelContent(bid, followups, contacts, linkedCOs);
-    // Show/hide Submit button based on stage
-    const submitBtn = document.getElementById('panel-submit-btn');
-    if (submitBtn) {
-      submitBtn.style.display = (bid.stage === 'active_bid' || bid.stage === 'active_co') ? '' : 'none';
-    }
+
+    // Render stage-specific action buttons
+    const actionsEl = document.getElementById('panel-stage-actions');
+    if (actionsEl) actionsEl.innerHTML = renderPanelStageActions(bid);
   } catch (e) {
     body.innerHTML = `<div class="text-danger" style="padding:16px">Error loading: ${esc(e.message)}</div>`;
   }
@@ -4079,12 +4091,14 @@ function renderJobPanelContent(bid, followups, contacts = [], linkedCOs = []) {
     }</span></div>` : '',
     bid.salesperson_initials ? `<div class="jp-field"><span class="jp-label">Salesperson</span><span class="jp-value">${estPill(bid.salesperson_initials, bid.salesperson_id, { green: true })}</span></div>` : '',
     (() => {
-      if (!bid.submitted_by && !bid.created_by) return '';
       const sub = bid.submitted_by ? State.team.find(t => t.id === bid.submitted_by) : null;
-      const cre = bid.created_by  ? State.team.find(t => t.id === bid.created_by)  : null;
+      const cre = bid.created_by   ? State.team.find(t => t.id === bid.created_by)  : null;
       return [
         sub ? `<div class="jp-field"><span class="jp-label">Submitted By</span><span class="jp-value">${estPill(sub.initials, sub.id)}</span></div>` : '',
         cre ? `<div class="jp-field"><span class="jp-label">Created By</span><span class="jp-value">${estPill(cre.initials, cre.id)}</span></div>` : '',
+        bid.close_reason      ? `<div class="jp-field"><span class="jp-label" style="color:#dc2626">Close Reason</span><span class="jp-value" style="color:#dc2626">${esc(bid.close_reason)}</span></div>` : '',
+        bid.date_not_awarded  ? `<div class="jp-field"><span class="jp-label">Not Awarded On</span><span class="jp-value">${fmt(bid.date_not_awarded,'date')}</span></div>` : '',
+        bid.not_awarded_notes ? `<div class="jp-field"><span class="jp-label">Feedback</span><span class="jp-value" style="font-style:italic">${esc(bid.not_awarded_notes)}</span></div>` : '',
       ].join('');
     })(),
   ].filter(Boolean).join('');
@@ -4862,6 +4876,180 @@ async function confirmSubmitBid(bidId) {
     await renderPage(State.currentPage);
     await updateBadges();
   } catch (e) { alert('Submit failed: ' + e.message); }
+}
+
+// ── State Machine: stage action buttons & modals ──────────────────────────────
+
+function renderPanelStageActions(bid) {
+  const id = bid.id;
+  switch (bid.stage) {
+    case 'opportunity':
+      return `
+        <button class="btn btn-sm" style="background:#3b82f6;color:#fff;font-weight:700"
+                onclick="openMoveToBidModal(${id})">→ Active Bid</button>
+        <button class="btn btn-sm" style="background:#64748b;color:#fff"
+                onclick="openCloseModal(${id})">Close</button>`;
+    case 'active_bid':
+    case 'active_co':
+      return `
+        <button class="btn btn-sm" style="background:#16a34a;color:#fff;font-weight:700"
+                onclick="openSubmitModal(${id})">Submit Bid</button>
+        <button class="btn btn-sm" style="background:#64748b;color:#fff"
+                onclick="openCloseModal(${id})">Close</button>`;
+    case 'follow_up':
+      return `
+        <button class="btn btn-sm" style="background:#16a34a;color:#fff;font-weight:700"
+                onclick="openAwardModal(${id})">✓ Awarded</button>
+        <button class="btn btn-sm" style="background:#dc2626;color:#fff;font-weight:700"
+                onclick="openNotAwardedModal(${id})">✗ Not Awarded</button>
+        <button class="btn btn-sm" style="background:#64748b;color:#fff"
+                onclick="openCloseModal(${id})">Close</button>`;
+    default:
+      return ''; // awarded, not_awarded, closed — no forward transitions
+  }
+}
+
+// ── Move Opportunity → Active Bid ─────────────────────────────────────────────
+async function openMoveToBidModal(bidId) {
+  const bid = await api.get(`/api/bids/${bidId}`);
+  if (!confirm(`Move "${bid.project_name}" to Active Bid?`)) return;
+  try {
+    await api.put(`/api/bids/${bidId}`, { stage: 'active_bid', status: 'Open' });
+    await renderPage(State.currentPage);
+    await updateBadges();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+// ── Award Modal ───────────────────────────────────────────────────────────────
+function openAwardModal(bidId) {
+  const overlay = _buildModal('award-modal');
+  overlay.innerHTML = `
+    <div class="modal-box modal-small">
+      <div class="modal-header">
+        <span style="font-weight:800;font-size:15px">✅ Mark Awarded</span>
+        <button class="modal-close" onclick="document.getElementById('award-modal').remove()">×</button>
+      </div>
+      <div style="padding:20px 24px">
+        <div class="form-group">
+          <label class="form-label">Award Date <span style="color:var(--danger)">*</span></label>
+          <input class="form-input" type="date" id="aw-date" value="${today()}" />
+        </div>
+      </div>
+      <div style="padding:0 24px 20px;display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn btn-secondary" onclick="document.getElementById('award-modal').remove()">Cancel</button>
+        <button class="btn btn-sm" style="background:#16a34a;color:#fff;font-weight:700;padding:8px 18px"
+                onclick="confirmAward(${bidId})">Confirm Awarded</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+async function confirmAward(bidId) {
+  const date = document.getElementById('aw-date')?.value;
+  if (!date) { alert('Award date is required.'); return; }
+  try {
+    await api.put(`/api/bids/${bidId}`, { stage: 'awarded', status: 'Awarded', award_date: date });
+    document.getElementById('award-modal')?.remove();
+    celebrateAward();
+    if (State.currentPanelBidId === bidId) closeJobPanel();
+    await renderPage(State.currentPage);
+    await updateBadges();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+// ── Not Awarded Modal ─────────────────────────────────────────────────────────
+function openNotAwardedModal(bidId) {
+  const overlay = _buildModal('not-awarded-modal');
+  overlay.innerHTML = `
+    <div class="modal-box modal-small">
+      <div class="modal-header">
+        <span style="font-weight:800;font-size:15px">✗ Mark Not Awarded</span>
+        <button class="modal-close" onclick="document.getElementById('not-awarded-modal').remove()">×</button>
+      </div>
+      <div style="padding:20px 24px;display:flex;flex-direction:column;gap:14px">
+        <div class="form-group">
+          <label class="form-label">Date Notified <span style="color:var(--danger)">*</span></label>
+          <input class="form-input" type="date" id="na-date" value="${today()}" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Customer Feedback <span style="color:var(--text-muted)">(optional)</span></label>
+          <textarea class="form-input" id="na-notes" rows="3"
+                    placeholder="e.g. Price too high, not clear on SOW, GC awarded to preferred vendor…"></textarea>
+        </div>
+      </div>
+      <div style="padding:0 24px 20px;display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn btn-secondary" onclick="document.getElementById('not-awarded-modal').remove()">Cancel</button>
+        <button class="btn btn-sm" style="background:#dc2626;color:#fff;font-weight:700;padding:8px 18px"
+                onclick="confirmNotAwarded(${bidId})">Confirm Not Awarded</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+async function confirmNotAwarded(bidId) {
+  const date  = document.getElementById('na-date')?.value;
+  const notes = document.getElementById('na-notes')?.value.trim() || null;
+  if (!date) { alert('Date notified is required.'); return; }
+  try {
+    await api.put(`/api/bids/${bidId}`, {
+      stage: 'not_awarded', status: 'Not Awarded',
+      date_not_awarded: date, not_awarded_notes: notes,
+    });
+    document.getElementById('not-awarded-modal')?.remove();
+    if (State.currentPanelBidId === bidId) closeJobPanel();
+    await renderPage(State.currentPage);
+    await updateBadges();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+// ── Close Modal (any stage) ───────────────────────────────────────────────────
+function openCloseModal(bidId) {
+  const overlay = _buildModal('close-bid-modal');
+  overlay.innerHTML = `
+    <div class="modal-box modal-small">
+      <div class="modal-header">
+        <span style="font-weight:800;font-size:15px">🔒 Close Bid</span>
+        <button class="modal-close" onclick="document.getElementById('close-bid-modal').remove()">×</button>
+      </div>
+      <div style="padding:20px 24px">
+        <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">
+          Closing a bid removes it from the active pipeline. Please provide a reason.
+        </p>
+        <div class="form-group">
+          <label class="form-label">Reason for Closing <span style="color:var(--danger)">*</span></label>
+          <textarea class="form-input" id="cl-reason" rows="3"
+                    placeholder="e.g. Customer cancelled project, scope changed, we decided not to bid…"></textarea>
+        </div>
+      </div>
+      <div style="padding:0 24px 20px;display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn btn-secondary" onclick="document.getElementById('close-bid-modal').remove()">Cancel</button>
+        <button class="btn btn-sm" style="background:#64748b;color:#fff;font-weight:700;padding:8px 18px"
+                onclick="confirmCloseBid(${bidId})">Close Bid</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+async function confirmCloseBid(bidId) {
+  const reason = document.getElementById('cl-reason')?.value.trim();
+  if (!reason) { alert('A reason is required to close a bid.'); return; }
+  try {
+    await api.put(`/api/bids/${bidId}`, { stage: 'closed', status: 'Closed', close_reason: reason });
+    document.getElementById('close-bid-modal')?.remove();
+    if (State.currentPanelBidId === bidId) closeJobPanel();
+    await renderPage(State.currentPage);
+    await updateBadges();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+// Helper: create a modal overlay, remove old one with same id
+function _buildModal(id) {
+  document.getElementById(id)?.remove();
+  const el = document.createElement('div');
+  el.id = id;
+  el.className = 'modal-overlay';
+  el.onclick = e => { if (e.target === el) el.remove(); };
+  return el;
 }
 
 function openBidModalFromPanel() {
