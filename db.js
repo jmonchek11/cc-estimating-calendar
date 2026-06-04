@@ -7,6 +7,7 @@ const Followup = require('./models/Followup');
 const Contact = require('./models/Contact');
 const Settings = require('./models/Settings');
 const Project = require('./models/Project');
+const IgnoredPair = require('./models/IgnoredPair');
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -558,8 +559,21 @@ function fmtProject(p) {
 async function getProjects({ search } = {}) {
   const q = {};
   if (search) q.name = { $regex: search.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'), $options: 'i' };
-  const projects = await Project.find(q).sort({ name: 1 }).lean();
-  return projects.map(fmtProject);
+  const projects = await Project.aggregate([
+    { $match: q },
+    { $lookup: { from: 'bids', localField: '_id', foreignField: 'project_id', as: 'bids' } },
+    { $addFields: {
+      bid_numbers: {
+        $filter: {
+          input: { $map: { input: '$bids', as: 'b', in: '$$b.bid_number' } },
+          cond: { $and: [{ $ne: ['$$this', null] }, { $ne: ['$$this', ''] }] },
+        },
+      },
+    }},
+    { $project: { name: 1, created_by: 1, created_at: 1, bid_numbers: 1 } },
+    { $sort: { name: 1 } },
+  ]);
+  return projects.map(p => ({ ...fmtProject(p), bid_numbers: p.bid_numbers || [] }));
 }
 
 async function getProject(id) {
@@ -618,14 +632,34 @@ async function runProjectMigration() {
     linked += res.modifiedCount;
   }
 
-  // Return all projects for review (with bid count)
+  // Return all projects for review (with bid count and bid numbers)
   const allProjects = await Project.aggregate([
     { $lookup: { from: 'bids', localField: '_id', foreignField: 'project_id', as: 'bids' } },
-    { $addFields: { bid_count: { $size: '$bids' } } },
-    { $project: { name: 1, bid_count: 1 } },
+    { $addFields: {
+      bid_count: { $size: '$bids' },
+      bid_numbers: {
+        $filter: {
+          input: { $map: { input: '$bids', as: 'b', in: '$$b.bid_number' } },
+          cond: { $and: [{ $ne: ['$$this', null] }, { $ne: ['$$this', ''] }] },
+        },
+      },
+    }},
+    { $project: { name: 1, bid_count: 1, bid_numbers: 1 } },
     { $sort: { name: 1 } },
   ]);
-  return { created, linked, projects: allProjects };
+  const ignoredPairs = await IgnoredPair.find().lean();
+  return { created, linked, projects: allProjects, ignoredPairs };
+}
+
+// ── Ignored Duplicate Pairs ───────────────────────────────────────────────────
+
+async function addIgnoredPair(id1, id2) {
+  const ids = [Math.min(id1, id2), Math.max(id1, id2)];
+  await IgnoredPair.findOneAndUpdate({ ids }, { ids }, { upsert: true, new: true });
+}
+
+async function getIgnoredPairs() {
+  return IgnoredPair.find().lean();
 }
 
 // ── Settings ──────────────────────────────────────────────────────────────────
@@ -1430,6 +1464,7 @@ module.exports = {
   getStats, getDigest, getAnalytics,
   findOrphanEstimators, fixOrphanEstimators,
   getProjects, getProject, createProject, updateProject, getProjectBids, mergeProjects, runProjectMigration,
+  addIgnoredPair, getIgnoredPairs,
   getEstimatorBids,
   savePhase, getLinkedCOs, linkCOToParent, checkDuplicateBidNumber,
   getSettings, updateSettings,

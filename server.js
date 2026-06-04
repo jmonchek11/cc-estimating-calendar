@@ -393,6 +393,16 @@ app.post('/api/admin/merge-projects', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.post('/api/admin/ignored-pairs', async (req, res) => {
+  try {
+    const admin = await db.getMember(req.session.userId);
+    if (!admin || !admin.is_admin) return res.status(403).json({ error: 'Admin only.' });
+    const { id1, id2 } = req.body;
+    await db.addIgnoredPair(Number(id1), Number(id2));
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── CONTACTS ──────────────────────────────────────────────────────────────────
 app.get('/api/contacts', async (req, res) => {
   try { res.json(await db.getContacts(req.query)); }

@@ -2703,8 +2703,12 @@ async function showProjectAC(input) {
   const escapedQ = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const rows = matches.map(p => {
     const hl = esc(p.name).replace(new RegExp(`(${escapedQ})`, 'gi'), '<strong>$1</strong>');
+    const nums = (p.bid_numbers || []).filter(Boolean);
+    const numsHtml = nums.length
+      ? `<div style="font-size:11px;color:var(--text-muted);margin-top:1px">${esc(nums.join(', '))}</div>`
+      : '';
     return `<div class="company-ac-item" data-id="${p.id}" data-name="${esc(p.name)}"
-                 onmousedown="selectProjectAC(this.dataset.id, this.dataset.name)">${hl}</div>`;
+                 onmousedown="selectProjectAC(this.dataset.id, this.dataset.name)">${hl}${numsHtml}</div>`;
   }).join('');
 
   // Always show "Create new project" option
@@ -2807,29 +2811,47 @@ function renderProjectMigrationResult(result) {
   const el = document.getElementById('migration-result');
   if (!el) return;
 
+  // Build a set of ignored pairs keyed as "min:max"
+  const ignoredSet = new Set((result.ignoredPairs || []).map(p => {
+    const sorted = [...p.ids].sort((a,b) => a-b);
+    return `${sorted[0]}:${sorted[1]}`;
+  }));
+
   // Flag possible duplicate project names (edit distance ≤ 3 or one is a substring of other)
   const projects = result.projects || [];
   const suspects = [];
   for (let i = 0; i < projects.length; i++) {
     for (let j = i+1; j < projects.length; j++) {
-      const a = projects[i].name.toLowerCase().replace(/[^a-z0-9]/g,'');
-      const b = projects[j].name.toLowerCase().replace(/[^a-z0-9]/g,'');
-      if (a.includes(b) || b.includes(a) || levenshtein(a,b) <= 3) {
-        suspects.push([projects[i], projects[j]]);
+      const a = projects[i], b = projects[j];
+      const key = `${Math.min(a._id,b._id)}:${Math.max(a._id,b._id)}`;
+      if (ignoredSet.has(key)) continue;
+      const an = a.name.toLowerCase().replace(/[^a-z0-9]/g,'');
+      const bn = b.name.toLowerCase().replace(/[^a-z0-9]/g,'');
+      if (an.includes(bn) || bn.includes(an) || levenshtein(an,bn) <= 3) {
+        suspects.push([a, b]);
       }
     }
   }
 
+  const fmtBidNums = (p) => {
+    const nums = (p.bid_numbers || []).filter(Boolean);
+    if (!nums.length) return `<span style="color:var(--text-muted)">(${p.bid_count} bid${p.bid_count!==1?'s':''}, no #s assigned)</span>`;
+    return `<span style="color:var(--text-muted)">${nums.join(', ')}</span>`;
+  };
+
   const suspectHtml = suspects.slice(0,20).map(([a,b]) => `
-    <div style="padding:8px 0;border-bottom:1px solid var(--border);font-size:13px">
-      <strong>${esc(a.name)}</strong> (${a.bid_count} bids) &amp;
-      <strong>${esc(b.name)}</strong> (${b.bid_count} bids)
-      <div style="margin-top:4px;display:flex;gap:6px">
+    <div style="padding:10px 0;border-bottom:1px solid var(--border);font-size:13px">
+      <div style="margin-bottom:3px"><strong>${esc(a.name)}</strong> ${fmtBidNums(a)}</div>
+      <div style="margin-bottom:7px"><strong>${esc(b.name)}</strong> ${fmtBidNums(b)}</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn btn-ghost btn-sm" onclick="mergeIntoProject(${a._id},${b._id},'${esc(a.name)}')">
           Keep "${esc(a.name)}"
         </button>
         <button class="btn btn-ghost btn-sm" onclick="mergeIntoProject(${b._id},${a._id},'${esc(b.name)}')">
           Keep "${esc(b.name)}"
+        </button>
+        <button class="btn btn-ghost btn-sm" style="color:var(--text-muted)" onclick="markNotDuplicate(${a._id},${b._id})">
+          Not a duplicate
         </button>
       </div>
     </div>`).join('');
@@ -2844,6 +2866,17 @@ function renderProjectMigrationResult(result) {
       ⚠️ ${suspects.length} possible duplicate${suspects.length>1?'s':''} — review and merge if needed:
     </div>
     ${suspectHtml}` : '<div style="font-size:13px;color:#16a34a">✓ No duplicate project names detected.</div>'}`;
+}
+
+async function markNotDuplicate(id1, id2) {
+  try {
+    await api.post('/api/admin/ignored-pairs', { id1, id2 });
+    if (_migrationResult) {
+      _migrationResult.ignoredPairs = _migrationResult.ignoredPairs || [];
+      _migrationResult.ignoredPairs.push({ ids: [Math.min(id1,id2), Math.max(id1,id2)] });
+      renderProjectMigrationResult(_migrationResult);
+    }
+  } catch (e) { alert('Failed to save: ' + e.message); }
 }
 
 async function mergeIntoProject(keepId, absorbId, keepName) {
