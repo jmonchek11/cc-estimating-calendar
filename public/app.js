@@ -4821,12 +4821,20 @@ function renderLifecycleSection(bid, linkedCOs = []) {
       </div>`;
   }).join('');
 
-  // Sort COs numerically by the trailing number in bid_number or job_number
-  // Handles both RFC-001 and COR-001 naming styles
+  // Sort COs numerically — handles RFC-001, COR-001, and plain numbers.
+  // Checks bid_number first, then job_number, then the start of project_name.
+  // Items with no number sort to the end.
   function coSortKey(co) {
-    const s = co.bid_number || co.job_number || co.project_name || '';
-    const m = s.match(/(\d+)\s*$/);
-    return m ? parseInt(m[1], 10) : 0;
+    const candidates = [co.bid_number, co.job_number, co.project_name].filter(Boolean);
+    for (const s of candidates) {
+      // Match RFC-XX or COR-XX at the very start (most reliable)
+      const rfc = s.match(/^(?:RFC|COR)[- ]?(\d+)/i);
+      if (rfc) return parseInt(rfc[1], 10);
+      // Fall back to the first run of digits in the string
+      const first = s.match(/(\d+)/);
+      if (first) return parseInt(first[1], 10);
+    }
+    return 999999; // no number → sort to end
   }
   const sortedCOs = [...linkedCOs].sort((a, b) => coSortKey(a) - coSortKey(b));
 
