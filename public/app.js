@@ -2829,7 +2829,6 @@ function selectProjectAC(id, name) {
   _selectedProjectId = Number(id);
   document.getElementById('f-project_id').value = id;
   document.getElementById('f-project_name_search').value = name;
-  document.getElementById('f-project_name').value = name;
   hideProjectAC();
   // Show confirmation badge
   const badge = document.getElementById('project-selected-badge');
@@ -2885,7 +2884,6 @@ async function openRebidModal(projectId, projectName) {
   // Wait a tick for modal to open, then pre-fill project
   setTimeout(() => {
     selectProjectAC(projectId, projectName);
-    document.getElementById('f-project_name').value = projectName;
     // Expand so user knows it's a fresh bid under the same project
     document.getElementById('bid-modal-title').textContent = `Re-bid — ${projectName}`;
   }, 50);
@@ -4848,16 +4846,30 @@ function renderLifecycleSection(bid, linkedCOs = []) {
   };
   const sortedCOs = [...linkedCOs].sort((a, b) => coSortKey(a) - coSortKey(b));
 
+  // Stage colors for CO rows
+  const CO_STAGE = {
+    awarded:     { border: '#86efac', bg: 'rgba(22,163,74,.07)',   badgeBg: '#dcfce7', badgeText: '#166534' },
+    not_awarded: { border: '#fca5a5', bg: 'rgba(220,38,38,.06)',   badgeBg: '#fee2e2', badgeText: '#991b1b' },
+    closed:      { border: '#cbd5e1', bg: 'rgba(148,163,184,.07)', badgeBg: '#f1f5f9', badgeText: '#64748b' },
+    follow_up:   { border: '#c4b5fd', bg: 'rgba(139,92,246,.06)',  badgeBg: '#ede9fe', badgeText: '#6d28d9' },
+    active_co:   { border: '#fdba74', bg: 'rgba(249,115,22,.06)',  badgeBg: '#fff7ed', badgeText: '#c2410c' },
+    active_bid:  { border: '#fcd34d', bg: 'rgba(245,158,11,.06)',  badgeBg: '#fef3c7', badgeText: '#92400e' },
+    opportunity: { border: '#93c5fd', bg: 'rgba(59,130,246,.06)',  badgeBg: '#eff6ff', badgeText: '#1d4ed8' },
+  };
+
   // Linked CO rows
   const coRows = sortedCOs.map(co => {
     const estM = State.team.find(t => t.id === co.estimator_id);
+    const cs = CO_STAGE[co.stage] || { border: 'var(--border)', bg: 'transparent', badgeBg: '#e2e8f0', badgeText: '#475569' };
     return `
-      <div class="lifecycle-co-row clickable-row" onclick="closeJobPanel();setTimeout(()=>openJobPanel(${co.id}),80)">
+      <div class="lifecycle-co-row clickable-row"
+           style="border-left:3px solid ${cs.border};background:${cs.bg};padding-left:7px;margin-left:-3px"
+           onclick="closeJobPanel();setTimeout(()=>openJobPanel(${co.id}),80)">
         <span class="badge badge-co" style="flex-shrink:0">CO</span>
         <span style="flex:1;min-width:0;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(co.project_name)}${co.bid_number?` <span style="color:var(--text-muted);font-size:11px">#${esc(co.bid_number)}</span>`:''}</span>
         ${estM ? `<span class="initials-pill" style="transform:scale(.85)">${esc(estM.initials)}</span>` : ''}
         <span style="font-size:12px;color:var(--text-muted);flex-shrink:0">${fmt(co.estimate_amount,'currency')}</span>
-        <span class="badge badge-stage" style="flex-shrink:0;font-size:10px">${stageName(co.stage)}</span>
+        <span style="flex-shrink:0;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;background:${cs.badgeBg};color:${cs.badgeText}">${stageName(co.stage)}</span>
       </div>`;
   }).join('');
 
