@@ -2711,6 +2711,17 @@ async function openProjectPanel(projectId) {
           <div class="jp-section-title" style="margin-top:16px;margin-bottom:10px">Closed / Decided (${closedBids.length})</div>
           ${closedBids.map(bidCard).join('')}` : ''}
         ${!bids.length ? '<div class="empty-state" style="padding:20px 0"><div class="empty-state-desc">No bids linked to this project yet.</div></div>' : ''}
+        <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+          <div class="jp-section-title" style="margin-bottom:8px">Add Existing Bid to This Project</div>
+          <div style="position:relative">
+            <input type="text" class="form-input" id="add-bid-search-${project.id}"
+                   placeholder="Search by bid #, project name, or customer…"
+                   oninput="searchAddBidToProject(this, ${project.id})"
+                   style="font-size:13px" />
+            <div id="add-bid-results-${project.id}"
+                 style="display:none;position:absolute;left:0;right:0;background:white;border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.12);z-index:50;max-height:220px;overflow-y:auto"></div>
+          </div>
+        </div>
       </div>
     </div>`;
   document.body.appendChild(overlay);
@@ -2921,6 +2932,108 @@ async function mergeIntoProject(keepId, absorbId, keepName) {
     _migrationResult = await api.post('/api/admin/migrate-projects', {});
     renderProjectMigrationResult(_migrationResult);
   } catch (e) { alert('Merge failed: ' + e.message); }
+}
+
+// ── Project re-linking (from job panel) ──────────────────────────────────────
+
+function toggleProjectRelink(bidId) {
+  const el = document.getElementById(`project-relink-${bidId}`);
+  if (!el) return;
+  const showing = el.style.display !== 'none';
+  el.style.display = showing ? 'none' : 'block';
+  if (!showing) {
+    const input = el.querySelector('input');
+    if (input) { input.value = ''; input.focus(); }
+    const results = document.getElementById(`project-relink-results-${bidId}`);
+    if (results) results.style.display = 'none';
+  }
+}
+
+async function searchProjectRelink(input, bidId) {
+  if (!_projectPickerCache) {
+    _projectPickerCache = await api.get('/api/projects').catch(() => []);
+  }
+  const q = input.value.trim().toLowerCase();
+  const resultsEl = document.getElementById(`project-relink-results-${bidId}`);
+  if (!resultsEl) return;
+  if (!q) { resultsEl.style.display = 'none'; return; }
+
+  const matches = (_projectPickerCache || []).filter(p => p.name.toLowerCase().includes(q)).slice(0, 8);
+  const escapedQ = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (!matches.length) {
+    resultsEl.innerHTML = `<div style="padding:10px;font-size:13px;color:var(--text-muted)">No projects found</div>`;
+  } else {
+    resultsEl.innerHTML = matches.map(p => {
+      const hl = esc(p.name).replace(new RegExp(`(${escapedQ})`, 'gi'), '<strong>$1</strong>');
+      const nums = (p.bid_numbers || []).slice(0, 4).join(', ');
+      return `<div class="company-ac-item"
+                   onmousedown="relinkBidToProject(${bidId}, ${p.id}, '${esc(p.name)}')">
+        ${hl}
+        ${nums ? `<div style="font-size:11px;color:var(--text-muted);margin-top:1px">${esc(nums)}</div>` : ''}
+      </div>`;
+    }).join('');
+  }
+  resultsEl.style.display = 'block';
+}
+
+async function relinkBidToProject(bidId, projectId, projectName) {
+  try {
+    await api.put(`/api/bids/${bidId}`, { project_id: projectId });
+    _projectPickerCache = null; // bust cache so project lists refresh
+    document.getElementById(`project-relink-${bidId}`)?.remove();
+    openJobPanel(bidId); // refresh panel
+  } catch (e) { alert('Failed to link project: ' + e.message); }
+}
+
+// ── Add existing bid to project (from project panel) ─────────────────────────
+
+let _addBidSearchTimer = null;
+async function searchAddBidToProject(input, projectId) {
+  clearTimeout(_addBidSearchTimer);
+  _addBidSearchTimer = setTimeout(async () => {
+    const q = input.value.trim();
+    const resultsEl = document.getElementById(`add-bid-results-${projectId}`);
+    if (!resultsEl) return;
+    if (!q) { resultsEl.style.display = 'none'; return; }
+
+    const bids = await api.get(`/api/bids?search=${encodeURIComponent(q)}`).catch(() => []);
+    if (!bids.length) {
+      resultsEl.innerHTML = `<div style="padding:10px;font-size:13px;color:var(--text-muted)">No bids found</div>`;
+      resultsEl.style.display = 'block';
+      return;
+    }
+    resultsEl.innerHTML = bids.slice(0, 8).map(b => {
+      const alreadyLinked = b.project_id === projectId;
+      const inOther = b.project_id && b.project_id !== projectId;
+      return `<div class="company-ac-item${alreadyLinked ? ' disabled' : ''}"
+                   style="${alreadyLinked ? 'opacity:.5;cursor:default' : ''}"
+                   onmousedown="${alreadyLinked ? '' : `addBidToProject(${b.id}, ${projectId})`}">
+        <div style="font-weight:600;font-size:13px">
+          ${esc(b.project_name)}
+          ${b.bid_number ? `<span style="font-weight:400;color:var(--text-muted);font-size:12px"> #${esc(b.bid_number)}</span>` : ''}
+        </div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:1px">
+          ${stageName(b.stage)}
+          ${b.customer ? ' · ' + esc(b.customer) : ''}
+          ${alreadyLinked ? ' · ✓ already in this project' : ''}
+          ${inOther ? ' · currently in another project' : ''}
+        </div>
+      </div>`;
+    }).join('');
+    resultsEl.style.display = 'block';
+  }, 250);
+}
+
+async function addBidToProject(bidId, projectId) {
+  try {
+    await api.put(`/api/bids/${bidId}`, { project_id: projectId });
+    _projectPickerCache = null;
+    const searchInput = document.getElementById(`add-bid-search-${projectId}`);
+    const resultsEl   = document.getElementById(`add-bid-results-${projectId}`);
+    if (searchInput) searchInput.value = '';
+    if (resultsEl) resultsEl.style.display = 'none';
+    openProjectPanel(projectId); // refresh panel
+  } catch (e) { alert('Failed: ' + e.message); }
 }
 
 function levenshtein(a, b) {
@@ -4453,7 +4566,32 @@ function renderJobPanelContent(bid, followups, contacts = [], linkedCOs = []) {
     `<span class="company-link" data-company="${esc(c)}" onclick="openCompanyProfile(this.dataset.company)">${esc(c)}</span>`
   ).join('<span style="color:var(--text-muted)"> · </span>');
 
+  const projectField = `
+    <div class="jp-field">
+      <span class="jp-label">Project</span>
+      <span class="jp-value">
+        <span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          ${bid.project_id
+            ? `<button class="btn-inline-link" onclick="openProjectPanel(${bid.project_id})">${esc(bid.project_name || 'View Project')}</button>`
+            : `<span style="color:var(--text-muted);font-size:13px">Not linked</span>`}
+          <button class="btn btn-ghost btn-sm" onclick="toggleProjectRelink(${bid.id})"
+                  style="${bid.project_id ? '' : 'color:var(--primary);font-weight:600'}">
+            ${bid.project_id ? 'Change' : '+ Link to Project'}
+          </button>
+        </span>
+        <div id="project-relink-${bid.id}" style="display:none;margin-top:6px;position:relative">
+          <input type="text" class="form-input" placeholder="Search projects…"
+                 oninput="searchProjectRelink(this, ${bid.id})"
+                 style="font-size:13px;margin-bottom:0" />
+          <div id="project-relink-results-${bid.id}"
+               class="company-ac-dropdown"
+               style="display:none;position:absolute;left:0;right:0;z-index:200"></div>
+        </div>
+      </span>
+    </div>`;
+
   const detailFields = [
+    projectField,
     customerList.length ? `<div class="jp-field"><span class="jp-label">Customer</span><span class="jp-value">${customerLinks}</span></div>` : '',
     bid.jurisdiction ? `<div class="jp-field"><span class="jp-label">Jurisdiction</span><span class="jp-value">${jurisdictionBadge(bid.jurisdiction)} <span style="font-size:12px;color:var(--text-muted)">${IBEW_LOCALS.find(l=>l.number===bid.jurisdiction)?.area||''}</span></span></div>` : '',
     bid.estimate_amount ? `<div class="jp-field"><span class="jp-label">Estimate Amount</span><span class="jp-value">${fmt(bid.estimate_amount, 'currency')}</span></div>` : '',
@@ -4586,7 +4724,6 @@ function renderJobPanelContent(bid, followups, contacts = [], linkedCOs = []) {
         ${statusBadge(bid.status)}
         ${bid.bid_number ? `<span style="font-size:12px;color:var(--text-muted)">#${esc(bid.bid_number)}</span>` : ''}
         ${bid.job_number ? `<span style="font-size:12px;color:var(--text-muted)">Job: ${esc(bid.job_number)}</span>` : ''}
-        ${bid.project_id ? `<button class="btn-inline-link" style="font-size:12px" onclick="openProjectPanel(${bid.project_id})">🏗️ View Project</button>` : ''}
       </div>
     </div>
     ${renderLifecycleSection(bid, linkedCOs)}
