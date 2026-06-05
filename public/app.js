@@ -2860,12 +2860,18 @@ function clearProjectSelection() {
 function loadProjectForBid(bid) {
   _selectedProjectId = bid.project_id || null;
   document.getElementById('f-project_id').value = bid.project_id || '';
-  document.getElementById('f-project_name_search').value = bid.project_name || '';
+
+  // Show the project ENTITY name in the search box (not the bid's own name)
+  const projEntity = bid.project_id && _projectPickerCache
+    ? _projectPickerCache.find(p => p.id === bid.project_id) : null;
+  const projDisplayName = projEntity?.name || bid.project_entity_name || '';
+  document.getElementById('f-project_name_search').value = projDisplayName;
+
   const badge = document.getElementById('project-selected-badge');
   if (badge) {
     if (bid.project_id) {
       badge.style.display = 'block';
-      badge.innerHTML = `<span style="font-size:12px;color:var(--text-muted)">Project ID #${bid.project_id}</span>
+      badge.innerHTML = `<span style="font-size:12px;color:var(--text-muted)">${esc(projDisplayName || `Project #${bid.project_id}`)}</span>
         <button type="button" class="btn btn-ghost btn-sm" style="font-size:11px;margin-left:8px"
                 onclick="openProjectPanel(${bid.project_id})">View →</button>`;
     } else {
@@ -4051,7 +4057,7 @@ async function saveBid() {
     job_number: document.getElementById('f-job_number').value.trim(),
     project_id:   Number(document.getElementById('f-project_id')?.value) || null,
     stage:        document.getElementById('f-stage').value,
-    project_name: document.getElementById('f-project_name_search')?.value.trim() || document.getElementById('f-project_name').value.trim(),
+    project_name: document.getElementById('f-project_name').value.trim(),
     estimate_amount: document.getElementById('f-estimate_amount').value || null,
     estimator_id: document.getElementById('f-estimator_id').value || null,
     salesperson_id: document.getElementById('f-salesperson_id').value || null,
