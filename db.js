@@ -559,21 +559,61 @@ function fmtProject(p) {
 async function getProjects({ search } = {}) {
   const q = {};
   if (search) q.name = { $regex: search.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'), $options: 'i' };
+  const ACTIVE_STAGES = ['opportunity', 'active_bid', 'active_co', 'follow_up'];
   const projects = await Project.aggregate([
     { $match: q },
-    { $lookup: { from: 'bids', localField: '_id', foreignField: 'project_id', as: 'bids' } },
+    { $lookup: {
+      from: 'bids',
+      let: { pid: '$_id' },
+      pipeline: [{ $match: { $expr: { $and: [
+        { $eq: ['$project_id', '$$pid'] },
+        { $eq: ['$is_deleted', 0] },
+      ]}}}],
+      as: 'bids',
+    }},
     { $addFields: {
+      bid_count: { $size: '$bids' },
       bid_numbers: {
         $filter: {
           input: { $map: { input: '$bids', as: 'b', in: '$$b.bid_number' } },
           cond: { $and: [{ $ne: ['$$this', null] }, { $ne: ['$$this', ''] }] },
         },
       },
+      customers: {
+        $setUnion: {
+          $filter: {
+            input: { $map: { input: '$bids', as: 'b', in: '$$b.customer' } },
+            cond: { $and: [{ $ne: ['$$this', null] }, { $ne: ['$$this', ''] }] },
+          },
+        },
+      },
+      estimator_ids: {
+        $setUnion: {
+          $filter: {
+            input: { $map: { input: '$bids', as: 'b', in: '$$b.estimator_id' } },
+            cond: { $ne: ['$$this', null] },
+          },
+        },
+      },
+      active_count: {
+        $size: { $filter: { input: '$bids', cond: { $in: ['$$this.stage', ACTIVE_STAGES] } } },
+      },
+      total_value: {
+        $sum: { $map: { input: '$bids', as: 'b', in: { $ifNull: ['$$b.estimate_amount', 0] } } },
+      },
     }},
-    { $project: { name: 1, created_by: 1, created_at: 1, bid_numbers: 1 } },
+    { $project: { name: 1, created_by: 1, created_at: 1, bid_count: 1, bid_numbers: 1, customers: 1, estimator_ids: 1, active_count: 1, total_value: 1 } },
     { $sort: { name: 1 } },
   ]);
-  return projects.map(p => ({ ...fmtProject(p), bid_numbers: p.bid_numbers || [] }));
+  return projects.map(p => ({
+    ...fmtProject(p),
+    bid_count:    p.bid_count    || 0,
+    bid_numbers:  p.bid_numbers  || [],
+    customers:    p.customers    || [],
+    estimator_ids: p.estimator_ids || [],
+    active_count: p.active_count || 0,
+    total_value:  p.total_value  || 0,
+  }));
 }
 
 async function getProject(id) {

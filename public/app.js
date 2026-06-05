@@ -2587,15 +2587,49 @@ async function renderProjects(main) {
   const params = search ? `?search=${encodeURIComponent(search)}` : '';
   _projectsCache = await api.get('/api/projects' + params);
 
-  // For each project load bid counts from cache or fetch
-  const rows = _projectsCache.map(p => `
+  const rows = _projectsCache.map(p => {
+    // Resolve estimator initials from State.team
+    const estInitials = (p.estimator_ids || [])
+      .map(id => State.team.find(t => t.id === id))
+      .filter(Boolean)
+      .map(t => `<span class="est-pill est-${t.id % 8}">${esc(t.initials)}</span>`)
+      .join('');
+
+    const bidNums = (p.bid_numbers || []).slice(0, 6)
+      .map(n => `<span class="proj-tag">#${esc(n)}</span>`).join('');
+    const extraNums = (p.bid_numbers || []).length > 6
+      ? `<span class="proj-tag proj-tag-muted">+${p.bid_numbers.length - 6} more</span>` : '';
+
+    const customers = (p.customers || []).slice(0, 3).map(c => esc(c)).join(', ')
+      + ((p.customers || []).length > 3 ? ` +${p.customers.length - 3}` : '');
+
+    const activeBadge = p.active_count
+      ? `<span class="proj-active-badge">${p.active_count} active</span>` : '';
+    const valueStr = p.total_value ? fmtCompact(p.total_value) : '';
+
+    return `
     <div class="proj-row" onclick="openProjectPanel(${p.id})">
-      <div class="proj-name">${esc(p.name)}</div>
-      <div class="proj-actions" onclick="event.stopPropagation()">
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span class="proj-name">${esc(p.name)}</span>
+          ${activeBadge}
+        </div>
+        <div class="proj-meta">
+          ${bidNums}${extraNums}
+          ${estInitials ? `<span class="proj-meta-sep">·</span>${estInitials}` : ''}
+          ${customers ? `<span class="proj-meta-sep">·</span><span class="proj-meta-customers">${customers}</span>` : ''}
+        </div>
+      </div>
+      <div class="proj-right" onclick="event.stopPropagation()">
+        <div class="proj-stats">
+          <span>${p.bid_count} bid${p.bid_count !== 1 ? 's' : ''}</span>
+          ${valueStr ? `<span>${valueStr}</span>` : ''}
+        </div>
         <button class="btn btn-ghost btn-sm" style="color:var(--primary)"
                 onclick="openRebidModal(${p.id},'${esc(p.name)}')">+ Re-bid</button>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 
   main.innerHTML = `
     <div class="page-header">

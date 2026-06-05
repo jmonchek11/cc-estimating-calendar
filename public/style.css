@@ -387,13 +387,36 @@ tbody td {
 
 /* ── Projects page ── */
 .proj-row {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 20px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+  padding: 12px 20px; border-bottom: 1px solid var(--border);
   cursor: pointer; transition: background .1s;
 }
 .proj-row:last-child { border-bottom: none; }
 .proj-row:hover { background: #f8fafc; }
 .proj-name { font-size: 14px; font-weight: 600; color: var(--text); }
+.proj-meta {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 4px;
+  margin-top: 5px; font-size: 12px; color: var(--text-muted);
+}
+.proj-meta-sep { color: var(--border); margin: 0 2px; }
+.proj-meta-customers { color: var(--text-muted); }
+.proj-tag {
+  display: inline-block; background: #eff6ff; color: #3b82f6;
+  border-radius: 4px; padding: 1px 5px; font-size: 11px; font-weight: 600;
+}
+.proj-tag-muted { background: #f1f5f9; color: var(--text-muted); }
+.proj-active-badge {
+  display: inline-block; background: #dcfce7; color: #16a34a;
+  border-radius: 10px; padding: 1px 8px; font-size: 11px; font-weight: 600;
+}
+.proj-right {
+  display: flex; flex-direction: column; align-items: flex-end; gap: 5px;
+  flex-shrink: 0; padding-top: 1px;
+}
+.proj-stats {
+  display: flex; gap: 8px; font-size: 12px; color: var(--text-muted);
+  white-space: nowrap;
+}
 .proj-bid-card {
   display: flex; align-items: flex-start; gap: 10px;
   padding: 10px; margin-bottom: 6px;
