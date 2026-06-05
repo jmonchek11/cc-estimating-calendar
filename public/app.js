@@ -972,7 +972,10 @@ async function renderSearch(main) {
 
   main.innerHTML = '<div class="loading-screen"><div class="spinner"></div><p>Searching…</p></div>';
 
-  const bids = await api.get(`/api/bids?search=${encodeURIComponent(q)}`);
+  const [bids] = await Promise.all([
+    api.get(`/api/bids?search=${encodeURIComponent(q)}`),
+    _projectPickerCache ? Promise.resolve() : api.get('/api/projects').then(p => { _projectPickerCache = p; }).catch(() => {}),
+  ]);
 
   if (!bids.length) {
     main.innerHTML = `
@@ -1009,9 +1012,19 @@ async function renderSearch(main) {
   const sections = orderedStages.map(s => {
     const items = grouped[s];
     const color = STAGE_COLORS[s] || '#94a3b8';
-    const rows = items.map(b => `
+    const rows = items.map(b => {
+      const projEntity = b.project_id ? (_projectPickerCache || []).find(p => p.id === b.project_id) : null;
+      const projEntityLabel = projEntity && projEntity.name !== b.project_name
+        ? `<div style="font-size:11px;color:var(--primary);margin-top:2px;font-weight:600">🏗️ ${esc(projEntity.name)}</div>`
+        : projEntity
+          ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px">🏗️ ${esc(projEntity.name)}</div>`
+          : '';
+      return `
       <tr class="clickable-row" onclick="openJobPanel(${b.id})">
-        <td class="td-project">${esc(b.project_name)}<small>${b.bid_number ? ' #' + esc(b.bid_number) : ''}</small></td>
+        <td class="td-project">
+          ${esc(b.project_name)}<small>${b.bid_number ? ' #' + esc(b.bid_number) : ''}</small>
+          ${projEntityLabel}
+        </td>
         <td class="td-customer">${esc(b.customer) || '—'}</td>
         <td class="td-amount">${fmt(b.estimate_amount, 'currency')}</td>
         <td class="td-date">${fmt(b.date_received, 'date')}</td>
@@ -1022,7 +1035,8 @@ async function renderSearch(main) {
           <button class="btn btn-ghost btn-sm" onclick="openFollowupModal(${b.id})" title="Log Follow-up">📝</button>
           <button class="btn btn-ghost btn-sm" onclick="openStageModal(${b.id},'${esc(b.stage)}')" title="Move Stage">➡️</button>
         </td>
-      </tr>`).join('');
+      </tr>`;
+    }).join('');
 
     return `
       <div style="margin-bottom:22px">
