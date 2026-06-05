@@ -2637,6 +2637,7 @@ async function renderProjects(main) {
         <div class="page-title">🏗️ Projects</div>
         <div class="page-subtitle">${_projectsCache.length} projects</div>
       </div>
+      <button class="btn btn-primary btn-sm" onclick="openNewProjectModal()">+ New Project</button>
     </div>
     <div class="filter-bar">
       <input type="text" id="proj-search" placeholder="Search projects…"
@@ -2652,6 +2653,45 @@ async function renderProjects(main) {
 function debounceProjects() {
   clearTimeout(_projectSearchTimer);
   _projectSearchTimer = setTimeout(() => renderProjects(document.getElementById('main')), 300);
+}
+
+function openNewProjectModal() {
+  const overlay = _buildModal('new-project-modal');
+  overlay.innerHTML = `
+    <div class="modal-box" style="max-width:420px">
+      <div class="modal-header">
+        <div class="modal-title">🏗️ New Project</div>
+        <button class="modal-close" onclick="document.getElementById('new-project-modal').remove()">×</button>
+      </div>
+      <div style="padding:20px 24px">
+        <div class="form-group">
+          <label class="form-label">Project Name *</label>
+          <input type="text" class="form-input" id="new-proj-name"
+                 placeholder="e.g. 30th Street Station"
+                 onkeydown="if(event.key==='Enter')saveNewProject()" />
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+          <button class="btn btn-ghost" onclick="document.getElementById('new-project-modal').remove()">Cancel</button>
+          <button class="btn btn-primary" onclick="saveNewProject()">Create Project</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  setTimeout(() => document.getElementById('new-proj-name')?.focus(), 50);
+}
+
+async function saveNewProject() {
+  const nameEl = document.getElementById('new-proj-name');
+  const name = nameEl?.value.trim();
+  if (!name) { nameEl?.focus(); return; }
+  try {
+    const p = await api.post('/api/projects', { name });
+    document.getElementById('new-project-modal')?.remove();
+    _projectPickerCache = null;
+    await renderProjects(document.getElementById('main'));
+    // Open the new project panel so user can immediately start adding bids
+    openProjectPanel(p.id);
+  } catch (e) { alert('Failed to create project: ' + e.message); }
 }
 
 async function openProjectPanel(projectId) {
@@ -4781,8 +4821,17 @@ function renderLifecycleSection(bid, linkedCOs = []) {
       </div>`;
   }).join('');
 
+  // Sort COs numerically by the trailing number in bid_number or job_number
+  // Handles both RFC-001 and COR-001 naming styles
+  function coSortKey(co) {
+    const s = co.bid_number || co.job_number || co.project_name || '';
+    const m = s.match(/(\d+)\s*$/);
+    return m ? parseInt(m[1], 10) : 0;
+  }
+  const sortedCOs = [...linkedCOs].sort((a, b) => coSortKey(a) - coSortKey(b));
+
   // Linked CO rows
-  const coRows = linkedCOs.map(co => {
+  const coRows = sortedCOs.map(co => {
     const estM = State.team.find(t => t.id === co.estimator_id);
     return `
       <div class="lifecycle-co-row clickable-row" onclick="closeJobPanel();setTimeout(()=>openJobPanel(${co.id}),80)">
@@ -4825,7 +4874,7 @@ function renderLifecycleSection(bid, linkedCOs = []) {
       ${hasLinkedCOs || bid.stage === 'awarded' ? `
         <div style="margin-top:12px;border-top:1px solid var(--border);padding-top:10px">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-            <span style="font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted)">Change Orders${hasLinkedCOs?` (${linkedCOs.length})`:''}</span>
+            <span style="font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted)">Change Orders${hasLinkedCOs?` (${sortedCOs.length})`:''}</span>
             <button class="btn btn-ghost btn-sm" onclick="toggleLinkCOSearch(${bid.id})">+ Link CO</button>
           </div>
           ${coRows || '<div style="font-size:12px;color:var(--text-muted)">No change orders linked yet.</div>'}
