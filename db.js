@@ -692,6 +692,10 @@ async function runProjectMigration() {
   return { created, linked, projects: allProjects, ignoredPairs };
 }
 
+async function deleteProject(id) {
+  await Project.findByIdAndDelete(Number(id));
+}
+
 // ── Ignored Duplicate Pairs ───────────────────────────────────────────────────
 
 async function addIgnoredPair(id1, id2) {
@@ -1506,7 +1510,7 @@ module.exports = {
   getFollowups, logFollowup,
   getStats, getDigest, getAnalytics,
   findOrphanEstimators, fixOrphanEstimators,
-  getProjects, getProject, createProject, updateProject, getProjectBids, mergeProjects, runProjectMigration,
+  getProjects, getProject, createProject, updateProject, deleteProject, getProjectBids, mergeProjects, runProjectMigration,
   addIgnoredPair, getIgnoredPairs,
   getEstimatorBids,
   savePhase, getLinkedCOs, linkCOToParent, checkDuplicateBidNumber,

@@ -3030,10 +3030,19 @@ async function searchProjectRelink(input, bidId) {
 
 async function relinkBidToProject(bidId, projectId, projectName) {
   try {
+    // Capture old project before the update
+    const relinkEl = document.getElementById(`project-relink-${bidId}`);
+    const oldProjectId   = relinkEl ? (Number(relinkEl.dataset.oldProjectId) || null) : null;
+    const oldProjectName = relinkEl ? (relinkEl.dataset.oldProjectName || '') : '';
+
     await api.put(`/api/bids/${bidId}`, { project_id: projectId });
-    _projectPickerCache = null; // bust cache so project lists refresh
-    document.getElementById(`project-relink-${bidId}`)?.remove();
+    _projectPickerCache = null;
     openJobPanel(bidId); // refresh panel
+
+    // Check if old project is now empty and offer to delete it
+    if (oldProjectId && oldProjectId !== projectId) {
+      await checkAndPromptDeleteProject(oldProjectId, oldProjectName);
+    }
   } catch (e) { alert('Failed to link project: ' + e.message); }
 }
 
@@ -3059,7 +3068,7 @@ async function searchAddBidToProject(input, projectId) {
       const inOther = b.project_id && b.project_id !== projectId;
       return `<div class="company-ac-item${alreadyLinked ? ' disabled' : ''}"
                    style="${alreadyLinked ? 'opacity:.5;cursor:default' : ''}"
-                   onmousedown="${alreadyLinked ? '' : `addBidToProject(${b.id}, ${projectId})`}">
+                   onmousedown="${alreadyLinked ? '' : `addBidToProject(${b.id}, ${projectId}, ${b.project_id || 'null'}, '${esc(b.project_entity_name || b.project_name || '')}')`}">
         <div style="font-weight:600;font-size:13px">
           ${esc(b.project_name)}
           ${b.bid_number ? `<span style="font-weight:400;color:var(--text-muted);font-size:12px"> #${esc(b.bid_number)}</span>` : ''}
@@ -3076,7 +3085,7 @@ async function searchAddBidToProject(input, projectId) {
   }, 250);
 }
 
-async function addBidToProject(bidId, projectId) {
+async function addBidToProject(bidId, projectId, oldProjectId = null, oldProjectName = '') {
   try {
     await api.put(`/api/bids/${bidId}`, { project_id: projectId });
     _projectPickerCache = null;
@@ -3085,7 +3094,27 @@ async function addBidToProject(bidId, projectId) {
     if (searchInput) searchInput.value = '';
     if (resultsEl) resultsEl.style.display = 'none';
     openProjectPanel(projectId); // refresh panel
+
+    // Check if old project is now empty and offer to delete it
+    if (oldProjectId && oldProjectId !== projectId) {
+      await checkAndPromptDeleteProject(oldProjectId, oldProjectName);
+    }
   } catch (e) { alert('Failed: ' + e.message); }
+}
+
+async function checkAndPromptDeleteProject(projectId, projectName) {
+  try {
+    const bids = await api.get(`/api/projects/${projectId}/bids`);
+    if (bids.length === 0) {
+      const label = projectName || `Project #${projectId}`;
+      if (confirm(`"${label}" now has no bids. Delete this empty project?`)) {
+        await api.del(`/api/projects/${projectId}`);
+        _projectPickerCache = null;
+        // Refresh projects page if visible
+        if (location.hash === '#projects') renderProjects(document.getElementById('main'));
+      }
+    }
+  } catch (_) { /* non-fatal — just skip the prompt */ }
 }
 
 function levenshtein(a, b) {
@@ -4764,7 +4793,9 @@ function renderJobPanelContent(bid, followups, contacts = [], linkedCOs = []) {
           🏗️ ${bid.project_id ? (bid.project_entity_name ? `Project: ${esc(bid.project_entity_name)}` : 'Change Project') : 'Link to Project'}
         </button>
       </div>
-      <div id="project-relink-${bid.id}" style="display:none;margin-top:8px;position:relative">
+      <div id="project-relink-${bid.id}" style="display:none;margin-top:8px;position:relative"
+           data-old-project-id="${bid.project_id || ''}"
+           data-old-project-name="${esc(bid.project_entity_name || '')}">
         <input type="text" class="form-input" placeholder="Search projects…"
                oninput="searchProjectRelink(this, ${bid.id})"
                style="font-size:13px;margin-bottom:0" />

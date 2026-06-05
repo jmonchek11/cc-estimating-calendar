@@ -376,6 +376,11 @@ app.get('/api/projects/:id/bids', async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.delete('/api/projects/:id', async (req, res) => {
+  try { await db.deleteProject(req.params.id); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/admin/migrate-projects', async (req, res) => {
   try {
     const admin = await db.getMember(req.session.userId);
