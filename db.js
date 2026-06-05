@@ -77,6 +77,7 @@ function formatBid(b) {
     status: o.status ?? 'Open',
     next_followup_date: o.next_followup_date ?? null,
     project_id:         o.project_id          ?? null,
+    project_entity_name: o._proj_name         ?? null,
     submitted_by:       o.submitted_by       ?? null,
     created_by:         o.created_by         ?? null,
     close_reason:       o.close_reason        ?? null,
@@ -799,6 +800,8 @@ async function getBid(id) {
   const results = await Bid.aggregate([
     { $match: { _id: Number(id) } },
     ...BID_PIPELINE,
+    { $lookup: { from: 'projects', localField: 'project_id', foreignField: '_id', as: '_proj' } },
+    { $addFields: { _proj_name: { $arrayElemAt: ['$_proj.name', 0] } } },
   ]);
   return results.length ? formatBid(results[0]) : null;
 }

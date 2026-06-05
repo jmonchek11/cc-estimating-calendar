@@ -4577,7 +4577,7 @@ async function openJobPanel(bidId) {
       api.get(`/api/bids/${bidId}/contacts`),
       api.get(`/api/bids/${bidId}/linked-cos`),
     ]);
-    document.getElementById('job-panel-title').textContent = bid.project_name;
+    document.getElementById('job-panel-title').textContent = bid.project_entity_name || bid.project_name;
     body.innerHTML = renderJobPanelContent(bid, followups, contacts, linkedCOs);
 
     // Render stage-specific action buttons
@@ -4606,32 +4606,7 @@ function renderJobPanelContent(bid, followups, contacts = [], linkedCOs = []) {
     `<span class="company-link" data-company="${esc(c)}" onclick="openCompanyProfile(this.dataset.company)">${esc(c)}</span>`
   ).join('<span style="color:var(--text-muted)"> · </span>');
 
-  const projectField = `
-    <div class="jp-field">
-      <span class="jp-label">Project</span>
-      <span class="jp-value">
-        <span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-          ${bid.project_id
-            ? `<button class="btn-inline-link" onclick="openProjectPanel(${bid.project_id})">${esc(bid.project_name || 'View Project')}</button>`
-            : `<span style="color:var(--text-muted);font-size:13px">Not linked</span>`}
-          <button class="btn btn-ghost btn-sm" onclick="toggleProjectRelink(${bid.id})"
-                  style="${bid.project_id ? '' : 'color:var(--primary);font-weight:600'}">
-            ${bid.project_id ? 'Change' : '+ Link to Project'}
-          </button>
-        </span>
-        <div id="project-relink-${bid.id}" style="display:none;margin-top:6px;position:relative">
-          <input type="text" class="form-input" placeholder="Search projects…"
-                 oninput="searchProjectRelink(this, ${bid.id})"
-                 style="font-size:13px;margin-bottom:0" />
-          <div id="project-relink-results-${bid.id}"
-               class="company-ac-dropdown"
-               style="display:none;position:absolute;left:0;right:0;z-index:200"></div>
-        </div>
-      </span>
-    </div>`;
-
   const detailFields = [
-    projectField,
     customerList.length ? `<div class="jp-field"><span class="jp-label">Customer</span><span class="jp-value">${customerLinks}</span></div>` : '',
     bid.jurisdiction ? `<div class="jp-field"><span class="jp-label">Jurisdiction</span><span class="jp-value">${jurisdictionBadge(bid.jurisdiction)} <span style="font-size:12px;color:var(--text-muted)">${IBEW_LOCALS.find(l=>l.number===bid.jurisdiction)?.area||''}</span></span></div>` : '',
     bid.estimate_amount ? `<div class="jp-field"><span class="jp-label">Estimate Amount</span><span class="jp-value">${fmt(bid.estimate_amount, 'currency')}</span></div>` : '',
@@ -4757,24 +4732,44 @@ function renderJobPanelContent(bid, followups, contacts = [], linkedCOs = []) {
         : '<div style="font-size:13px;color:var(--text-muted)">No customers on this bid yet.</div>'}
     </div>`;
 
+  // Build top identity block
+  const displayName = bid.project_entity_name || bid.project_name || '';
+  // Show the bid's own project_name as a sub-line only when it differs from the entity name
+  const bidNameLine = (bid.project_entity_name && bid.project_entity_name !== bid.project_name)
+    ? `<div style="font-size:13px;color:var(--text-muted);margin-top:2px">${esc(bid.project_name)}${bid.bid_number ? ` · <span style="font-weight:600;color:var(--text)">#${esc(bid.bid_number)}</span>` : ''}</div>`
+    : bid.bid_number ? `<div style="font-size:13px;color:var(--text-muted);margin-top:2px">Bid #<span style="font-weight:600;color:var(--text)">${esc(bid.bid_number)}</span></div>` : '';
+
   return `
-    <div class="jp-section">
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:4px">
+    <div class="jp-section" style="padding-bottom:14px">
+      <div style="font-size:17px;font-weight:800;color:var(--text);line-height:1.3">${esc(displayName)}</div>
+      ${bid.job_number ? `<div style="font-size:13px;color:var(--text-muted);margin-top:2px">Job #<span style="font-weight:600;color:var(--text)">${esc(bid.job_number)}</span></div>` : ''}
+      ${bidNameLine}
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px">
         <span class="badge badge-stage">${stageName(bid.stage)}</span>
         ${statusBadge(bid.status)}
-        ${bid.bid_number ? `<span style="font-size:12px;color:var(--text-muted)">#${esc(bid.bid_number)}</span>` : ''}
-        ${bid.job_number ? `<span style="font-size:12px;color:var(--text-muted)">Job: ${esc(bid.job_number)}</span>` : ''}
+        <button class="btn btn-ghost btn-sm" onclick="toggleProjectRelink(${bid.id})"
+                style="font-size:11px;${bid.project_id ? 'color:var(--text-muted)' : 'color:var(--primary);font-weight:600'}">
+          🏗️ ${bid.project_id ? (bid.project_entity_name ? `Project: ${esc(bid.project_entity_name)}` : 'Change Project') : 'Link to Project'}
+        </button>
+      </div>
+      <div id="project-relink-${bid.id}" style="display:none;margin-top:8px;position:relative">
+        <input type="text" class="form-input" placeholder="Search projects…"
+               oninput="searchProjectRelink(this, ${bid.id})"
+               style="font-size:13px;margin-bottom:0" />
+        <div id="project-relink-results-${bid.id}"
+             class="company-ac-results"
+             style="display:none"></div>
       </div>
     </div>
-    ${renderLifecycleSection(bid, linkedCOs)}
-    ${contactsSection}
-    ${renderRemindersSection(bid)}
     ${detailFields ? `<div class="jp-section"><div class="jp-section-title">Details</div>${detailFields}</div>` : ''}
     ${dateFields ? `<div class="jp-section"><div class="jp-section-title">Dates</div>${dateFields}</div>` : ''}
-    ${progressSection}
+    ${contactsSection}
+    ${renderRemindersSection(bid)}
     ${notesSection}
+    ${progressSection}
     ${awardSection}
-    ${followupHistory}`;
+    ${followupHistory}
+    ${renderLifecycleSection(bid, linkedCOs)}`;
 }
 
 // ── Bid Lifecycle (phases + linked COs) ──────────────────────────────────────
@@ -4821,21 +4816,22 @@ function renderLifecycleSection(bid, linkedCOs = []) {
       </div>`;
   }).join('');
 
-  // Sort COs numerically — handles RFC-001, COR-001, and plain numbers.
-  // Checks bid_number first, then job_number, then the start of project_name.
-  // Items with no number sort to the end.
-  function coSortKey(co) {
+  // Sort COs numerically — RFC-001, COR-001, RFC 42, etc.
+  // Uses arrow fn (not declaration) to avoid any hoisting edge cases.
+  const coSortKey = (co) => {
     const candidates = [co.bid_number, co.job_number, co.project_name].filter(Boolean);
     for (const s of candidates) {
-      // Match RFC-XX or COR-XX at the very start (most reliable)
-      const rfc = s.match(/^(?:RFC|COR)[- ]?(\d+)/i);
-      if (rfc) return parseInt(rfc[1], 10);
-      // Fall back to the first run of digits in the string
-      const first = s.match(/(\d+)/);
-      if (first) return parseInt(first[1], 10);
+      // RFC/COR prefix with optional separator — handles RFC-66, RFC 66, RFC#66
+      const m = s.match(/^(?:RFC|COR)\s*[-#]?\s*(\d+)/i);
+      if (m) return parseInt(m[1], 10);
     }
-    return 999999; // no number → sort to end
-  }
+    // Fall back to first digits in bid_number or project_name
+    for (const s of candidates) {
+      const m = s.match(/(\d+)/);
+      if (m) return parseInt(m[1], 10);
+    }
+    return 999999;
+  };
   const sortedCOs = [...linkedCOs].sort((a, b) => coSortKey(a) - coSortKey(b));
 
   // Linked CO rows
