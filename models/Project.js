@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const ProjectSchema = new mongoose.Schema({
   _id:        Number,
   name:       { type: String, required: true },
+  job_number: { type: String, default: null },
   created_by: { type: Number, default: null },
   created_at: String,
   updated_at: String,

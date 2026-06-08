@@ -412,6 +412,23 @@ app.put('/api/ideas/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.get('/api/projects/:id/scan-job', async (req, res) => {
+  try { res.json(await db.scanProjectByJobNumber(req.params.id)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/projects/:id/bulk-link', async (req, res) => {
+  try {
+    await db.bulkLinkBidsToProject(req.params.id, req.body.bid_ids || []);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/bids/rfc-cleanup', async (req, res) => {
+  try { res.json(await db.getRfcJobNumberBids()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.delete('/api/projects/:id', async (req, res) => {
   try { await db.deleteProject(req.params.id); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }

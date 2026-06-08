@@ -2052,7 +2052,10 @@ async function renderCleanup(main) {
           ${(issue||hiddenStages.length||person||mineOnly||search) ? ' <em style="color:var(--text-muted)">(filtered)</em>' : ''}
         </div>
       </div>
-      <button class="btn btn-secondary" onclick="clearCleanupFilters()">Reset Filters</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-secondary btn-sm" style="background:#fffbeb;border-color:#fde68a;color:#92400e" onclick="openRfcCleanupModal()">🔄 RFC/COR in Job # Field</button>
+        <button class="btn btn-secondary" onclick="clearCleanupFilters()">Reset Filters</button>
+      </div>
     </div>
 
     ${State.currentUser?.is_admin ? `
@@ -2781,6 +2784,15 @@ async function openProjectPanel(projectId) {
             · ${fmtCompact(totalValue)} pipeline
             ${wonValue ? ' · ' + fmtCompact(wonValue) + ' won' : ''}
           </div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap" id="proj-job-row-${project.id}">
+            ${project.job_number
+              ? `<span style="font-size:12px">Job # <strong style="color:var(--text)">${esc(project.job_number)}</strong></span>
+                 <button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="editProjectJobNumber(${project.id},'${esc(project.job_number)}')">Edit</button>
+                 <button class="btn btn-secondary btn-sm" style="font-size:11px" onclick="openProjectJobScan(${project.id})">🔍 Scan Matching Bids</button>`
+              : `<span style="font-size:12px;color:var(--text-muted)">No job # set</span>
+                 <button class="btn btn-ghost btn-sm" style="font-size:11px;color:var(--primary)" onclick="editProjectJobNumber(${project.id},'')">+ Set Job #</button>`
+            }
+          </div>
         </div>
         <div style="display:flex;gap:8px;align-items:center">
           <button class="btn btn-primary btn-sm" onclick="openRebidModal(${project.id},'${esc(project.name)}')">+ Re-bid</button>
@@ -3020,6 +3032,167 @@ async function mergeIntoProject(keepId, absorbId, keepName) {
     _migrationResult = await api.post('/api/admin/migrate-projects', {});
     renderProjectMigrationResult(_migrationResult);
   } catch (e) { alert('Merge failed: ' + e.message); }
+}
+
+// ── Project job # editing & job-number scan ───────────────────────────────────
+
+function editProjectJobNumber(projectId, current) {
+  const row = document.getElementById(`proj-job-row-${projectId}`);
+  if (!row) return;
+  row.innerHTML = `
+    <div style="display:flex;gap:6px;align-items:center">
+      <input type="text" class="form-input" id="proj-job-input-${projectId}"
+             value="${esc(current)}" placeholder="e.g. 24-0315"
+             style="font-size:13px;height:30px;width:140px"
+             onkeydown="if(event.key==='Enter')saveProjectJobNumber(${projectId});if(event.key==='Escape')openProjectPanel(${projectId})" />
+      <button class="btn btn-primary btn-sm" onclick="saveProjectJobNumber(${projectId})">Save</button>
+      <button class="btn btn-ghost btn-sm" onclick="openProjectPanel(${projectId})">Cancel</button>
+    </div>`;
+  document.getElementById(`proj-job-input-${projectId}`)?.focus();
+}
+
+async function saveProjectJobNumber(projectId) {
+  const val = document.getElementById(`proj-job-input-${projectId}`)?.value.trim() || '';
+  try {
+    await api.put(`/api/projects/${projectId}`, { job_number: val });
+    _projectPickerCache = null;
+    openProjectPanel(projectId);
+  } catch (e) { alert('Failed: ' + e.message); }
+}
+
+async function openProjectJobScan(projectId) {
+  const bids = await api.get(`/api/projects/${projectId}/scan-job`).catch(e => { alert(e.message); return null; });
+  if (!bids) return;
+
+  if (!bids.length) {
+    alert('No unlinked bids found with that job #.');
+    return;
+  }
+
+  const overlay = _buildModal('job-scan-modal');
+  overlay.innerHTML = `
+    <div class="modal-box" style="max-width:660px;max-height:85vh;overflow:hidden;display:flex;flex-direction:column">
+      <div class="modal-header">
+        <div class="modal-title">🔍 Bids Matching This Job #</div>
+        <button class="modal-close" onclick="document.getElementById('job-scan-modal').remove()">×</button>
+      </div>
+      <div style="padding:10px 20px;background:#eff6ff;border-bottom:1px solid #bfdbfe;font-size:13px;color:#1e40af">
+        ${bids.length} bid${bids.length!==1?'s':''} found with this job # that aren't linked to this project yet.
+        Check the ones you want to associate, then click Link Selected.
+      </div>
+      <div style="flex:1;overflow-y:auto;padding:0 20px">
+        <div style="padding:8px 0;border-bottom:1px solid var(--border)">
+          <label style="font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px">
+            <input type="checkbox" id="scan-select-all" onchange="document.querySelectorAll('.job-scan-check').forEach(c=>c.checked=this.checked)" checked />
+            Select / deselect all
+          </label>
+        </div>
+        ${bids.map(b => `
+          <label style="display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);cursor:pointer">
+            <input type="checkbox" class="job-scan-check" value="${b.id}" checked style="margin-top:2px;flex-shrink:0" />
+            <div style="flex:1;min-width:0">
+              <div style="font-size:13px;font-weight:600">
+                ${esc(b.project_name)}
+                ${b.bid_number ? `<span style="font-weight:400;color:var(--text-muted)"> #${esc(b.bid_number)}</span>` : ''}
+                ${b.co_number  ? `<span style="font-weight:400;color:#f97316"> RFC: ${esc(b.co_number)}</span>` : ''}
+              </div>
+              <div style="font-size:12px;color:var(--text-muted);margin-top:2px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+                <span class="badge badge-stage" style="font-size:10px">${stageName(b.stage)}</span>
+                ${b.estimator_initials ? estPill(b.estimator_initials, b.estimator_id) : ''}
+                ${b.customer ? esc(b.customer) : ''}
+                ${b.project_id ? `<span style="color:#d97706">· currently in another project</span>` : ''}
+              </div>
+            </div>
+          </label>`).join('')}
+      </div>
+      <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end;align-items:center">
+        <span id="scan-selected-count" style="font-size:12px;color:var(--text-muted)">${bids.length} selected</span>
+        <button class="btn btn-ghost" onclick="document.getElementById('job-scan-modal').remove()">Cancel</button>
+        <button class="btn btn-primary" onclick="approveJobScanLinks(${projectId})">Link Selected</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  // Update selected count live
+  overlay.addEventListener('change', () => {
+    const n = overlay.querySelectorAll('.job-scan-check:checked').length;
+    const el = document.getElementById('scan-selected-count');
+    if (el) el.textContent = `${n} selected`;
+  });
+}
+
+async function approveJobScanLinks(projectId) {
+  const ids = Array.from(document.querySelectorAll('.job-scan-check:checked')).map(c => Number(c.value));
+  if (!ids.length) { alert('No bids selected.'); return; }
+  try {
+    await api.post(`/api/projects/${projectId}/bulk-link`, { bid_ids: ids });
+    document.getElementById('job-scan-modal')?.remove();
+    _projectPickerCache = null;
+    openProjectPanel(projectId);
+  } catch (e) { alert('Failed: ' + e.message); }
+}
+
+// ── RFC / COR in Job # cleanup ────────────────────────────────────────────────
+
+async function openRfcCleanupModal() {
+  const bids = await api.get('/api/bids/rfc-cleanup').catch(e => { alert(e.message); return null; });
+  if (!bids) return;
+
+  if (!bids.length) {
+    alert('No bids found with RFC or COR in the Job # field. All clean!');
+    return;
+  }
+
+  const overlay = _buildModal('rfc-cleanup-modal');
+  overlay.innerHTML = `
+    <div class="modal-box" style="max-width:700px;max-height:88vh;overflow:hidden;display:flex;flex-direction:column">
+      <div class="modal-header">
+        <div class="modal-title">🔄 RFC / COR in Job # Field</div>
+        <button class="modal-close" onclick="document.getElementById('rfc-cleanup-modal').remove()">×</button>
+      </div>
+      <div style="padding:10px 20px;background:#fffbeb;border-bottom:1px solid #fde68a;font-size:13px;color:#92400e">
+        ⚠️ These ${bids.length} bid${bids.length!==1?'s':''} have an RFC or COR number in the <strong>Job #</strong> field —
+        that value likely belongs in the <strong>RFC / CO #</strong> field.
+        Copy it over here, with the option to also clear the Job # field.
+      </div>
+      <div style="flex:1;overflow-y:auto">
+        ${bids.map(b => `
+          <div id="rfc-row-${b.id}" style="display:flex;align-items:center;gap:10px;padding:11px 20px;border-bottom:1px solid var(--border)">
+            <div style="flex:1;min-width:0">
+              <div style="font-size:13px;font-weight:600">
+                ${esc(b.project_name)}
+                ${b.bid_number ? `<span style="color:var(--text-muted);font-weight:400"> #${esc(b.bid_number)}</span>` : ''}
+              </div>
+              <div style="font-size:12px;color:var(--text-muted);margin-top:2px">
+                Job # field: <strong style="color:#d97706">${esc(b.job_number)}</strong>
+                ${b.co_number ? ` · RFC/CO # already: <strong style="color:#16a34a">${esc(b.co_number)}</strong>` : ''}
+                <span class="badge badge-stage" style="font-size:10px;margin-left:4px">${stageName(b.stage)}</span>
+              </div>
+            </div>
+            <div id="rfc-btns-${b.id}" style="display:flex;gap:5px;flex-shrink:0">
+              ${b.co_number
+                ? `<span style="font-size:12px;color:var(--text-muted)">Already set</span>`
+                : `<button class="btn btn-primary btn-sm" onclick="copyJobToCo(${b.id},false)">Copy to CO #</button>
+                   <button class="btn btn-ghost btn-sm" onclick="copyJobToCo(${b.id},true)">Copy + Clear Job #</button>`}
+            </div>
+          </div>`).join('')}
+      </div>
+      <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end">
+        <button class="btn btn-ghost" onclick="document.getElementById('rfc-cleanup-modal').remove()">Close</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+async function copyJobToCo(bidId, clearJobNumber) {
+  try {
+    const bid = await api.get(`/api/bids/${bidId}`);
+    const update = { co_number: bid.job_number };
+    if (clearJobNumber) update.job_number = '';
+    await api.put(`/api/bids/${bidId}`, update);
+    const btns = document.getElementById(`rfc-btns-${bidId}`);
+    if (btns) btns.innerHTML = `<span style="font-size:12px;color:#16a34a">✓ Copied${clearJobNumber ? ' · Job # cleared' : ''}</span>`;
+  } catch (e) { alert('Failed: ' + e.message); }
 }
 
 // ── Project re-linking (from job panel) ──────────────────────────────────────
@@ -3718,6 +3891,7 @@ function openBidModal(bidId = null, defaultStage = 'opportunity', highlightIssue
       document.getElementById('bid-id').value = b.id;
       document.getElementById('f-bid_number').value = b.bid_number || '';
       document.getElementById('f-job_number').value = b.job_number || '';
+      document.getElementById('f-co_number').value  = b.co_number  || '';
       document.getElementById('f-stage').value = b.stage;
       document.getElementById('f-project_name').value = b.project_name;
       document.getElementById('f-estimate_amount').value = b.estimate_amount || '';
@@ -4090,6 +4264,7 @@ async function saveBid() {
   const data = {
     bid_number: document.getElementById('f-bid_number').value.trim(),
     job_number: document.getElementById('f-job_number').value.trim(),
+    co_number:  document.getElementById('f-co_number')?.value.trim() || null,
     project_id:   Number(document.getElementById('f-project_id')?.value) || null,
     stage:        document.getElementById('f-stage').value,
     project_name: document.getElementById('f-project_name').value.trim(),
@@ -4996,6 +5171,7 @@ function renderJobPanelContent(bid, followups, contacts = [], linkedCOs = []) {
     <div class="jp-section" style="padding-bottom:14px">
       <div style="font-size:17px;font-weight:800;color:var(--text);line-height:1.3">${esc(displayName)}</div>
       ${bid.job_number ? `<div style="font-size:13px;color:var(--text-muted);margin-top:2px">Job #<span style="font-weight:600;color:var(--text)">${esc(bid.job_number)}</span></div>` : ''}
+      ${bid.co_number  ? `<div style="font-size:13px;color:var(--text-muted);margin-top:2px">RFC/CO #<span style="font-weight:600;color:#f97316">${esc(bid.co_number)}</span></div>` : ''}
       ${bidNameLine}
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px">
         <span class="badge badge-stage">${stageName(bid.stage)}</span>

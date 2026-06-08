@@ -48,6 +48,7 @@ function formatBid(b) {
     id: o._id,
     bid_number: o.bid_number ?? null,
     job_number: o.job_number ?? null,
+    co_number:  o.co_number  ?? null,
     stage: o.stage,
     project_name: o.project_name,
     customer: o.customer ?? null,
@@ -555,7 +556,7 @@ async function checkDuplicateBidNumber(bidNumber) {
 function fmtProject(p) {
   if (!p) return null;
   const o = p.toObject ? p.toObject() : p;
-  return { id: o._id, name: o.name, created_by: o.created_by ?? null, created_at: o.created_at ?? null };
+  return { id: o._id, name: o.name, job_number: o.job_number ?? null, created_by: o.created_by ?? null, created_at: o.created_at ?? null };
 }
 
 async function getProjects({ search } = {}) {
@@ -632,9 +633,43 @@ async function createProject(name, createdBy) {
   return fmtProject(doc);
 }
 
-async function updateProject(id, { name }) {
-  await Project.updateOne({ _id: Number(id) }, { $set: { name, updated_at: nowStr() } });
+async function updateProject(id, data) {
+  const upd = { updated_at: nowStr() };
+  if (data.name      !== undefined) upd.name       = data.name;
+  if (data.job_number !== undefined) upd.job_number = data.job_number || null;
+  await Project.updateOne({ _id: Number(id) }, { $set: upd });
   return getProject(id);
+}
+
+async function scanProjectByJobNumber(projectId) {
+  const project = await Project.findById(Number(projectId)).lean();
+  if (!project?.job_number) return [];
+  const bids = await Bid.aggregate([
+    { $match: {
+      is_deleted: 0,
+      job_number: project.job_number,
+      $or: [{ project_id: null }, { project_id: { $ne: Number(projectId) } }],
+    }},
+    ...BID_PIPELINE,
+    { $sort: { project_name: 1 } },
+  ]);
+  return bids.map(formatBid);
+}
+
+async function bulkLinkBidsToProject(projectId, bidIds) {
+  await Bid.updateMany(
+    { _id: { $in: bidIds.map(Number) } },
+    { $set: { project_id: Number(projectId), updated_at: nowStr() } }
+  );
+}
+
+async function getRfcJobNumberBids() {
+  const bids = await Bid.aggregate([
+    { $match: { is_deleted: 0, job_number: { $regex: /^(RFC|COR)/i } } },
+    ...BID_PIPELINE,
+    { $sort: { job_number: 1 } },
+  ]);
+  return bids.map(formatBid);
 }
 
 async function getProjectBids(projectId) {
@@ -860,7 +895,7 @@ async function getBid(id) {
 }
 
 const BID_FIELDS = [
-  'bid_number', 'job_number', 'stage', 'project_name', 'customer', 'customer2',
+  'bid_number', 'job_number', 'co_number', 'stage', 'project_name', 'customer', 'customer2',
   'customer3', 'customer4', 'customer5', 'notes', 'estimator_id', 'salesperson_id',
   'date_received', 'estimate_due_date', 'estimate_start_date', 'date_estimate_sent',
   'estimate_review_date', 'estimate_amount', 'estimate_pct_complete',
@@ -1560,6 +1595,7 @@ module.exports = {
   getStats, getDigest, getAnalytics,
   findOrphanEstimators, fixOrphanEstimators,
   getProjects, getProject, createProject, updateProject, deleteProject, getProjectBids, mergeProjects, runProjectMigration,
+  scanProjectByJobNumber, bulkLinkBidsToProject, getRfcJobNumberBids,
   addIgnoredPair, getIgnoredPairs,
   heartbeat, getOnlineUsers,
   submitIdea, getIdeas, updateIdeaStatus,

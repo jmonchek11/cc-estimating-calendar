@@ -4,6 +4,7 @@ const bidSchema = new mongoose.Schema({
   _id: { type: Number },
   bid_number: { type: String, default: null },
   job_number: { type: String, default: null },
+  co_number:  { type: String, default: null },
   stage: { type: String, required: true, default: 'opportunity' },
   project_name: { type: String, required: true },
   customer: { type: String, default: null },
