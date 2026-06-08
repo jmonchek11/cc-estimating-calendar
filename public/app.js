@@ -470,20 +470,6 @@ async function renderDashboard(main) {
       </div>
     </div>
 
-    <div class="dashboard-grid">
-      <div class="card">
-        <div class="section-title">📊 ${scopeLabel} Pipeline by Value</div>
-        <div style="margin-top:8px">${stageBars}</div>
-        <div style="text-align:right;font-size:12px;color:var(--text-muted);margin-top:8px;border-top:1px solid var(--border);padding-top:8px">
-          Total Active Pipeline: <strong>${fmt(totalValue, 'currency')}</strong>
-        </div>
-      </div>
-      <div class="card">
-        <div class="section-title">🕐 ${scopeLabel} Recent Activity</div>
-        ${recentRows || '<div class="text-muted" style="padding:8px 0;font-size:13px">No recent activity</div>'}
-      </div>
-    </div>
-
     <div class="card" style="margin-top:20px">
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:14px">
         <div class="section-title" style="margin:0">🗓️ ${scopeLabel} Calendar</div>
@@ -501,6 +487,20 @@ async function renderDashboard(main) {
       </div>
       ${buildCalendarGrid(calYear, calMonth, calBids, calFilter)}
       <div class="cal-legend" style="margin-top:10px">${calLegendHtml}</div>
+    </div>
+
+    <div class="dashboard-grid">
+      <div class="card">
+        <div class="section-title">📊 ${scopeLabel} Pipeline by Value</div>
+        <div style="margin-top:8px">${stageBars}</div>
+        <div style="text-align:right;font-size:12px;color:var(--text-muted);margin-top:8px;border-top:1px solid var(--border);padding-top:8px">
+          Total Active Pipeline: <strong>${fmt(totalValue, 'currency')}</strong>
+        </div>
+      </div>
+      <div class="card">
+        <div class="section-title">🕐 ${scopeLabel} Recent Activity</div>
+        ${recentRows || '<div class="text-muted" style="padding:8px 0;font-size:13px">No recent activity</div>'}
+      </div>
     </div>`;
 }
 
