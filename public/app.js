@@ -2778,7 +2778,10 @@ async function openProjectPanel(projectId) {
     <div class="modal-box" style="max-width:680px;max-height:88vh;overflow:hidden;display:flex;flex-direction:column">
       <div class="modal-header">
         <div>
-          <div style="font-size:18px;font-weight:800">🏗️ ${esc(project.name)}</div>
+          <div style="display:flex;align-items:center;gap:8px" id="proj-name-row-${project.id}">
+            <div style="font-size:18px;font-weight:800">🏗️ ${esc(project.name)}</div>
+            ${State.currentUser?.is_admin ? `<button class="btn btn-ghost btn-sm" style="font-size:11px;color:var(--text-muted)" onclick="editProjectName(${project.id},'${esc(project.name)}')" title="Rename project">✏️</button>` : ''}
+          </div>
           <div style="font-size:12px;color:var(--text-muted);margin-top:2px">
             ${bids.length} bid${bids.length!==1?'s':''} total
             · ${fmtCompact(totalValue)} pipeline
@@ -3032,6 +3035,35 @@ async function mergeIntoProject(keepId, absorbId, keepName) {
     _migrationResult = await api.post('/api/admin/migrate-projects', {});
     renderProjectMigrationResult(_migrationResult);
   } catch (e) { alert('Merge failed: ' + e.message); }
+}
+
+// ── Project name editing (admin only) ────────────────────────────────────────
+
+function editProjectName(projectId, current) {
+  const row = document.getElementById(`proj-name-row-${projectId}`);
+  if (!row) return;
+  row.innerHTML = `
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+      <input type="text" class="form-input" id="proj-name-input-${projectId}"
+             value="${esc(current)}" placeholder="Project name"
+             style="font-size:15px;font-weight:700;height:34px;min-width:220px"
+             onkeydown="if(event.key==='Enter')saveProjectName(${projectId});if(event.key==='Escape')openProjectPanel(${projectId})" />
+      <button class="btn btn-primary btn-sm" onclick="saveProjectName(${projectId})">Save</button>
+      <button class="btn btn-ghost btn-sm" onclick="openProjectPanel(${projectId})">Cancel</button>
+    </div>`;
+  document.getElementById(`proj-name-input-${projectId}`)?.select();
+}
+
+async function saveProjectName(projectId) {
+  const val = document.getElementById(`proj-name-input-${projectId}`)?.value.trim();
+  if (!val) { document.getElementById(`proj-name-input-${projectId}`)?.focus(); return; }
+  try {
+    await api.put(`/api/projects/${projectId}`, { name: val });
+    _projectPickerCache = null;
+    openProjectPanel(projectId);
+    // Refresh the projects list if it's visible
+    if (location.hash === '#projects') renderProjects(document.getElementById('main'));
+  } catch (e) { alert('Failed: ' + e.message); }
 }
 
 // ── Project job # editing & job-number scan ───────────────────────────────────
