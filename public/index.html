@@ -135,6 +135,17 @@
       <a class="nav-item" data-page="settings" href="#settings">
         <span class="nav-icon">⚙️</span> Team Settings
       </a>
+
+      <!-- SIDEBAR FOOTER: online users + ideas -->
+      <div class="sidebar-footer" id="sidebar-footer" style="display:none">
+        <button class="sb-footer-btn" id="online-btn" onclick="openOnlinePanel()" title="See who's online">
+          <span class="online-pulse-dot"></span>
+          <span id="online-count-label">…</span>
+        </button>
+        <button class="sb-footer-btn" onclick="openIdeasModal()" title="Submit an idea or report an issue">
+          💡 Ideas
+        </button>
+      </div>
     </nav>
 
     <main id="main">

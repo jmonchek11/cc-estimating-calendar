@@ -11,6 +11,7 @@ const teamMemberSchema = new mongoose.Schema({
   password_hash: { type: String, default: null },
   must_change_password: { type: Boolean, default: true },
   is_admin: { type: Boolean, default: false },
+  last_seen: { type: Date, default: null },
   created_at: { type: String, default: () => new Date().toISOString() }
 }, { _id: false, versionKey: false });
 

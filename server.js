@@ -376,6 +376,42 @@ app.get('/api/projects/:id/bids', async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Online presence ───────────────────────────────────────────────────────────
+app.post('/api/heartbeat', async (req, res) => {
+  if (!req.session.userId) return res.json({ ok: false });
+  try { await db.heartbeat(req.session.userId); res.json({ ok: true }); }
+  catch (e) { res.json({ ok: false }); }
+});
+
+app.get('/api/online', async (req, res) => {
+  try { res.json(await db.getOnlineUsers()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Ideas / feedback ──────────────────────────────────────────────────────────
+app.post('/api/ideas', async (req, res) => {
+  if (!req.session.userId) return res.status(401).json({ error: 'Not logged in' });
+  try { res.json(await db.submitIdea({ ...req.body, submitted_by: req.session.userId })); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.get('/api/ideas', async (req, res) => {
+  try {
+    const user = await db.getMember(req.session.userId);
+    if (!user || !user.is_admin) return res.status(403).json({ error: 'Admin only' });
+    res.json(await db.getIdeas());
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/ideas/:id', async (req, res) => {
+  try {
+    const user = await db.getMember(req.session.userId);
+    if (!user || !user.is_admin) return res.status(403).json({ error: 'Admin only' });
+    await db.updateIdeaStatus(req.params.id, req.body.status);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.delete('/api/projects/:id', async (req, res) => {
   try { await db.deleteProject(req.params.id); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }

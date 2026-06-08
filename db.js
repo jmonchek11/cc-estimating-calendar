@@ -8,6 +8,7 @@ const Contact = require('./models/Contact');
 const Settings = require('./models/Settings');
 const Project = require('./models/Project');
 const IgnoredPair = require('./models/IgnoredPair');
+const Idea = require('./models/Idea');
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -705,6 +706,52 @@ async function addIgnoredPair(id1, id2) {
 
 async function getIgnoredPairs() {
   return IgnoredPair.find().lean();
+}
+
+// ── Online presence ───────────────────────────────────────────────────────────
+
+async function heartbeat(userId) {
+  await TeamMember.findByIdAndUpdate(Number(userId), { last_seen: new Date() });
+}
+
+async function getOnlineUsers() {
+  const cutoff = new Date(Date.now() - 5 * 60 * 1000); // 5 min window
+  const users = await TeamMember.find({ active: 1, last_seen: { $gte: cutoff } }).lean();
+  return users.map(formatMember);
+}
+
+// ── Ideas / feedback ──────────────────────────────────────────────────────────
+
+async function submitIdea(data) {
+  const id = await nextId('ideas');
+  const now = nowStr();
+  await Idea.create({
+    _id: id,
+    type: data.type || 'idea',
+    title: String(data.title || '').trim(),
+    body: String(data.body || '').trim(),
+    submitted_by: data.submitted_by ? Number(data.submitted_by) : null,
+    status: 'new',
+    created_at: now,
+    updated_at: now,
+  });
+  return { id };
+}
+
+async function getIdeas() {
+  const ideas = await Idea.find({}).sort({ created_at: -1 }).lean();
+  const teamMap = {};
+  (await TeamMember.find({}).lean()).forEach(m => { teamMap[m._id] = m; });
+  return ideas.map(i => ({
+    id: i._id, type: i.type, title: i.title, body: i.body,
+    status: i.status, created_at: i.created_at,
+    submitted_by_name:     i.submitted_by && teamMap[i.submitted_by] ? teamMap[i.submitted_by].name : null,
+    submitted_by_initials: i.submitted_by && teamMap[i.submitted_by] ? teamMap[i.submitted_by].initials : null,
+  }));
+}
+
+async function updateIdeaStatus(id, status) {
+  await Idea.findByIdAndUpdate(Number(id), { status, updated_at: nowStr() });
 }
 
 // ── Settings ──────────────────────────────────────────────────────────────────
@@ -1512,6 +1559,8 @@ module.exports = {
   findOrphanEstimators, fixOrphanEstimators,
   getProjects, getProject, createProject, updateProject, deleteProject, getProjectBids, mergeProjects, runProjectMigration,
   addIgnoredPair, getIgnoredPairs,
+  heartbeat, getOnlineUsers,
+  submitIdea, getIdeas, updateIdeaStatus,
   getEstimatorBids,
   savePhase, getLinkedCOs, linkCOToParent, checkDuplicateBidNumber,
   getSettings, updateSettings,

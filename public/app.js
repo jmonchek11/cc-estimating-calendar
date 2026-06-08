@@ -4478,6 +4478,9 @@ async function logout() {
   State.currentUser = null;
   State.mineOnly = false;
   State.globalSearch = '';
+  if (_onlinePollTimer) { clearInterval(_onlinePollTimer); _onlinePollTimer = null; }
+  const footer = document.getElementById('sidebar-footer');
+  if (footer) footer.style.display = 'none';
   const fab = document.getElementById('quick-log-fab');
   if (fab) fab.style.display = 'none';
   // Hide and clear search bar
@@ -4504,6 +4507,146 @@ function updateSidebarUser(user) {
   // Show global search bar
   const sw = document.getElementById('sidebar-search-wrap');
   if (sw) sw.style.display = 'block';
+  // Show sidebar footer and start heartbeat
+  const footer = document.getElementById('sidebar-footer');
+  if (footer) footer.style.display = 'flex';
+  startOnlinePolling();
+}
+
+// ── Online presence & Ideas ───────────────────────────────────────────────────
+
+let _onlinePollTimer = null;
+
+function startOnlinePolling() {
+  if (_onlinePollTimer) return; // already running
+  const tick = async () => {
+    await api.post('/api/heartbeat', {}).catch(() => {});
+    const users = await api.get('/api/online').catch(() => []);
+    const label = document.getElementById('online-count-label');
+    if (label) label.textContent = `${users.length} online`;
+  };
+  tick();
+  _onlinePollTimer = setInterval(tick, 60_000);
+}
+
+async function openOnlinePanel() {
+  const users = await api.get('/api/online').catch(() => []);
+  const overlay = _buildModal('online-panel-modal');
+  overlay.innerHTML = `
+    <div class="modal-box" style="max-width:340px">
+      <div class="modal-header">
+        <div class="modal-title"><span class="online-pulse-dot" style="display:inline-block;margin-right:6px"></span>Who's Online</div>
+        <button class="modal-close" onclick="document.getElementById('online-panel-modal').remove()">×</button>
+      </div>
+      <div style="padding:16px 20px">
+        ${users.length ? users.map(u => `
+          <div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border)">
+            <span class="sidebar-user-avatar" style="background:${avatarColor(u.initials)};width:30px;height:30px;font-size:11px">${esc(u.initials)}</span>
+            <div>
+              <div style="font-size:13px;font-weight:600">${esc(u.name)}</div>
+              <div style="font-size:11px;color:var(--text-muted);text-transform:capitalize">${esc(u.role)}</div>
+            </div>
+          </div>`).join('')
+        : '<div style="font-size:13px;color:var(--text-muted);padding:8px 0">No one else is online right now.</div>'}
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+async function openIdeasModal() {
+  const isAdmin = State.currentUser?.is_admin;
+  const ideas = isAdmin ? await api.get('/api/ideas').catch(() => []) : [];
+
+  const statusLabel = s => ({ new:'New', reviewed:'Reviewed', done:'Done', wontfix:"Won't Fix" }[s] || s);
+  const typeIcon    = t => t === 'issue' ? '🐛' : '💡';
+
+  const adminInbox = isAdmin && ideas.length ? `
+    <div style="margin-top:20px;border-top:1px solid var(--border);padding-top:16px">
+      <div style="font-size:13px;font-weight:700;margin-bottom:10px">📥 Submitted (${ideas.length})</div>
+      ${ideas.map(i => `
+        <div style="padding:10px 0;border-bottom:1px solid var(--border)">
+          <div style="display:flex;align-items:flex-start;gap:8px">
+            <span style="font-size:16px;flex-shrink:0">${typeIcon(i.type)}</span>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:13px;font-weight:600">${esc(i.title)}</div>
+              ${i.body ? `<div style="font-size:12px;color:var(--text-muted);margin-top:2px">${esc(i.body)}</div>` : ''}
+              <div style="font-size:11px;color:var(--text-muted);margin-top:4px">
+                ${i.submitted_by_initials ? `<span class="initials-pill" style="font-size:10px">${esc(i.submitted_by_initials)}</span>` : ''}
+                ${i.submitted_by_name ? esc(i.submitted_by_name) : 'Anonymous'}
+                · ${fmt(i.created_at?.substring(0,10),'date')}
+              </div>
+            </div>
+            <select style="font-size:11px;border-radius:4px;padding:2px 4px;border:1px solid var(--border);background:var(--card-bg);cursor:pointer;flex-shrink:0"
+                    onchange="updateIdeaStatus(${i.id}, this.value)">
+              ${['new','reviewed','done','wontfix'].map(s =>
+                `<option value="${s}" ${i.status===s?'selected':''}>${statusLabel(s)}</option>`
+              ).join('')}
+            </select>
+          </div>
+        </div>`).join('')}
+    </div>` : isAdmin ? `
+    <div style="margin-top:20px;border-top:1px solid var(--border);padding-top:12px;font-size:13px;color:var(--text-muted)">No submissions yet.</div>` : '';
+
+  const overlay = _buildModal('ideas-modal');
+  overlay.innerHTML = `
+    <div class="modal-box" style="max-width:500px;max-height:85vh;overflow:hidden;display:flex;flex-direction:column">
+      <div class="modal-header">
+        <div class="modal-title">💡 Ideas & Issues</div>
+        <button class="modal-close" onclick="document.getElementById('ideas-modal').remove()">×</button>
+      </div>
+      <div style="flex:1;overflow-y:auto;padding:20px 24px">
+        <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px">
+          Have an idea to improve the app, or spotted something broken? Send it straight to the admin.
+        </p>
+        <div class="form-group">
+          <label class="form-label">Type</label>
+          <div style="display:flex;gap:8px">
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+              <input type="radio" name="idea-type" value="idea" checked /> 💡 Idea / Enhancement
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+              <input type="radio" name="idea-type" value="issue" /> 🐛 Bug / Issue
+            </label>
+          </div>
+        </div>
+        <div class="form-group" style="margin-top:12px">
+          <label class="form-label">Title *</label>
+          <input type="text" class="form-input" id="idea-title" placeholder="One line summary…" />
+        </div>
+        <div class="form-group" style="margin-top:10px">
+          <label class="form-label">Details</label>
+          <textarea class="form-input" id="idea-body" rows="3"
+                    placeholder="Any extra context, steps to reproduce, etc."
+                    style="resize:vertical"></textarea>
+        </div>
+        <div style="display:flex;justify-content:flex-end;margin-top:14px">
+          <button class="btn btn-primary" onclick="submitIdea()">Submit</button>
+        </div>
+        ${adminInbox}
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+async function submitIdea() {
+  const title = document.getElementById('idea-title')?.value.trim();
+  if (!title) { document.getElementById('idea-title')?.focus(); return; }
+  const type  = document.querySelector('input[name="idea-type"]:checked')?.value || 'idea';
+  const body  = document.getElementById('idea-body')?.value.trim() || '';
+  try {
+    await api.post('/api/ideas', { type, title, body });
+    document.getElementById('ideas-modal')?.remove();
+    // Simple confirmation toast
+    const toast = document.createElement('div');
+    toast.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#166534;color:white;padding:10px 20px;border-radius:8px;font-size:13px;font-weight:600;z-index:9999';
+    toast.textContent = '✓ Submitted — thanks!';
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 3000);
+  } catch (e) { alert('Failed to submit: ' + e.message); }
+}
+
+async function updateIdeaStatus(ideaId, status) {
+  await api.put(`/api/ideas/${ideaId}`, { status }).catch(e => alert(e.message));
 }
 
 // (PIN input removed — now using email/password auth)
