@@ -470,7 +470,7 @@ async function renderDashboard(main) {
       </div>
     </div>
 
-    <div class="card" style="margin-top:20px">
+    <div class="card" style="margin-bottom:20px">
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:14px">
         <div class="section-title" style="margin:0">🗓️ ${scopeLabel} Calendar</div>
         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
