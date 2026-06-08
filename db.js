@@ -605,7 +605,7 @@ async function getProjects({ search } = {}) {
         $sum: { $map: { input: '$bids', as: 'b', in: { $ifNull: ['$$b.estimate_amount', 0] } } },
       },
     }},
-    { $project: { name: 1, created_by: 1, created_at: 1, bid_count: 1, bid_numbers: 1, customers: 1, estimator_ids: 1, active_count: 1, total_value: 1 } },
+    { $project: { name: 1, job_number: 1, created_by: 1, created_at: 1, bid_count: 1, bid_numbers: 1, customers: 1, estimator_ids: 1, active_count: 1, total_value: 1 } },
     { $sort: { name: 1 } },
   ]);
   return projects.map(p => ({
@@ -721,7 +721,7 @@ async function runProjectMigration() {
         },
       },
     }},
-    { $project: { name: 1, bid_count: 1, bid_numbers: 1 } },
+    { $project: { name: 1, job_number: 1, bid_count: 1, bid_numbers: 1 } },
     { $sort: { name: 1 } },
   ]);
   const ignoredPairs = await IgnoredPair.find().lean();
