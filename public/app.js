@@ -2715,6 +2715,12 @@ function openNewProjectModal() {
           <label class="form-label">Project Name *</label>
           <input type="text" class="form-input" id="new-proj-name"
                  placeholder="e.g. 30th Street Station"
+                 onkeydown="if(event.key==='Enter')document.getElementById('new-proj-job').focus()" />
+        </div>
+        <div class="form-group" style="margin-top:10px">
+          <label class="form-label">Job # <span style="font-weight:400;color:var(--text-muted)">(optional)</span></label>
+          <input type="text" class="form-input" id="new-proj-job"
+                 placeholder="e.g. 240315"
                  onkeydown="if(event.key==='Enter')saveNewProject()" />
         </div>
         <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
@@ -2731,12 +2737,13 @@ async function saveNewProject() {
   const nameEl = document.getElementById('new-proj-name');
   const name = nameEl?.value.trim();
   if (!name) { nameEl?.focus(); return; }
+  const jobNumber = document.getElementById('new-proj-job')?.value.trim() || '';
   try {
     const p = await api.post('/api/projects', { name });
+    if (jobNumber) await api.put(`/api/projects/${p.id}`, { job_number: jobNumber });
     document.getElementById('new-project-modal')?.remove();
     _projectPickerCache = null;
     await renderProjects(document.getElementById('main'));
-    // Open the new project panel so user can immediately start adding bids
     openProjectPanel(p.id);
   } catch (e) { alert('Failed to create project: ' + e.message); }
 }
