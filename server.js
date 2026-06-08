@@ -202,6 +202,12 @@ app.post('/api/bids', async (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+// Static sub-routes must come BEFORE /api/bids/:id or Express matches them as an id
+app.get('/api/bids/rfc-cleanup', async (req, res) => {
+  try { res.json(await db.getRfcJobNumberBids()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/bids/:id', async (req, res) => {
   try {
     const bid = await db.getBid(req.params.id);
@@ -422,11 +428,6 @@ app.post('/api/projects/:id/bulk-link', async (req, res) => {
     await db.bulkLinkBidsToProject(req.params.id, req.body.bid_ids || []);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.get('/api/bids/rfc-cleanup', async (req, res) => {
-  try { res.json(await db.getRfcJobNumberBids()); }
-  catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.delete('/api/projects/:id', async (req, res) => {
