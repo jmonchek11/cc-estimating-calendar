@@ -293,17 +293,19 @@ function navigateMineOnly(page) {
 }
 
 async function renderDashboard(main) {
-  const [stats, myStats] = await Promise.all([
-    api.get('/api/stats'),
-    State.currentUser ? api.get('/api/my-stats') : Promise.resolve(null),
-  ]);
-
   // Non-admins are always locked to "mine" view
   if (State.currentUser && !State.currentUser.is_admin) {
     State.dashboardView = 'mine';
   }
-
   const isMine = State.currentUser && State.dashboardView === 'mine';
+
+  const calBidsUrl = `/api/bids?stage=opportunity,active_bid,active_co,follow_up${isMine && State.currentUser ? `&mine_only=true&userId=${State.currentUser.id}` : ''}`;
+
+  const [stats, myStats, calBids] = await Promise.all([
+    api.get('/api/stats'),
+    State.currentUser ? api.get('/api/my-stats') : Promise.resolve(null),
+    api.get(calBidsUrl),
+  ]);
 
   // Build data maps
   const globalMap = {};
@@ -410,6 +412,15 @@ async function renderDashboard(main) {
 
   const scopeLabel = isMine ? `${esc(firstName(State.currentUser.name))}'s` : 'Global';
 
+  // Calendar vars
+  const { calYear, calMonth, calFilter } = State;
+  const calMonthName = new Date(calYear, calMonth, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  const calEstimators = State.team.filter(m => m.active && (m.role === 'estimator' || m.role === 'estimator/pm'));
+  const calLegendHtml = [
+    ...calEstimators.map(m => `<span class="cal-legend-item"><span class="cal-legend-dot" style="background:${estimatorColor(m.id)}"></span>${esc(m.initials)}</span>`),
+    `<span class="cal-legend-item"><span class="cal-legend-dot" style="background:var(--sidebar-hover-bg);border:1px dashed #94a3b8"></span>Follow-up</span>`,
+  ].join('');
+
   main.innerHTML = `
     <div class="page-header">
       <div>
@@ -471,6 +482,25 @@ async function renderDashboard(main) {
         <div class="section-title">🕐 ${scopeLabel} Recent Activity</div>
         ${recentRows || '<div class="text-muted" style="padding:8px 0;font-size:13px">No recent activity</div>'}
       </div>
+    </div>
+
+    <div class="card" style="margin-top:20px">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:14px">
+        <div class="section-title" style="margin:0">🗓️ ${scopeLabel} Calendar</div>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <button class="btn btn-ghost btn-sm" onclick="navCalendar(-1)">‹ Prev</button>
+          <span class="cal-month-label">${esc(calMonthName)}</span>
+          <button class="btn btn-ghost btn-sm" onclick="navCalendar(1)">Next ›</button>
+          <button class="btn btn-secondary btn-sm" onclick="State.calYear=new Date().getFullYear();State.calMonth=new Date().getMonth();rerenderCalContext()">Today</button>
+          <select class="cal-filter-select" style="margin:0" onchange="State.calFilter=this.value;rerenderCalContext()">
+            <option value="all" ${calFilter==='all'?'selected':''}>Due Dates + Follow-ups</option>
+            <option value="due_only" ${calFilter==='due_only'?'selected':''}>Due Dates Only</option>
+            <option value="followups_only" ${calFilter==='followups_only'?'selected':''}>Follow-ups Only</option>
+          </select>
+        </div>
+      </div>
+      ${buildCalendarGrid(calYear, calMonth, calBids, calFilter)}
+      <div class="cal-legend" style="margin-top:10px">${calLegendHtml}</div>
     </div>`;
 }
 
@@ -3574,12 +3604,17 @@ function buildCalendarGrid(year, month, bids, filterType) {
   return `<div class="cal-hdr">${headers}</div><div class="cal-grid">${cells}</div>`;
 }
 
+function rerenderCalContext() {
+  const hash = (location.hash || '').replace('#', '') || 'dashboard';
+  renderPage(hash === 'calendar' ? 'calendar' : 'dashboard');
+}
+
 function navCalendar(dir) {
   let m = State.calMonth + dir, y = State.calYear;
   if (m < 0)  { m = 11; y--; }
   if (m > 11) { m = 0;  y++; }
   State.calMonth = m; State.calYear = y;
-  renderPage('calendar');
+  rerenderCalContext();
 }
 
 async function renderCalendar(main) {
@@ -3602,8 +3637,8 @@ async function renderCalendar(main) {
       <button class="btn btn-ghost btn-sm" onclick="navCalendar(-1)">‹ Prev</button>
       <span class="cal-month-label">${esc(monthName)}</span>
       <button class="btn btn-ghost btn-sm" onclick="navCalendar(1)">Next ›</button>
-      <button class="btn btn-secondary btn-sm" onclick="State.calYear=new Date().getFullYear();State.calMonth=new Date().getMonth();renderPage('calendar')">Today</button>
-      <select class="cal-filter-select" onchange="State.calFilter=this.value;renderPage('calendar')">
+      <button class="btn btn-secondary btn-sm" onclick="State.calYear=new Date().getFullYear();State.calMonth=new Date().getMonth();rerenderCalContext()">Today</button>
+      <select class="cal-filter-select" onchange="State.calFilter=this.value;rerenderCalContext()">
         <option value="all" ${calFilter==='all'?'selected':''}>Due Dates + Follow-ups</option>
         <option value="due_only" ${calFilter==='due_only'?'selected':''}>Due Dates Only</option>
         <option value="followups_only" ${calFilter==='followups_only'?'selected':''}>Follow-ups Only</option>
