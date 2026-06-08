@@ -4553,6 +4553,23 @@ async function openOnlinePanel() {
   document.body.appendChild(overlay);
 }
 
+const IDEA_PAGE_NAMES = {
+  'dashboard':     'Dashboard',
+  'opportunities': 'Opportunities',
+  'active-bids':   'Active Bids',
+  'change-orders': 'Change Orders',
+  'follow-ups':    'Follow Ups',
+  'calendar':      'Calendar',
+  'projects':      'Projects',
+  'contacts':      'Contacts',
+  'search':        'Search',
+  'digest':        'Weekly Digest',
+  'analytics':     'Analytics',
+  'history':       'History',
+  'cleanup':       'Data Cleanup',
+  'settings':      'Team Settings',
+};
+
 async function openIdeasModal() {
   const isAdmin = State.currentUser?.is_admin;
   const ideas = isAdmin ? await api.get('/api/ideas').catch(() => []) : [];
@@ -4574,6 +4591,7 @@ async function openIdeasModal() {
                 ${i.submitted_by_initials ? `<span class="initials-pill" style="font-size:10px">${esc(i.submitted_by_initials)}</span>` : ''}
                 ${i.submitted_by_name ? esc(i.submitted_by_name) : 'Anonymous'}
                 · ${fmt(i.created_at?.substring(0,10),'date')}
+                ${i.page ? `· <span style="background:#f1f5f9;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:600">${esc(IDEA_PAGE_NAMES[i.page] || i.page)}</span>` : ''}
               </div>
             </div>
             <select style="font-size:11px;border-radius:4px;padding:2px 4px;border:1px solid var(--border);background:var(--card-bg);cursor:pointer;flex-shrink:0"
@@ -4610,6 +4628,15 @@ async function openIdeasModal() {
           </div>
         </div>
         <div class="form-group" style="margin-top:12px">
+          <label class="form-label">Related to</label>
+          <select class="form-input" id="idea-page" style="font-size:13px">
+            ${Object.entries(IDEA_PAGE_NAMES).map(([val, label]) =>
+              `<option value="${val}" ${(location.hash.replace('#','') || 'dashboard') === val ? 'selected' : ''}>${label}</option>`
+            ).join('')}
+            <option value="general" ${!IDEA_PAGE_NAMES[location.hash.replace('#','')] ? 'selected' : ''}>General / Not page-specific</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin-top:10px">
           <label class="form-label">Title *</label>
           <input type="text" class="form-input" id="idea-title" placeholder="One line summary…" />
         </div>
@@ -4633,8 +4660,9 @@ async function submitIdea() {
   if (!title) { document.getElementById('idea-title')?.focus(); return; }
   const type  = document.querySelector('input[name="idea-type"]:checked')?.value || 'idea';
   const body  = document.getElementById('idea-body')?.value.trim() || '';
+  const page  = document.getElementById('idea-page')?.value || null;
   try {
-    await api.post('/api/ideas', { type, title, body });
+    await api.post('/api/ideas', { type, title, body, page });
     document.getElementById('ideas-modal')?.remove();
     // Simple confirmation toast
     const toast = document.createElement('div');

@@ -730,6 +730,7 @@ async function submitIdea(data) {
     type: data.type || 'idea',
     title: String(data.title || '').trim(),
     body: String(data.body || '').trim(),
+    page: data.page ? String(data.page).trim() : null,
     submitted_by: data.submitted_by ? Number(data.submitted_by) : null,
     status: 'new',
     created_at: now,
@@ -744,6 +745,7 @@ async function getIdeas() {
   (await TeamMember.find({}).lean()).forEach(m => { teamMap[m._id] = m; });
   return ideas.map(i => ({
     id: i._id, type: i.type, title: i.title, body: i.body,
+    page: i.page || null,
     status: i.status, created_at: i.created_at,
     submitted_by_name:     i.submitted_by && teamMap[i.submitted_by] ? teamMap[i.submitted_by].name : null,
     submitted_by_initials: i.submitted_by && teamMap[i.submitted_by] ? teamMap[i.submitted_by].initials : null,

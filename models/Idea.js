@@ -5,6 +5,7 @@ const schema = new mongoose.Schema({
   type:         { type: String, enum: ['idea', 'issue'], required: true },
   title:        { type: String, required: true },
   body:         { type: String, default: '' },
+  page:         { type: String, default: null },
   submitted_by: { type: Number, default: null },
   status:       { type: String, default: 'new' }, // new | reviewed | done | wontfix
   created_at:   String,
