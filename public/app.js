@@ -3218,7 +3218,7 @@ async function openRfcCleanupModal() {
     return `
       <div style="padding:12px 0;border-bottom:1px solid var(--border)">
         <div style="display:flex;align-items:flex-start;gap:10px">
-          <input type="checkbox" class="rfc-auto-check" data-idx="${i}" ${alreadyHasCo ? 'disabled title="RFC/CO # already set"' : 'checked'}
+          <input type="checkbox" class="rfc-auto-check" data-idx="${i}" checked
                  style="margin-top:3px;flex-shrink:0" />
           <div style="flex:1;min-width:0">
             <div style="font-size:13px;font-weight:600;margin-bottom:6px">
@@ -3266,7 +3266,7 @@ async function openRfcCleanupModal() {
         ${rows}
       </div>
       <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end;align-items:center">
-        <span id="rfc-apply-count" style="font-size:12px;color:var(--text-muted)">${_rfcCleanupData.filter(d => !d.bid.co_number).length} selected</span>
+        <span id="rfc-apply-count" style="font-size:12px;color:var(--text-muted)">${_rfcCleanupData.length} selected</span>
         <button class="btn btn-ghost" onclick="document.getElementById('rfc-cleanup-modal').remove()">Cancel</button>
         <button class="btn btn-primary" id="rfc-apply-btn" onclick="applyRfcCleanup()">Apply Selected</button>
       </div>
