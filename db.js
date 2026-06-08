@@ -665,7 +665,7 @@ async function bulkLinkBidsToProject(projectId, bidIds) {
 
 async function getRfcJobNumberBids() {
   const bids = await Bid.aggregate([
-    { $match: { is_deleted: 0, job_number: { $regex: /^(RFC|COR)/i } } },
+    { $match: { is_deleted: 0, job_number: { $regex: /(RFC|COR)/i } } },
     ...BID_PIPELINE,
     { $sort: { job_number: 1 } },
   ]);
