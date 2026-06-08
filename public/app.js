@@ -3166,65 +3166,145 @@ async function approveJobScanLinks(projectId) {
 
 // ── RFC / COR in Job # cleanup ────────────────────────────────────────────────
 
-async function openRfcCleanupModal() {
-  const bids = await api.get('/api/bids/rfc-cleanup').catch(e => { alert(e.message); return null; });
-  if (!bids) return;
+// Extracts the RFC/COR number and clean base job # from a combined job_number string.
+// e.g. "240315 RFC-66"  → { coNumber: "RFC-66", baseJobNumber: "240315" }
+//      "240315 RFC66"   → { coNumber: "RFC-66", baseJobNumber: "240315" }
+//      "240315 COR 001" → { coNumber: "COR-001", baseJobNumber: "240315" }
+function extractRfcFromJobNumber(jobNumber) {
+  if (!jobNumber) return null;
+  const m = jobNumber.match(/(RFC|COR)-?\s*(\d+)/i);
+  if (!m) return null;
+  const coNumber = `${m[1].toUpperCase()}-${m[2]}`;
+  const base = jobNumber.replace(m[0], '').replace(/[-\s]+$/, '').replace(/\s+/g, ' ').trim();
+  return { coNumber, baseJobNumber: base };
+}
 
-  if (!bids.length) {
-    alert('No bids found with RFC or COR in the Job # field. All clean!');
-    return;
-  }
+let _rfcCleanupData = [];
+
+async function openRfcCleanupModal() {
+  const [bids] = await Promise.all([
+    api.get('/api/bids/rfc-cleanup').catch(e => { alert(e.message); return null; }),
+    _projectPickerCache ? Promise.resolve() : api.get('/api/projects').then(p => { _projectPickerCache = p; }).catch(() => {}),
+  ]);
+  if (!bids) return;
+  if (!bids.length) { alert('No bids found with RFC or COR in the Job # field. All clean!'); return; }
+
+  // Build processed list with proposed changes
+  _rfcCleanupData = bids.map(b => {
+    const extracted = extractRfcFromJobNumber(b.job_number);
+    if (!extracted) return null;
+    const { coNumber, baseJobNumber } = extracted;
+    const matchingProject = (_projectPickerCache || []).find(p => p.job_number && p.job_number.trim() === baseJobNumber) || null;
+    const currentBidName = b.project_name || '';
+    const newBidName = currentBidName.toLowerCase().startsWith(coNumber.toLowerCase())
+      ? currentBidName
+      : `${coNumber} ${currentBidName}`;
+    return { bid: b, coNumber, baseJobNumber, matchingProject, currentBidName, newBidName };
+  }).filter(Boolean);
+
+  if (!_rfcCleanupData.length) { alert('Could not extract RFC/COR numbers from any of these bids.'); return; }
+
+  const rows = _rfcCleanupData.map((item, i) => {
+    const { bid, coNumber, baseJobNumber, matchingProject, currentBidName, newBidName } = item;
+    const alreadyHasCo = !!bid.co_number;
+    const bidNameChanged = newBidName !== currentBidName;
+    return `
+      <div style="padding:12px 0;border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:flex-start;gap:10px">
+          <input type="checkbox" class="rfc-auto-check" data-idx="${i}" ${alreadyHasCo ? 'disabled title="RFC/CO # already set"' : 'checked'}
+                 style="margin-top:3px;flex-shrink:0" />
+          <div style="flex:1;min-width:0">
+            <div style="font-size:13px;font-weight:600;margin-bottom:6px">
+              ${esc(bid.project_name)}${bid.bid_number ? `<span style="color:var(--text-muted);font-weight:400"> #${esc(bid.bid_number)}</span>` : ''}
+              <span class="badge badge-stage" style="font-size:10px;margin-left:4px">${stageName(bid.stage)}</span>
+            </div>
+            <div style="display:grid;grid-template-columns:80px 1fr;gap:3px 8px;font-size:12px;margin-bottom:6px">
+              <span style="color:var(--text-muted)">Job #</span>
+              <span><span style="color:#d97706;text-decoration:line-through">${esc(bid.job_number)}</span>
+                    <span style="color:#16a34a;margin-left:6px">→ ${esc(baseJobNumber)}</span></span>
+              <span style="color:var(--text-muted)">RFC/CO #</span>
+              <span><span style="color:#16a34a;font-weight:600">${esc(coNumber)}</span>
+                    ${alreadyHasCo ? `<em style="color:#d97706;margin-left:6px">(currently: ${esc(bid.co_number)})</em>` : ''}</span>
+              ${bidNameChanged ? `
+              <span style="color:var(--text-muted)">Bid Name</span>
+              <span><span style="color:#d97706;text-decoration:line-through">${esc(currentBidName)}</span>
+                    <span style="color:#16a34a;margin-left:6px">→ ${esc(newBidName)}</span></span>` : ''}
+            </div>
+            ${matchingProject
+              ? `<div style="font-size:11px;color:#16a34a;font-weight:600">✓ Matches project: ${esc(matchingProject.name)}</div>`
+              : `<div style="font-size:11px;color:#d97706">⚠️ No project found with job # ${esc(baseJobNumber)} — changes will still apply</div>`}
+          </div>
+        </div>
+      </div>`;
+  }).join('');
 
   const overlay = _buildModal('rfc-cleanup-modal');
   overlay.innerHTML = `
-    <div class="modal-box" style="max-width:700px;max-height:88vh;overflow:hidden;display:flex;flex-direction:column">
+    <div class="modal-box" style="max-width:720px;max-height:88vh;overflow:hidden;display:flex;flex-direction:column">
       <div class="modal-header">
-        <div class="modal-title">🔄 RFC / COR in Job # Field</div>
+        <div class="modal-title">🔄 RFC / COR Cleanup</div>
         <button class="modal-close" onclick="document.getElementById('rfc-cleanup-modal').remove()">×</button>
       </div>
       <div style="padding:10px 20px;background:#fffbeb;border-bottom:1px solid #fde68a;font-size:13px;color:#92400e">
-        ⚠️ These ${bids.length} bid${bids.length!==1?'s':''} have an RFC or COR number in the <strong>Job #</strong> field —
-        that value likely belongs in the <strong>RFC / CO #</strong> field.
-        Copy it over here, with the option to also clear the Job # field.
+        Review the proposed changes. For each selected bid: Job # is trimmed to just the number, RFC/CO # is set, and the RFC number is prepended to the bid name.
       </div>
-      <div style="flex:1;overflow-y:auto">
-        ${bids.map(b => `
-          <div id="rfc-row-${b.id}" style="display:flex;align-items:center;gap:10px;padding:11px 20px;border-bottom:1px solid var(--border)">
-            <div style="flex:1;min-width:0">
-              <div style="font-size:13px;font-weight:600">
-                ${esc(b.project_name)}
-                ${b.bid_number ? `<span style="color:var(--text-muted);font-weight:400"> #${esc(b.bid_number)}</span>` : ''}
-              </div>
-              <div style="font-size:12px;color:var(--text-muted);margin-top:2px">
-                Job # field: <strong style="color:#d97706">${esc(b.job_number)}</strong>
-                ${b.co_number ? ` · RFC/CO # already: <strong style="color:#16a34a">${esc(b.co_number)}</strong>` : ''}
-                <span class="badge badge-stage" style="font-size:10px;margin-left:4px">${stageName(b.stage)}</span>
-              </div>
-            </div>
-            <div id="rfc-btns-${b.id}" style="display:flex;gap:5px;flex-shrink:0">
-              ${b.co_number
-                ? `<span style="font-size:12px;color:var(--text-muted)">Already set</span>`
-                : `<button class="btn btn-primary btn-sm" onclick="copyJobToCo(${b.id},false)">Copy to CO #</button>
-                   <button class="btn btn-ghost btn-sm" onclick="copyJobToCo(${b.id},true)">Copy + Clear Job #</button>`}
-            </div>
-          </div>`).join('')}
+      <div style="flex:1;overflow-y:auto;padding:0 20px">
+        <div style="padding:8px 0;border-bottom:1px solid var(--border)">
+          <label style="font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px">
+            <input type="checkbox" id="rfc-select-all" checked
+                   onchange="document.querySelectorAll('.rfc-auto-check:not(:disabled)').forEach(c=>c.checked=this.checked)" />
+            Select / deselect all
+          </label>
+        </div>
+        ${rows}
       </div>
-      <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end">
-        <button class="btn btn-ghost" onclick="document.getElementById('rfc-cleanup-modal').remove()">Close</button>
+      <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end;align-items:center">
+        <span id="rfc-apply-count" style="font-size:12px;color:var(--text-muted)">${_rfcCleanupData.filter(d => !d.bid.co_number).length} selected</span>
+        <button class="btn btn-ghost" onclick="document.getElementById('rfc-cleanup-modal').remove()">Cancel</button>
+        <button class="btn btn-primary" id="rfc-apply-btn" onclick="applyRfcCleanup()">Apply Selected</button>
       </div>
     </div>`;
   document.body.appendChild(overlay);
+
+  overlay.addEventListener('change', () => {
+    const n = overlay.querySelectorAll('.rfc-auto-check:checked').length;
+    const el = document.getElementById('rfc-apply-count');
+    if (el) el.textContent = `${n} selected`;
+  });
 }
 
-async function copyJobToCo(bidId, clearJobNumber) {
-  try {
-    const bid = await api.get(`/api/bids/${bidId}`);
-    const update = { co_number: bid.job_number };
-    if (clearJobNumber) update.job_number = '';
-    await api.put(`/api/bids/${bidId}`, update);
-    const btns = document.getElementById(`rfc-btns-${bidId}`);
-    if (btns) btns.innerHTML = `<span style="font-size:12px;color:#16a34a">✓ Copied${clearJobNumber ? ' · Job # cleared' : ''}</span>`;
-  } catch (e) { alert('Failed: ' + e.message); }
+async function applyRfcCleanup() {
+  const indices = Array.from(document.querySelectorAll('.rfc-auto-check:checked')).map(c => Number(c.dataset.idx));
+  if (!indices.length) { alert('No bids selected.'); return; }
+
+  const btn = document.getElementById('rfc-apply-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Applying…'; }
+
+  let success = 0, failed = 0;
+  for (const idx of indices) {
+    const item = _rfcCleanupData[idx];
+    if (!item) continue;
+    try {
+      await api.put(`/api/bids/${item.bid.id}`, {
+        job_number:   item.baseJobNumber,
+        co_number:    item.coNumber,
+        project_name: item.newBidName,
+      });
+      success++;
+    } catch (e) {
+      failed++;
+      console.error(`Failed bid ${item.bid.id}:`, e.message);
+    }
+  }
+
+  document.getElementById('rfc-cleanup-modal')?.remove();
+  _projectPickerCache = null;
+
+  const toast = document.createElement('div');
+  toast.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#166534;color:white;padding:10px 20px;border-radius:8px;font-size:13px;font-weight:600;z-index:9999';
+  toast.textContent = `✓ ${success} bid${success !== 1 ? 's' : ''} updated${failed ? ` · ${failed} failed` : ''}.`;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 4000);
 }
 
 // ── Project re-linking (from job panel) ──────────────────────────────────────
