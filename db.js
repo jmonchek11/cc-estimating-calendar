@@ -738,6 +738,42 @@ async function deleteProject(id) {
   await Project.findByIdAndDelete(Number(id));
 }
 
+// ── Job # Audit ───────────────────────────────────────────────────────────────
+// Returns all projects + bids that have a job_number so the frontend can
+// group them, detect mismatches, and surface linking issues.
+async function getJobNumberAudit() {
+  const [projects, bids] = await Promise.all([
+    Project.find({ job_number: { $nin: [null, ''] } }).lean(),
+    Bid.aggregate([
+      { $match: { job_number: { $nin: [null, ''] }, is_deleted: { $ne: 1 } } },
+      { $lookup: { from: 'projects', localField: 'project_id', foreignField: '_id', as: '_proj' } },
+      { $addFields: { _proj: { $arrayElemAt: ['$_proj', 0] } } },
+      { $project: {
+        bid_number: 1, co_number: 1, project_name: 1, job_number: 1,
+        stage: 1, project_id: 1, estimate_amount: 1,
+        linked_project_name:       { $ifNull: ['$_proj.name',       null] },
+        linked_project_job_number: { $ifNull: ['$_proj.job_number', null] },
+      }},
+    ]),
+  ]);
+
+  return {
+    projects: projects.map(p => ({ id: p._id, name: p.name, job_number: p.job_number })),
+    bids: bids.map(b => ({
+      id:                        b._id,
+      bid_number:                b.bid_number                || null,
+      co_number:                 b.co_number                 || null,
+      project_name:              b.project_name,
+      job_number:                b.job_number,
+      stage:                     b.stage,
+      estimate_amount:           b.estimate_amount           || null,
+      project_id:                b.project_id                || null,
+      linked_project_name:       b.linked_project_name       || null,
+      linked_project_job_number: b.linked_project_job_number || null,
+    })),
+  };
+}
+
 // ── Ignored Duplicate Pairs ───────────────────────────────────────────────────
 
 async function addIgnoredPair(id1, id2) {
@@ -1601,7 +1637,7 @@ module.exports = {
   getStats, getDigest, getAnalytics,
   findOrphanEstimators, fixOrphanEstimators,
   getProjects, getProject, createProject, updateProject, deleteProject, getProjectBids, mergeProjects, runProjectMigration,
-  scanProjectByJobNumber, bulkLinkBidsToProject, getRfcJobNumberBids,
+  scanProjectByJobNumber, bulkLinkBidsToProject, getRfcJobNumberBids, getJobNumberAudit,
   addIgnoredPair, getIgnoredPairs,
   heartbeat, getOnlineUsers,
   submitIdea, getIdeas, updateIdeaStatus,

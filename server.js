@@ -429,6 +429,12 @@ app.put('/api/ideas/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// MUST be before /api/projects/:id
+app.get('/api/audit/job-numbers', async (req, res) => {
+  try { res.json(await db.getJobNumberAudit()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/projects/:id/scan-job', async (req, res) => {
   try { res.json(await db.scanProjectByJobNumber(req.params.id)); }
   catch (e) { res.status(500).json({ error: e.message }); }

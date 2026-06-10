@@ -424,6 +424,23 @@ tbody td {
 }
 .proj-filter-btn:hover { background: #f1f5f9; color: var(--text); border-color: #cbd5e1; }
 .proj-filter-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); font-weight: 600; }
+/* Job # Audit */
+.audit-bid-row:hover { background: #f0f9ff !important; }
+.audit-proj-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe;
+  border-radius: 6px; padding: 3px 10px; font-size: 12px; font-weight: 600;
+  cursor: pointer; font-family: inherit; transition: background .12s;
+}
+.audit-proj-chip:hover { background: #dbeafe; }
+.audit-badge {
+  display: inline-block; border-radius: 10px;
+  padding: 2px 8px; font-size: 11px; font-weight: 600;
+}
+.audit-badge-ok   { background: #dcfce7; color: #16a34a; }
+.audit-badge-warn { background: #fffbeb; color: #d97706; }
+.audit-badge-err  { background: #fef2f2; color: #dc2626; }
+
 /* Sort select */
 .proj-sort-select {
   padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius);

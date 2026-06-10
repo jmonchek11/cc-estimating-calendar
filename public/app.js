@@ -2052,7 +2052,8 @@ async function renderCleanup(main) {
           ${(issue||hiddenStages.length||person||mineOnly||search) ? ' <em style="color:var(--text-muted)">(filtered)</em>' : ''}
         </div>
       </div>
-      <div style="display:flex;gap:8px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-secondary btn-sm" style="background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8" onclick="openJobNumberAudit()">📋 Job # Audit</button>
         <button class="btn btn-secondary btn-sm" style="background:#fffbeb;border-color:#fde68a;color:#92400e" onclick="openRfcCleanupModal()">🔄 RFC/COR in Job # Field</button>
         <button class="btn btn-secondary" onclick="clearCleanupFilters()">Reset Filters</button>
       </div>
@@ -3254,6 +3255,258 @@ function extractRfcFromJobNumber(jobNumber) {
   const coNumber = `${m[1].toUpperCase()}-${m[2]}`;
   const base = jobNumber.replace(m[0], '').replace(/[-\s]+$/, '').replace(/\s+/g, ' ').trim();
   return { coNumber, baseJobNumber: base };
+}
+
+// ── Job # Audit ───────────────────────────────────────────────────────────────
+
+let _jobAuditData   = null;   // cached raw API response
+let _jobAuditFilter = 'issues'; // 'issues' | 'all'
+let _jobAuditSearch = '';
+
+// Strips RFC/COR suffix from a job number to get the base number.
+// "636031 RFC-20" → "636031",  "636031" → "636031",  "26001COR003" → "26001"
+function normalizeJobNum(jn) {
+  if (!jn) return null;
+  const stripped = jn.replace(/\s*(RFC|COR)\s*-?\s*\d+/gi, '').replace(/[-\s.]+$/, '').trim();
+  return stripped || jn.trim();
+}
+
+async function openJobNumberAudit() {
+  const overlay = _buildModal('job-audit-modal');
+  overlay.innerHTML = `
+    <div class="modal-box" style="max-width:940px;max-height:92vh;overflow:hidden;display:flex;flex-direction:column">
+      <div class="modal-header">
+        <div>
+          <div class="modal-title">📋 Job # Audit</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:2px">Loading…</div>
+        </div>
+        <button class="modal-close" onclick="document.getElementById('job-audit-modal').remove()">×</button>
+      </div>
+      <div style="flex:1;display:flex;align-items:center;justify-content:center">
+        <div class="spinner"></div>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  _jobAuditFilter = 'issues';
+  _jobAuditSearch = '';
+
+  try {
+    _jobAuditData = await api.get('/api/audit/job-numbers');
+    renderJobAuditContent();
+  } catch (e) {
+    const box = document.querySelector('#job-audit-modal .modal-box');
+    if (box) box.innerHTML = `<div style="padding:24px;color:var(--danger)">Error loading audit: ${esc(e.message)}</div>`;
+  }
+}
+
+function renderJobAuditContent() {
+  const box = document.querySelector('#job-audit-modal .modal-box');
+  if (!box || !_jobAuditData) return;
+
+  const { projects, bids } = _jobAuditData;
+
+  // ── Build groups keyed by normalized job # ──────────────────────────────
+  const groups = {};
+
+  for (const p of projects) {
+    const norm = p.job_number.trim();
+    if (!groups[norm]) groups[norm] = { job_number: norm, projects: [], bids: [] };
+    groups[norm].projects.push(p);
+  }
+
+  for (const b of bids) {
+    const norm = normalizeJobNum(b.job_number);
+    if (!norm) continue;
+    if (!groups[norm]) groups[norm] = { job_number: norm, projects: [], bids: [] };
+
+    // Determine linking status
+    let status;
+    if (!b.project_id) {
+      status = 'unlinked';
+    } else if (b.linked_project_job_number && b.linked_project_job_number.trim() === norm) {
+      status = 'ok';
+    } else {
+      // Linked to a project that doesn't carry this job #
+      status = 'wrong';
+    }
+    groups[norm].bids.push({ ...b, _norm: norm, _status: status });
+  }
+
+  // Sort groups numerically
+  let allGroups = Object.values(groups).sort((a, b) => {
+    const an = parseInt(a.job_number) || 0, bn = parseInt(b.job_number) || 0;
+    if (an !== bn) return an - bn;
+    return a.job_number.localeCompare(b.job_number);
+  });
+
+  // Compute per-group stats
+  for (const g of allGroups) {
+    g.ok_count       = g.bids.filter(b => b._status === 'ok').length;
+    g.wrong_count    = g.bids.filter(b => b._status === 'wrong').length;
+    g.unlinked_count = g.bids.filter(b => b._status === 'unlinked').length;
+    g.has_issues     = g.wrong_count > 0 || g.unlinked_count > 0 || g.projects.length === 0;
+  }
+
+  const issueGroups = allGroups.filter(g => g.has_issues);
+
+  // ── Apply filter & search ───────────────────────────────────────────────
+  let display = _jobAuditFilter === 'issues' ? issueGroups : allGroups;
+  const q = (_jobAuditSearch || '').toLowerCase();
+  if (q) {
+    display = display.filter(g =>
+      g.job_number.toLowerCase().includes(q) ||
+      g.projects.some(p => p.name.toLowerCase().includes(q)) ||
+      g.bids.some(b => (b.project_name || '').toLowerCase().includes(q) ||
+                       (b.bid_number   || '').toLowerCase().includes(q))
+    );
+  }
+
+  const totalIssueItems = issueGroups.reduce((s, g) => s + g.wrong_count + g.unlinked_count, 0);
+
+  // ── Build HTML for each group ───────────────────────────────────────────
+  const groupsHtml = display.map(g => {
+    // Projects row
+    const projHtml = g.projects.length
+      ? g.projects.map(p => `
+          <button class="audit-proj-chip" onclick="event.stopPropagation();openProjectPanel(${p.id})">
+            🏗️ ${esc(p.name)}
+          </button>`).join('')
+      : `<span style="font-size:12px;color:#d97706;font-style:italic">
+           ⚠️ No project has job # ${esc(g.job_number)} assigned — create one or assign it
+         </span>`;
+
+    // Bid rows
+    const bidRows = g.bids.map(b => {
+      const isOk      = b._status === 'ok';
+      const isWrong   = b._status === 'wrong';
+      const isUnlinked = b._status === 'unlinked';
+      const rowBg     = isOk ? '' : isWrong ? 'background:#fffbeb' : 'background:#fef2f2';
+      const statusColor = isOk ? '#16a34a' : isWrong ? '#d97706' : '#dc2626';
+      const statusIcon  = isOk ? '✅' : isWrong ? '⚠️' : '🔴';
+      let   statusLabel;
+      if (isOk) {
+        statusLabel = `Correctly linked to <strong>${esc(b.linked_project_name)}</strong>`;
+      } else if (isWrong) {
+        const pJobNote = b.linked_project_job_number
+          ? ` — its job # is <strong>${esc(b.linked_project_job_number)}</strong>`
+          : ' — project has no job #';
+        statusLabel = `Linked to <strong>"${esc(b.linked_project_name)}"</strong>${pJobNote}`;
+      } else {
+        statusLabel = `Not linked to any project`;
+      }
+
+      // Flag if raw job # has RFC/COR in it (needs RFC cleanup first)
+      const needsRfcCleanup = b.job_number !== g.job_number
+        ? `<span style="font-size:10px;background:#fff7ed;color:#c2410c;border-radius:3px;padding:1px 4px;margin-left:4px">raw: ${esc(b.job_number)}</span>`
+        : '';
+
+      return `
+        <tr class="audit-bid-row" style="cursor:pointer;border-bottom:1px solid var(--border);${rowBg}"
+            onclick="document.getElementById('job-audit-modal').remove();setTimeout(()=>openJobPanel(${b.id}),80)"
+            title="Click to open bid and relink project">
+          <td style="padding:8px 12px">
+            <div style="font-weight:600;font-size:13px">${esc(b.project_name || '—')}${needsRfcCleanup}</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:1px">
+              ${b.bid_number ? `#${esc(b.bid_number)}` : ''}
+              ${b.co_number  ? `<span style="background:#fff7ed;color:#c2410c;border-radius:3px;padding:0 4px;font-weight:600;margin-left:3px">${esc(b.co_number)}</span>` : ''}
+            </div>
+          </td>
+          <td style="padding:8px 12px;white-space:nowrap">
+            <span class="badge badge-stage" style="font-size:10px">${stageName(b.stage)}</span>
+          </td>
+          <td style="padding:8px 12px;font-size:12px;color:${statusColor}">
+            ${statusIcon} ${statusLabel}
+          </td>
+          <td style="padding:8px 12px;white-space:nowrap;text-align:right">
+            <span style="font-size:11px;color:var(--primary);font-weight:600">Open →</span>
+          </td>
+        </tr>`;
+    }).join('');
+
+    // Summary badges
+    const badges = [
+      g.ok_count       ? `<span class="audit-badge audit-badge-ok">✅ ${g.ok_count} ok</span>` : '',
+      g.wrong_count    ? `<span class="audit-badge audit-badge-warn">⚠️ ${g.wrong_count} wrong project</span>` : '',
+      g.unlinked_count ? `<span class="audit-badge audit-badge-err">🔴 ${g.unlinked_count} unlinked</span>` : '',
+    ].filter(Boolean).join('');
+
+    const borderColor = g.has_issues ? (g.unlinked_count > 0 ? '#fca5a5' : '#fde68a') : '#bbf7d0';
+
+    return `
+      <div style="border:1px solid ${borderColor};border-radius:8px;overflow:hidden;margin-bottom:10px">
+        <div style="display:flex;align-items:center;gap:10px;padding:9px 14px;background:#f8fafc;border-bottom:1px solid ${borderColor};flex-wrap:wrap">
+          <span style="font-size:14px;font-weight:800;color:var(--text);font-family:monospace">JOB # ${esc(g.job_number)}</span>
+          <span style="font-size:12px;color:var(--text-muted)">${g.bids.length} bid${g.bids.length !== 1 ? 's' : ''}</span>
+          <div style="flex:1"></div>
+          <div style="display:flex;gap:5px;flex-wrap:wrap">${badges}</div>
+        </div>
+        <div style="padding:8px 14px;${g.bids.length ? 'border-bottom:1px solid var(--border)' : ''}">
+          <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);margin-bottom:5px">Project(s)</div>
+          <div style="display:flex;flex-wrap:wrap;gap:5px">${projHtml}</div>
+        </div>
+        ${g.bids.length ? `
+        <div style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse">
+            <thead>
+              <tr style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);background:#fafafa">
+                <th style="padding:5px 12px;text-align:left;font-weight:600;border-bottom:1px solid var(--border)">Bid / CO</th>
+                <th style="padding:5px 12px;text-align:left;font-weight:600;border-bottom:1px solid var(--border)">Stage</th>
+                <th style="padding:5px 12px;text-align:left;font-weight:600;border-bottom:1px solid var(--border)">Project Link Status</th>
+                <th style="padding:5px 12px;border-bottom:1px solid var(--border)"></th>
+              </tr>
+            </thead>
+            <tbody>${bidRows}</tbody>
+          </table>
+        </div>` : ''}
+      </div>`;
+  }).join('');
+
+  box.innerHTML = `
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">📋 Job # Audit</div>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:2px">
+          ${allGroups.length} job #s across ${projects.length} projects &amp; ${bids.length} bids
+          · <span style="color:${totalIssueItems > 0 ? '#dc2626' : '#16a34a'};font-weight:600">
+              ${totalIssueItems > 0 ? `${totalIssueItems} item${totalIssueItems !== 1 ? 's' : ''} need attention` : '✅ All correctly linked'}
+            </span>
+        </div>
+      </div>
+      <button class="modal-close" onclick="document.getElementById('job-audit-modal').remove()">×</button>
+    </div>
+
+    <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <div class="proj-filter-btns">
+        <button class="proj-filter-btn${_jobAuditFilter === 'issues' ? ' active' : ''}"
+                onclick="_jobAuditFilter='issues';renderJobAuditContent()">
+          ⚠️ Needs Attention (${issueGroups.length})
+        </button>
+        <button class="proj-filter-btn${_jobAuditFilter === 'all' ? ' active' : ''}"
+                onclick="_jobAuditFilter='all';renderJobAuditContent()">
+          All Job #s (${allGroups.length})
+        </button>
+      </div>
+      <input type="text" class="form-input" id="audit-search"
+             placeholder="Search job #, project, or bid name…"
+             value="${esc(_jobAuditSearch)}"
+             oninput="_jobAuditSearch=this.value;renderJobAuditContent()"
+             style="flex:1;min-width:200px;max-width:320px" />
+      <button class="btn btn-ghost btn-sm" onclick="_jobAuditData=null;openJobNumberAudit()" title="Refresh data">↻ Refresh</button>
+    </div>
+
+    <div style="flex:1;overflow-y:auto;padding:14px 16px">
+      ${display.length
+        ? `<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;font-style:italic">
+             Click any bid row to open its detail panel and use "Change / Link Project" to fix the assignment.
+           </div>
+           ${groupsHtml}`
+        : `<div class="empty-state">
+             <div class="empty-state-icon">${_jobAuditFilter === 'issues' ? '✅' : '📋'}</div>
+             <div class="empty-state-title">${_jobAuditFilter === 'issues' ? 'No issues found!' : 'No job numbers found'}</div>
+             <div class="empty-state-desc">${_jobAuditFilter === 'issues' ? 'All bids with job numbers are correctly linked to projects with matching job numbers.' : 'Add job numbers to projects and bids to see the audit.'}</div>
+           </div>`}
+    </div>`;
 }
 
 let _rfcCleanupData = [];
