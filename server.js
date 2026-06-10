@@ -229,6 +229,16 @@ app.post('/api/bids/propagate-customers', async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.get('/api/bids/propagate-customers-jobnum', async (req, res) => {
+  try { res.json(await db.getPropagatableCustomersByJobNum()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/bids/propagate-customers-jobnum', async (req, res) => {
+  try { res.json({ updated: await db.applyPropagateCustomersByJobNum() }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/bids/:id', async (req, res) => {
   try {
     const bid = await db.getBid(req.params.id);

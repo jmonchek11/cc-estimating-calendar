@@ -1904,6 +1904,95 @@ async function applyPropagateCustomers() {
   }
 }
 
+async function openPropagateByJobNumModal() {
+  const overlay = _buildModal('propagate-jobnum-modal');
+  overlay.innerHTML = `
+    <div class="modal-box" style="max-width:620px">
+      <div class="modal-header">
+        <div class="modal-title">🔢 Fill Missing Customers from Job #</div>
+        <button class="modal-close" onclick="document.getElementById('propagate-jobnum-modal').remove()">×</button>
+      </div>
+      <div id="pjm-body" style="padding:20px 24px">
+        <div style="display:flex;align-items:center;gap:10px;color:var(--text-muted);font-size:13px">
+          <div class="spinner" style="width:18px;height:18px;border-width:2px"></div>
+          Scanning bids by job number…
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  let candidates;
+  try {
+    candidates = await api.get('/api/bids/propagate-customers-jobnum');
+  } catch (e) {
+    document.getElementById('pjm-body').innerHTML =
+      `<p style="color:#dc2626;font-size:13px">Error: ${esc(e.message)}</p>`;
+    return;
+  }
+
+  const body = document.getElementById('pjm-body');
+  if (!candidates.length) {
+    body.innerHTML = `
+      <div style="text-align:center;padding:24px 0">
+        <div style="font-size:32px;margin-bottom:8px">🏆</div>
+        <div style="font-size:15px;font-weight:600;margin-bottom:4px">Nothing to fill</div>
+        <div style="font-size:13px;color:var(--text-muted)">No bids found where a job # sibling has a customer to share.</div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;padding-top:8px">
+        <button class="btn btn-ghost" onclick="document.getElementById('propagate-jobnum-modal').remove()">Close</button>
+      </div>`;
+    return;
+  }
+
+  // Group by job_number
+  const byJob = {};
+  for (const c of candidates) {
+    if (!byJob[c.job_number]) byJob[c.job_number] = { customer: c.proposed_customer, bids: [] };
+    byJob[c.job_number].bids.push(c);
+  }
+
+  const jobRows = Object.entries(byJob).map(([jn, g]) => `
+    <div style="margin-bottom:12px;border:1px solid var(--border);border-radius:6px;overflow:hidden">
+      <div style="background:#f8fafc;padding:8px 12px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border)">
+        <span style="font-size:13px;font-weight:600">Job # ${esc(jn)}</span>
+        <span style="font-size:12px;padding:2px 8px;background:#dcfce7;color:#166534;border-radius:12px;font-weight:600">→ ${esc(g.customer)}</span>
+      </div>
+      ${g.bids.map(b => `
+        <div style="padding:6px 12px;font-size:12px;color:var(--text-muted);border-bottom:1px solid #f1f5f9;display:flex;gap:8px;align-items:center">
+          ${b.bid_number ? `<span style="font-weight:600;color:var(--text)">#${esc(b.bid_number)}</span>` : ''}
+          <span>${esc(b.bid_name)}</span>
+        </div>`).join('')}
+    </div>`).join('');
+
+  body.innerHTML = `
+    <p style="font-size:13px;margin-bottom:14px">
+      Found <strong>${candidates.length} bid${candidates.length !== 1 ? 's' : ''}</strong> across
+      <strong>${Object.keys(byJob).length} job number${Object.keys(byJob).length !== 1 ? 's' : ''}</strong>
+      where at least one bid on the same job already has a customer set.
+    </p>
+    <div style="max-height:340px;overflow-y:auto;margin-bottom:16px">${jobRows}</div>
+    <div style="display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn btn-ghost" onclick="document.getElementById('propagate-jobnum-modal').remove()">Cancel</button>
+      <button class="btn btn-primary" id="pjm-apply-btn" onclick="applyPropagateByJobNum()">
+        Apply to ${candidates.length} Bid${candidates.length !== 1 ? 's' : ''}
+      </button>
+    </div>`;
+}
+
+async function applyPropagateByJobNum() {
+  const btn = document.getElementById('pjm-apply-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Applying…'; }
+  try {
+    const { updated } = await api.post('/api/bids/propagate-customers-jobnum', {});
+    document.getElementById('propagate-jobnum-modal')?.remove();
+    showToast(`Updated ${updated} bid${updated !== 1 ? 's' : ''} with customer from job # siblings`);
+    renderPage('cleanup');
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Apply'; }
+    showToast('Failed: ' + e.message, 'error');
+  }
+}
+
 // ── Orphan estimator repair ────────────────────────────────────────────────────
 let _orphanData = null; // cached until user applies fix
 
@@ -2153,7 +2242,8 @@ async function renderCleanup(main) {
         </div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-secondary btn-sm" style="background:#f0fdf4;border-color:#86efac;color:#166534" onclick="openPropagateCustomersModal()">👥 Fill Missing Customers</button>
+        <button class="btn btn-secondary btn-sm" style="background:#f0fdf4;border-color:#86efac;color:#166534" onclick="openPropagateCustomersModal()">👥 Fill from Projects</button>
+        <button class="btn btn-secondary btn-sm" style="background:#f0fdf4;border-color:#86efac;color:#166534" onclick="openPropagateByJobNumModal()">🔢 Fill from Job #</button>
         <button class="btn btn-secondary btn-sm" style="background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8" onclick="openJobNumberAudit()">📋 Job # Audit</button>
         <button class="btn btn-secondary btn-sm" style="background:#fffbeb;border-color:#fde68a;color:#92400e" onclick="openRfcCleanupModal()">🔄 RFC/COR in Job # Field</button>
         <button class="btn btn-secondary" onclick="clearCleanupFilters()">Reset Filters</button>

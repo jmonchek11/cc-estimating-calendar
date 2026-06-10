@@ -687,6 +687,51 @@ async function getProjectPrimaryCustomer(projectId) {
   return Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
 }
 
+async function getPropagatableCustomersByJobNum() {
+  const candidates = await Bid.find({
+    job_number: { $nin: [null, ''] },
+    $or: [{ customer: null }, { customer: '' }],
+    is_deleted: { $ne: 1 },
+  }, { _id: 1, project_name: 1, bid_number: 1, job_number: 1 }).lean();
+
+  if (!candidates.length) return [];
+
+  const jobNumbers = [...new Set(candidates.map(b => b.job_number))];
+
+  const customerMap = {};
+  for (const jn of jobNumbers) {
+    const withCust = await Bid.find({
+      job_number: jn,
+      customer: { $nin: [null, ''] },
+      is_deleted: { $ne: 1 },
+    }).select('customer').lean();
+    if (withCust.length) {
+      const counts = {};
+      for (const b of withCust) counts[b.customer] = (counts[b.customer] || 0) + 1;
+      customerMap[jn] = Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
+    }
+  }
+
+  return candidates
+    .filter(b => customerMap[b.job_number])
+    .map(b => ({
+      id: b._id,
+      bid_name: b.project_name,
+      bid_number: b.bid_number,
+      job_number: b.job_number,
+      proposed_customer: customerMap[b.job_number],
+    }));
+}
+
+async function applyPropagateCustomersByJobNum() {
+  const candidates = await getPropagatableCustomersByJobNum();
+  const now = nowStr();
+  for (const c of candidates) {
+    await Bid.findByIdAndUpdate(c.id, { $set: { customer: c.proposed_customer, updated_at: now } });
+  }
+  return candidates.length;
+}
+
 async function getPropagatableCustomers() {
   const candidates = await Bid.find({
     project_id: { $ne: null },
@@ -1746,6 +1791,7 @@ module.exports = {
   getProjects, getProject, createProject, updateProject, deleteProject, getProjectBids, mergeProjects, runProjectMigration,
   scanProjectByJobNumber, bulkLinkBidsToProject, getRfcJobNumberBids, getJobNumberAudit,
   getProjectPrimaryCustomer, getPropagatableCustomers, applyPropagateCustomers,
+  getPropagatableCustomersByJobNum, applyPropagateCustomersByJobNum,
   addIgnoredPair, getIgnoredPairs,
   heartbeat, getOnlineUsers,
   submitIdea, getIdeas, updateIdeaStatus,
