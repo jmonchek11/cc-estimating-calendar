@@ -219,6 +219,16 @@ app.get('/api/bids/rfc-cleanup', async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.get('/api/bids/propagate-customers', requireAuth, async (req, res) => {
+  try { res.json(await db.getPropagatableCustomers()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/bids/propagate-customers', requireAuth, async (req, res) => {
+  try { res.json({ updated: await db.applyPropagateCustomers() }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/bids/:id', async (req, res) => {
   try {
     const bid = await db.getBid(req.params.id);

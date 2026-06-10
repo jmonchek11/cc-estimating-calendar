@@ -1813,6 +1813,97 @@ function clearCleanupFilters() {
   renderPage('cleanup');
 }
 
+// ── Propagate customers from linked projects ───────────────────────────────────
+async function openPropagateCustomersModal() {
+  const overlay = _buildModal('propagate-customers-modal');
+  overlay.innerHTML = `
+    <div class="modal-box" style="max-width:620px">
+      <div class="modal-header">
+        <div class="modal-title">👥 Fill Missing Customers from Projects</div>
+        <button class="modal-close" onclick="document.getElementById('propagate-customers-modal').remove()">×</button>
+      </div>
+      <div id="pcm-body" style="padding:20px 24px">
+        <div style="display:flex;align-items:center;gap:10px;color:var(--text-muted);font-size:13px">
+          <div class="spinner" style="width:18px;height:18px;border-width:2px"></div>
+          Scanning for bids with missing customers…
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  let candidates;
+  try {
+    candidates = await api.get('/api/bids/propagate-customers');
+  } catch (e) {
+    document.getElementById('pcm-body').innerHTML =
+      `<p style="color:#dc2626;font-size:13px">Error loading data: ${esc(e.message)}</p>`;
+    return;
+  }
+
+  const body = document.getElementById('pcm-body');
+  if (!candidates.length) {
+    body.innerHTML = `
+      <div style="text-align:center;padding:24px 0">
+        <div style="font-size:32px;margin-bottom:8px">🏆</div>
+        <div style="font-size:15px;font-weight:600;margin-bottom:4px">All set!</div>
+        <div style="font-size:13px;color:var(--text-muted)">No linked bids are missing a customer that can be auto-filled.</div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;padding-top:8px">
+        <button class="btn btn-ghost" onclick="document.getElementById('propagate-customers-modal').remove()">Close</button>
+      </div>`;
+    return;
+  }
+
+  // Group by project for a cleaner preview
+  const byProject = {};
+  for (const c of candidates) {
+    if (!byProject[c.project_name]) byProject[c.project_name] = { customer: c.proposed_customer, bids: [] };
+    byProject[c.project_name].bids.push(c);
+  }
+
+  const projectRows = Object.entries(byProject).map(([projName, g]) => `
+    <div style="margin-bottom:12px;border:1px solid var(--border);border-radius:6px;overflow:hidden">
+      <div style="background:#f8fafc;padding:8px 12px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border)">
+        <span style="font-size:13px;font-weight:600">${esc(projName)}</span>
+        <span style="font-size:12px;padding:2px 8px;background:#dcfce7;color:#166534;border-radius:12px;font-weight:600">→ ${esc(g.customer)}</span>
+      </div>
+      ${g.bids.map(b => `
+        <div style="padding:6px 12px;font-size:12px;color:var(--text-muted);border-bottom:1px solid #f1f5f9;display:flex;gap:8px;align-items:center">
+          ${b.bid_number ? `<span style="font-weight:600;color:var(--text)">#${esc(b.bid_number)}</span>` : ''}
+          <span>${esc(b.bid_name)}</span>
+        </div>`).join('')}
+    </div>`).join('');
+
+  body.innerHTML = `
+    <p style="font-size:13px;margin-bottom:14px">
+      Found <strong>${candidates.length} bid${candidates.length !== 1 ? 's' : ''}</strong> across
+      <strong>${Object.keys(byProject).length} project${Object.keys(byProject).length !== 1 ? 's' : ''}</strong>
+      with no customer that can be filled from their linked project.
+      The customer shown is the most common one among the other bids in that project.
+    </p>
+    <div style="max-height:340px;overflow-y:auto;margin-bottom:16px">${projectRows}</div>
+    <div style="display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn btn-ghost" onclick="document.getElementById('propagate-customers-modal').remove()">Cancel</button>
+      <button class="btn btn-primary" id="pcm-apply-btn" onclick="applyPropagateCustomers()">
+        Apply to ${candidates.length} Bid${candidates.length !== 1 ? 's' : ''}
+      </button>
+    </div>`;
+}
+
+async function applyPropagateCustomers() {
+  const btn = document.getElementById('pcm-apply-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Applying…'; }
+  try {
+    const { updated } = await api.post('/api/bids/propagate-customers', {});
+    document.getElementById('propagate-customers-modal')?.remove();
+    showToast(`Updated ${updated} bid${updated !== 1 ? 's' : ''} with customer from their project`);
+    renderPage('cleanup');
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Apply'; }
+    showToast('Failed: ' + e.message, 'error');
+  }
+}
+
 // ── Orphan estimator repair ────────────────────────────────────────────────────
 let _orphanData = null; // cached until user applies fix
 
@@ -2062,6 +2153,7 @@ async function renderCleanup(main) {
         </div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-secondary btn-sm" style="background:#f0fdf4;border-color:#86efac;color:#166534" onclick="openPropagateCustomersModal()">👥 Fill Missing Customers</button>
         <button class="btn btn-secondary btn-sm" style="background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8" onclick="openJobNumberAudit()">📋 Job # Audit</button>
         <button class="btn btn-secondary btn-sm" style="background:#fffbeb;border-color:#fde68a;color:#92400e" onclick="openRfcCleanupModal()">🔄 RFC/COR in Job # Field</button>
         <button class="btn btn-secondary" onclick="clearCleanupFilters()">Reset Filters</button>

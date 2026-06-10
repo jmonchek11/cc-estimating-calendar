@@ -687,6 +687,47 @@ async function getProjectPrimaryCustomer(projectId) {
   return Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
 }
 
+async function getPropagatableCustomers() {
+  const candidates = await Bid.find({
+    project_id: { $ne: null },
+    $or: [{ customer: null }, { customer: '' }],
+    is_deleted: { $ne: 1 },
+  }, { _id: 1, project_name: 1, bid_number: 1, project_id: 1 }).lean();
+
+  if (!candidates.length) return [];
+
+  const projectIds = [...new Set(candidates.map(b => b.project_id))];
+
+  const projects = await Project.find({ _id: { $in: projectIds } }).select('name').lean();
+  const projNameMap = Object.fromEntries(projects.map(p => [p._id, p.name]));
+
+  const customerMap = {};
+  for (const pid of projectIds) {
+    const c = await getProjectPrimaryCustomer(pid);
+    if (c) customerMap[pid] = c;
+  }
+
+  return candidates
+    .filter(b => customerMap[b.project_id])
+    .map(b => ({
+      id: b._id,
+      bid_name: b.project_name,
+      bid_number: b.bid_number,
+      project_id: b.project_id,
+      project_name: projNameMap[b.project_id] || `Project #${b.project_id}`,
+      proposed_customer: customerMap[b.project_id],
+    }));
+}
+
+async function applyPropagateCustomers() {
+  const candidates = await getPropagatableCustomers();
+  const now = nowStr();
+  for (const c of candidates) {
+    await Bid.findByIdAndUpdate(c.id, { $set: { customer: c.proposed_customer, updated_at: now } });
+  }
+  return candidates.length;
+}
+
 async function bulkLinkBidsToProject(projectId, bidIds) {
   const pid = Number(projectId);
   const ids = bidIds.map(Number);
@@ -1704,7 +1745,7 @@ module.exports = {
   findOrphanEstimators, fixOrphanEstimators,
   getProjects, getProject, createProject, updateProject, deleteProject, getProjectBids, mergeProjects, runProjectMigration,
   scanProjectByJobNumber, bulkLinkBidsToProject, getRfcJobNumberBids, getJobNumberAudit,
-  getProjectPrimaryCustomer,
+  getProjectPrimaryCustomer, getPropagatableCustomers, applyPropagateCustomers,
   addIgnoredPair, getIgnoredPairs,
   heartbeat, getOnlineUsers,
   submitIdea, getIdeas, updateIdeaStatus,
