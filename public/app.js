@@ -3456,8 +3456,14 @@ function renderJobAuditContent() {
         </div>
       </div>`;
 
+    // In "Needs Attention" mode, hide bids that are already correctly linked —
+    // they're done and just add noise. Show all in "All Job #s" mode.
+    const bidsToShow = _jobAuditFilter === 'issues'
+      ? g.bids.filter(b => b._status !== 'ok')
+      : g.bids;
+
     // Bid rows
-    const bidRows = g.bids.map(b => {
+    const bidRows = bidsToShow.map(b => {
       const isOk       = b._status === 'ok';
       const isWrong    = b._status === 'wrong';
       const rowBg      = isOk ? '' : isWrong ? 'background:#fffbeb' : 'background:#fef2f2';
@@ -3515,7 +3521,10 @@ function renderJobAuditContent() {
       <div style="border:1px solid ${borderColor};border-radius:8px;overflow:hidden;margin-bottom:10px">
         <div style="display:flex;align-items:center;gap:10px;padding:9px 14px;background:#f8fafc;border-bottom:1px solid ${borderColor};flex-wrap:wrap">
           <span style="font-size:14px;font-weight:800;color:var(--text);font-family:monospace">JOB # ${esc(g.job_number)}</span>
-          <span style="font-size:12px;color:var(--text-muted)">${g.bids.length} bid${g.bids.length !== 1 ? 's' : ''}</span>
+          <span style="font-size:12px;color:var(--text-muted)">
+            ${bidsToShow.length} need${bidsToShow.length === 1 ? 's' : ''} attention
+            ${g.ok_count ? `<span style="color:#16a34a;margin-left:4px">· ${g.ok_count} done ✓</span>` : ''}
+          </span>
           <div style="flex:1"></div>
           <div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center">
             ${badges}
@@ -3530,7 +3539,7 @@ function renderJobAuditContent() {
           <div style="display:flex;flex-wrap:wrap;gap:5px">${projHtml}</div>
         </div>
         ${createFormHtml}
-        ${g.bids.length ? `
+        ${bidsToShow.length ? `
         <div style="overflow-x:auto">
           <table style="width:100%;border-collapse:collapse">
             <thead>
