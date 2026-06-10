@@ -23,6 +23,15 @@ const State = {
 // ─────────────────────────────────────────────
 // UTILITIES
 // ─────────────────────────────────────────────
+function showToast(msg, type = 'success') {
+  const bg = type === 'error' ? '#991b1b' : '#166534';
+  const t = document.createElement('div');
+  t.style.cssText = `position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:${bg};color:white;padding:10px 22px;border-radius:8px;font-size:13px;font-weight:600;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,.2);white-space:nowrap`;
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3500);
+}
+
 function fmt(val, type = 'text') {
   if (val === null || val === undefined || val === '') return '—';
   if (type === 'currency') {
