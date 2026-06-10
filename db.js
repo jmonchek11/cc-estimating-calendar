@@ -662,11 +662,52 @@ async function scanProjectByJobNumber(projectId) {
   return bids.map(formatBid);
 }
 
+// Returns the most-common non-null customer across bids already linked to a project.
+async function getProjectPrimaryCustomer(projectId) {
+  const bids = await Bid.find({
+    project_id: Number(projectId),
+    customer:   { $nin: [null, ''] },
+    is_deleted: { $ne: 1 },
+  }).select('customer').lean();
+  if (!bids.length) return null;
+  const counts = {};
+  for (const b of bids) counts[b.customer] = (counts[b.customer] || 0) + 1;
+  return Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
+}
+
 async function bulkLinkBidsToProject(projectId, bidIds) {
-  await Bid.updateMany(
-    { _id: { $in: bidIds.map(Number) } },
-    { $set: { project_id: Number(projectId), updated_at: nowStr() } }
-  );
+  const pid = Number(projectId);
+  const ids = bidIds.map(Number);
+  const now = nowStr();
+
+  // Determine the customer to inherit:
+  // 1. Check bids already linked to this project.
+  // 2. If project is new/empty, check among the bids being linked right now.
+  let inheritCustomer = await getProjectPrimaryCustomer(pid);
+  if (!inheritCustomer) {
+    const linking = await Bid.find({
+      _id: { $in: ids }, customer: { $nin: [null, ''] }, is_deleted: { $ne: 1 },
+    }).select('customer').lean();
+    if (linking.length) {
+      const counts = {};
+      for (const b of linking) counts[b.customer] = (counts[b.customer] || 0) + 1;
+      inheritCustomer = Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
+    }
+  }
+
+  if (inheritCustomer) {
+    // Link each bid individually so we can fill customer only where blank
+    for (const bidId of ids) {
+      const bid = await Bid.findById(bidId).select('customer').lean();
+      if (!bid) continue;
+      const upd = { project_id: pid, updated_at: now };
+      if (!bid.customer) upd.customer = inheritCustomer;
+      await Bid.findByIdAndUpdate(bidId, { $set: upd });
+    }
+  } else {
+    // No customer to inherit — simple bulk update
+    await Bid.updateMany({ _id: { $in: ids } }, { $set: { project_id: pid, updated_at: now } });
+  }
 }
 
 async function getRfcJobNumberBids() {
@@ -969,6 +1010,19 @@ async function updateBid(id, data) {
       update[f] = (f === 'estimator_id' || f === 'salesperson_id') ? (val ? Number(val) : null) : val;
     }
   }
+
+  // Auto-fill customer when linking to a project and the bid has no customer.
+  // Only fires when project_id is being set to a new value AND customer is not
+  // explicitly included in this update (don't overwrite an intentional change).
+  if ('project_id' in data && data.project_id && !('customer' in data)) {
+    const current = await Bid.findById(Number(id)).select('customer project_id').lean();
+    const isNewLink = current && Number(current.project_id) !== Number(data.project_id);
+    if (current && !current.customer && isNewLink) {
+      const inherited = await getProjectPrimaryCustomer(data.project_id);
+      if (inherited) update.customer = inherited;
+    }
+  }
+
   await Bid.findByIdAndUpdate(Number(id), update);
   return getBid(id);
 }
@@ -1638,6 +1692,7 @@ module.exports = {
   findOrphanEstimators, fixOrphanEstimators,
   getProjects, getProject, createProject, updateProject, deleteProject, getProjectBids, mergeProjects, runProjectMigration,
   scanProjectByJobNumber, bulkLinkBidsToProject, getRfcJobNumberBids, getJobNumberAudit,
+  getProjectPrimaryCustomer,
   addIgnoredPair, getIgnoredPairs,
   heartbeat, getOnlineUsers,
   submitIdea, getIdeas, updateIdeaStatus,
