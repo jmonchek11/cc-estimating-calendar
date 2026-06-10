@@ -3262,6 +3262,7 @@ function extractRfcFromJobNumber(jobNumber) {
 let _jobAuditData   = null;   // cached raw API response
 let _jobAuditFilter = 'issues'; // 'issues' | 'all'
 let _jobAuditSearch = '';
+let _jobAuditGroups = {};     // keyed by normalized job # — lets inline form functions find group data
 
 // Strips RFC/COR suffix from a job number to get the base number.
 // "636031 RFC-20" → "636031",  "636031" → "636031",  "26001COR003" → "26001"
@@ -3364,8 +3365,15 @@ function renderJobAuditContent() {
 
   const totalIssueItems = issueGroups.reduce((s, g) => s + g.wrong_count + g.unlinked_count, 0);
 
+  // ── Store groups so inline form functions can access bid lists ───────────
+  _jobAuditGroups = {};
+  for (const g of allGroups) _jobAuditGroups[g.job_number] = g;
+
   // ── Build HTML for each group ───────────────────────────────────────────
   const groupsHtml = display.map(g => {
+    // Safe CSS id fragment (strip non-alphanumeric)
+    const sid = g.job_number.replace(/[^a-zA-Z0-9]/g, '_');
+
     // Projects row
     const projHtml = g.projects.length
       ? g.projects.map(p => `
@@ -3373,18 +3381,80 @@ function renderJobAuditContent() {
             🏗️ ${esc(p.name)}
           </button>`).join('')
       : `<span style="font-size:12px;color:#d97706;font-style:italic">
-           ⚠️ No project has job # ${esc(g.job_number)} assigned — create one or assign it
+           ⚠️ No project has job # ${esc(g.job_number)} assigned yet
          </span>`;
+
+    // Inline "Create Project" form — hidden until toggled
+    const bidCheckboxes = g.bids.map(b => {
+      const alreadyOk = b._status === 'ok';
+      return `
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 0;cursor:pointer;
+                      font-size:13px;border-bottom:1px solid #e0f0ff">
+          <input type="checkbox" class="audit-create-check" data-bid-id="${b.id}"
+                 ${alreadyOk ? '' : 'checked'} />
+          <span style="font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+            ${esc(b.project_name || '—')}
+          </span>
+          ${b.bid_number ? `<span style="color:var(--text-muted);font-size:11px;white-space:nowrap">#${esc(b.bid_number)}</span>` : ''}
+          <span class="badge badge-stage" style="font-size:10px;white-space:nowrap">${stageName(b.stage)}</span>
+          ${alreadyOk ? `<span style="font-size:10px;color:#16a34a;white-space:nowrap;font-style:italic">✅ already ok</span>` : ''}
+        </label>`;
+    }).join('');
+
+    const createFormHtml = `
+      <div id="audit-create-${sid}"
+           style="display:none;padding:16px;background:#f0f9ff;border-top:2px solid #3b82f6">
+        <div style="font-size:14px;font-weight:700;color:#1d4ed8;margin-bottom:14px">
+          ➕ New Project for Job # ${esc(g.job_number)}
+        </div>
+        <div style="display:flex;gap:10px;align-items:flex-end;margin-bottom:14px;flex-wrap:wrap">
+          <div class="form-group" style="flex:1;min-width:200px;margin:0">
+            <label class="form-label">Project Name *</label>
+            <input type="text" class="form-input" id="audit-proj-name-${sid}"
+                   placeholder="e.g. 30th Street Station"
+                   onkeydown="if(event.key==='Enter')submitAuditCreateProject('${esc(g.job_number)}')" />
+          </div>
+          <div style="padding-bottom:7px;white-space:nowrap;font-size:13px;color:var(--text-muted)">
+            Job # <strong style="color:var(--text)">${esc(g.job_number)}</strong> (pre-assigned)
+          </div>
+        </div>
+        ${g.bids.length ? `
+        <div style="margin-bottom:14px">
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;
+                      color:#1d4ed8;margin-bottom:8px">
+            Link bids to this project (uncheck any to skip):
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:12px;
+                        font-weight:600;color:var(--text-muted);border-bottom:2px solid #bfdbfe;
+                        margin-bottom:4px;cursor:pointer">
+            <input type="checkbox" id="audit-create-all-${sid}" checked
+                   onchange="document.querySelectorAll('#audit-create-${sid} .audit-create-check')
+                             .forEach(c=>c.checked=this.checked)" />
+            Select / deselect all (${g.bids.length} bid${g.bids.length !== 1 ? 's' : ''})
+          </label>
+          ${bidCheckboxes}
+        </div>` :
+        `<p style="font-size:12px;color:var(--text-muted);margin:0 0 14px">
+           No bids found with this job # yet — you can link them later from each bid's flyout.
+         </p>`}
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn btn-ghost btn-sm"
+                  onclick="toggleAuditCreateProject('${esc(g.job_number)}')">Cancel</button>
+          <button class="btn btn-primary btn-sm" id="audit-create-btn-${sid}"
+                  onclick="submitAuditCreateProject('${esc(g.job_number)}')">
+            ✓ Create &amp; Link Selected
+          </button>
+        </div>
+      </div>`;
 
     // Bid rows
     const bidRows = g.bids.map(b => {
-      const isOk      = b._status === 'ok';
-      const isWrong   = b._status === 'wrong';
-      const isUnlinked = b._status === 'unlinked';
-      const rowBg     = isOk ? '' : isWrong ? 'background:#fffbeb' : 'background:#fef2f2';
+      const isOk       = b._status === 'ok';
+      const isWrong    = b._status === 'wrong';
+      const rowBg      = isOk ? '' : isWrong ? 'background:#fffbeb' : 'background:#fef2f2';
       const statusColor = isOk ? '#16a34a' : isWrong ? '#d97706' : '#dc2626';
       const statusIcon  = isOk ? '✅' : isWrong ? '⚠️' : '🔴';
-      let   statusLabel;
+      let statusLabel;
       if (isOk) {
         statusLabel = `Correctly linked to <strong>${esc(b.linked_project_name)}</strong>`;
       } else if (isWrong) {
@@ -3396,7 +3466,6 @@ function renderJobAuditContent() {
         statusLabel = `Not linked to any project`;
       }
 
-      // Flag if raw job # has RFC/COR in it (needs RFC cleanup first)
       const needsRfcCleanup = b.job_number !== g.job_number
         ? `<span style="font-size:10px;background:#fff7ed;color:#c2410c;border-radius:3px;padding:1px 4px;margin-left:4px">raw: ${esc(b.job_number)}</span>`
         : '';
@@ -3439,12 +3508,19 @@ function renderJobAuditContent() {
           <span style="font-size:14px;font-weight:800;color:var(--text);font-family:monospace">JOB # ${esc(g.job_number)}</span>
           <span style="font-size:12px;color:var(--text-muted)">${g.bids.length} bid${g.bids.length !== 1 ? 's' : ''}</span>
           <div style="flex:1"></div>
-          <div style="display:flex;gap:5px;flex-wrap:wrap">${badges}</div>
+          <div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center">
+            ${badges}
+            <button class="btn btn-primary btn-sm" style="font-size:11px;padding:3px 10px;margin-left:4px"
+                    onclick="event.stopPropagation();toggleAuditCreateProject('${esc(g.job_number)}')">
+              ➕ New Project
+            </button>
+          </div>
         </div>
-        <div style="padding:8px 14px;${g.bids.length ? 'border-bottom:1px solid var(--border)' : ''}">
+        <div style="padding:8px 14px;border-bottom:1px solid var(--border)">
           <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);margin-bottom:5px">Project(s)</div>
           <div style="display:flex;flex-wrap:wrap;gap:5px">${projHtml}</div>
         </div>
+        ${createFormHtml}
         ${g.bids.length ? `
         <div style="overflow-x:auto">
           <table style="width:100%;border-collapse:collapse">
@@ -3507,6 +3583,71 @@ function renderJobAuditContent() {
              <div class="empty-state-desc">${_jobAuditFilter === 'issues' ? 'All bids with job numbers are correctly linked to projects with matching job numbers.' : 'Add job numbers to projects and bids to see the audit.'}</div>
            </div>`}
     </div>`;
+}
+
+// ── Audit inline "Create Project" helpers ────────────────────────────────────
+
+function toggleAuditCreateProject(jobNumber) {
+  const sid = jobNumber.replace(/[^a-zA-Z0-9]/g, '_');
+  const form = document.getElementById(`audit-create-${sid}`);
+  if (!form) return;
+  const isVisible = form.style.display !== 'none';
+  form.style.display = isVisible ? 'none' : 'block';
+  if (!isVisible) {
+    // Focus the name input when opening
+    setTimeout(() => document.getElementById(`audit-proj-name-${sid}`)?.focus(), 50);
+  }
+}
+
+async function submitAuditCreateProject(jobNumber) {
+  const sid    = jobNumber.replace(/[^a-zA-Z0-9]/g, '_');
+  const nameEl = document.getElementById(`audit-proj-name-${sid}`);
+  const name   = (nameEl?.value || '').trim();
+  if (!name) { nameEl?.focus(); return; }
+
+  const checkedBidIds = Array.from(
+    document.querySelectorAll(`#audit-create-${sid} .audit-create-check:checked`)
+  ).map(cb => Number(cb.dataset.bidId));
+
+  const btn = document.getElementById(`audit-create-btn-${sid}`);
+  if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
+
+  try {
+    // 1. Create the project (job # pre-assigned)
+    const project = await api.post('/api/projects', {
+      name,
+      job_number: jobNumber,
+      created_by: State.currentUser?.id || null,
+    });
+
+    // 2. Bulk-link selected bids
+    if (checkedBidIds.length) {
+      await api.post(`/api/projects/${project.id}/bulk-link`, { bid_ids: checkedBidIds });
+    }
+
+    _projectPickerCache = null;
+
+    const linkedMsg = checkedBidIds.length
+      ? ` and linked ${checkedBidIds.length} bid${checkedBidIds.length !== 1 ? 's' : ''}`
+      : '';
+    showToast(`✅ Project "${name}" created${linkedMsg}.`);
+
+    // 3. Refresh audit data and re-render
+    _jobAuditData = await api.get('/api/audit/job-numbers');
+    renderJobAuditContent();
+
+    // Scroll the updated group into view
+    setTimeout(() => {
+      const newSid = jobNumber.replace(/[^a-zA-Z0-9]/g, '_');
+      document.querySelector(`#audit-create-${newSid}`)
+        ?.closest('div[style*="border-radius:8px"]')
+        ?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }, 150);
+
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = '✓ Create & Link Selected'; }
+    alert('Failed to create project: ' + e.message);
+  }
 }
 
 let _rfcCleanupData = [];
