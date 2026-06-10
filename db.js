@@ -630,12 +630,24 @@ async function getProject(id) {
   return p ? fmtProject(p) : null;
 }
 
-async function createProject(name, createdBy) {
+async function createProject(name, createdBy, jobNumber) {
   const existing = await Project.findOne({ name }).lean();
-  if (existing) return fmtProject(existing);
+  if (existing) {
+    // If the existing project has no job # and one is being supplied now, set it
+    if (!existing.job_number && jobNumber) {
+      await Project.findByIdAndUpdate(existing._id, { $set: { job_number: jobNumber, updated_at: nowStr() } });
+      return fmtProject(await Project.findById(existing._id).lean());
+    }
+    return fmtProject(existing);
+  }
   const id = await nextId('projects');
   const now = nowStr();
-  const doc = await Project.create({ _id: id, name, created_by: createdBy || null, created_at: now, updated_at: now });
+  const doc = await Project.create({
+    _id: id, name,
+    job_number: jobNumber || null,
+    created_by: createdBy || null,
+    created_at: now, updated_at: now,
+  });
   return fmtProject(doc);
 }
 

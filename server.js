@@ -372,7 +372,7 @@ app.get('/api/projects', async (req, res) => {
 });
 
 app.post('/api/projects', async (req, res) => {
-  try { res.json(await db.createProject(req.body.name, req.session.userId || null)); }
+  try { res.json(await db.createProject(req.body.name, req.session.userId || null, req.body.job_number || null)); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 

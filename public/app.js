@@ -2816,8 +2816,7 @@ async function saveNewProject() {
   if (!name) { nameEl?.focus(); return; }
   const jobNumber = document.getElementById('new-proj-job')?.value.trim() || '';
   try {
-    const p = await api.post('/api/projects', { name });
-    if (jobNumber) await api.put(`/api/projects/${p.id}`, { job_number: jobNumber });
+    const p = await api.post('/api/projects', { name, job_number: jobNumber || null });
     document.getElementById('new-project-modal')?.remove();
     _projectPickerCache = null;
     await renderProjects(document.getElementById('main'));
