@@ -152,6 +152,17 @@ app.post('/api/auth/set-password', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Verify the current user's password (used for destructive-action confirmation)
+app.post('/api/auth/verify-password', async (req, res) => {
+  if (!req.session.userId) return res.status(401).json({ error: 'Not authenticated' });
+  try {
+    const { password } = req.body;
+    if (!password) return res.json({ valid: false });
+    const valid = await db.verifyUserPassword(req.session.userId, password);
+    res.json({ valid: !!valid });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── TEAM ──────────────────────────────────────────────────────────────────────
 app.get('/api/team', async (req, res) => {
   try { res.json(await db.getAllTeam()); }
@@ -431,8 +442,12 @@ app.post('/api/projects/:id/bulk-link', async (req, res) => {
 });
 
 app.delete('/api/projects/:id', async (req, res) => {
-  try { await db.deleteProject(req.params.id); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  try {
+    const actor = await db.getMember(req.session.userId);
+    if (!actor || !actor.is_admin) return res.status(403).json({ error: 'Admin only.' });
+    await db.deleteProject(req.params.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/admin/migrate-projects', async (req, res) => {

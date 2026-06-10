@@ -2873,6 +2873,9 @@ async function openProjectPanel(projectId) {
         </div>
         <div style="display:flex;gap:8px;align-items:center">
           <button class="btn btn-primary btn-sm" onclick="openRebidModal(${project.id},'${esc(project.name)}')">+ Re-bid</button>
+          ${State.currentUser?.is_admin ? `
+          <button class="btn btn-danger btn-sm" title="Delete this project"
+                  onclick="deleteProjectAdmin(${project.id},'${esc(project.name)}',${bids.length})">🗑 Delete</button>` : ''}
           <button class="modal-close" onclick="document.getElementById('project-panel').remove()">×</button>
         </div>
       </div>
@@ -3498,18 +3501,129 @@ async function addBidToProject(bidId, projectId, oldProjectId = null, oldProject
 }
 
 async function checkAndPromptDeleteProject(projectId, projectName) {
+  if (!State.currentUser?.is_admin) return; // only admins can delete
   try {
     const bids = await api.get(`/api/projects/${projectId}/bids`);
     if (bids.length === 0) {
       const label = projectName || `Project #${projectId}`;
-      if (confirm(`"${label}" now has no bids. Delete this empty project?`)) {
-        await api.del(`/api/projects/${projectId}`);
-        _projectPickerCache = null;
-        // Refresh projects page if visible
-        if (location.hash === '#projects') renderProjects(document.getElementById('main'));
-      }
+      confirmWithPassword(
+        {
+          title: 'Delete Empty Project?',
+          body: `<strong>"${esc(label)}"</strong> now has no bids linked to it. Permanently delete this project? This cannot be undone.`,
+          confirmLabel: 'Yes, Delete',
+        },
+        async () => {
+          await api.del(`/api/projects/${projectId}`);
+          _projectPickerCache = null;
+          if (location.hash === '#projects') renderProjects(document.getElementById('main'));
+          showToast(`Project "${label}" deleted.`);
+        }
+      );
     }
   } catch (_) { /* non-fatal — just skip the prompt */ }
+}
+
+// ── Password-confirmed destructive action modal ───────────────────────────────
+let _confirmPwCallback = null;
+let _confirmPwLabel    = 'Delete';
+
+function confirmWithPassword({ title = 'Confirm Action', body, confirmLabel = 'Delete' }, onConfirm) {
+  document.getElementById('confirm-pw-overlay')?.remove();
+  _confirmPwCallback = onConfirm;
+  _confirmPwLabel    = confirmLabel;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'confirm-pw-overlay';
+  overlay.className = 'modal-overlay';
+  overlay.onclick = e => {
+    if (e.target === overlay) { overlay.remove(); _confirmPwCallback = null; }
+  };
+  overlay.innerHTML = `
+    <div class="modal-box" style="max-width:440px">
+      <div class="modal-header">
+        <div style="font-size:16px;font-weight:700">⚠️ ${esc(title)}</div>
+        <button class="modal-close" onclick="document.getElementById('confirm-pw-overlay').remove();_confirmPwCallback=null">×</button>
+      </div>
+      <div style="padding:20px 24px">
+        <p style="margin:0 0 18px;color:var(--text);line-height:1.55;font-size:14px">${body}</p>
+        <div class="form-group">
+          <label class="form-label">Enter your password to confirm</label>
+          <input type="password" class="form-input" id="confirm-pw-input" placeholder="Your password"
+                 onkeydown="if(event.key==='Enter')submitConfirmPassword()" />
+          <div id="confirm-pw-error"
+               style="color:var(--danger);font-size:12px;margin-top:5px;display:none;font-weight:600">
+            ✕ Incorrect password. Please try again.
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px">
+          <button class="btn btn-secondary"
+                  onclick="document.getElementById('confirm-pw-overlay').remove();_confirmPwCallback=null">
+            Cancel
+          </button>
+          <button class="btn btn-danger" id="confirm-pw-submit" onclick="submitConfirmPassword()">
+            ${esc(confirmLabel)}
+          </button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  setTimeout(() => document.getElementById('confirm-pw-input')?.focus(), 60);
+}
+
+async function submitConfirmPassword() {
+  const input = document.getElementById('confirm-pw-input');
+  const errEl = document.getElementById('confirm-pw-error');
+  const btn   = document.getElementById('confirm-pw-submit');
+  const pw    = (input?.value || '').trim();
+  if (!pw) { input?.focus(); return; }
+
+  btn.disabled    = true;
+  btn.textContent = 'Verifying…';
+  errEl.style.display = 'none';
+
+  try {
+    const res = await api.post('/api/auth/verify-password', { password: pw });
+    if (!res.valid) {
+      errEl.style.display = 'block';
+      btn.disabled    = false;
+      btn.textContent = _confirmPwLabel;
+      input.value = '';
+      input.focus();
+      return;
+    }
+    // ✅ Password verified — close modal, run callback
+    document.getElementById('confirm-pw-overlay')?.remove();
+    const cb = _confirmPwCallback;
+    _confirmPwCallback = null;
+    if (cb) await cb();
+  } catch (e) {
+    errEl.textContent   = '✕ Verification failed: ' + e.message;
+    errEl.style.display = 'block';
+    btn.disabled    = false;
+    btn.textContent = _confirmPwLabel;
+  }
+}
+
+async function deleteProjectAdmin(projectId, projectName, bidCount) {
+  const bidMsg = bidCount > 0
+    ? ` This will <strong>unlink ${bidCount} bid${bidCount !== 1 ? 's' : ''}</strong> from this project (the bids themselves will not be deleted).`
+    : '';
+  confirmWithPassword(
+    {
+      title: 'Delete Project',
+      body: `You are about to permanently delete <strong>"${esc(projectName)}"</strong>.${bidMsg} This cannot be undone.`,
+      confirmLabel: 'Delete Project',
+    },
+    async () => {
+      try {
+        await api.del(`/api/projects/${projectId}`);
+        _projectPickerCache = null;
+        document.getElementById('project-panel')?.remove();
+        if (location.hash === '#projects') renderProjects(document.getElementById('main'));
+        showToast(`Project "${projectName}" deleted.`);
+      } catch (e) { alert('Delete failed: ' + e.message); }
+    }
+  );
 }
 
 function levenshtein(a, b) {

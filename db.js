@@ -209,6 +209,12 @@ async function getMember(userId) {
   return formatMember(m);
 }
 
+async function verifyUserPassword(userId, password) {
+  const member = await TeamMember.findById(Number(userId));
+  if (!member || !member.password_hash) return false;
+  return bcrypt.compare(password, member.password_hash);
+}
+
 // ── Stats ─────────────────────────────────────────────────────────────────────
 
 async function getMyStats(userId) {
@@ -1589,7 +1595,7 @@ async function importContacts(buffer) {
 
 module.exports = {
   getTeam, getAllTeam, createTeamMember, updateTeamMember,
-  loginUser, getMember, setPassword, adminSetTempPassword, getMyStats,
+  loginUser, getMember, setPassword, adminSetTempPassword, verifyUserPassword, getMyStats,
   getBids, getBid, createBid, updateBid, deleteBid,
   getFollowups, logFollowup,
   getStats, getDigest, getAnalytics,
