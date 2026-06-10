@@ -401,10 +401,36 @@ tbody td {
 .proj-meta-sep { color: var(--border); margin: 0 2px; }
 .proj-meta-customers { color: var(--text-muted); }
 .proj-tag {
-  display: inline-block; background: #eff6ff; color: #3b82f6;
-  border-radius: 4px; padding: 1px 5px; font-size: 11px; font-weight: 600;
+  display: inline-block; border-radius: 4px; padding: 1px 5px; font-size: 11px; font-weight: 600;
+}
+/* Bid # tags — blue */
+.proj-tag-bid { background: #eff6ff; color: #3b82f6; }
+/* Job # tags — red */
+.proj-tag-job { background: #fff1f2; color: #e11d48; border: 1px solid #fecdd3; }
+/* No job # indicator — dashed muted */
+.proj-tag-nojob {
+  background: transparent; color: #cbd5e1; border: 1px dashed #e2e8f0;
+  font-weight: 400; font-style: italic;
 }
 .proj-tag-muted { background: #f1f5f9; color: var(--text-muted); }
+
+/* Projects filter buttons */
+.proj-filter-btns { display: flex; gap: 2px; flex-wrap: nowrap; }
+.proj-filter-btn {
+  padding: 5px 11px; border-radius: 4px; border: 1px solid var(--border);
+  background: transparent; color: var(--text-muted); font-size: 12px;
+  cursor: pointer; font-family: inherit; white-space: nowrap; transition: all .15s;
+  line-height: 1.4;
+}
+.proj-filter-btn:hover { background: #f1f5f9; color: var(--text); border-color: #cbd5e1; }
+.proj-filter-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); font-weight: 600; }
+/* Sort select */
+.proj-sort-select {
+  padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius);
+  font-size: 13px; color: var(--text); background: #fff; cursor: pointer;
+  font-family: inherit; white-space: nowrap;
+}
+.proj-sort-select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37,99,235,.1); }
 .proj-active-badge {
   display: inline-block; background: #dcfce7; color: #16a34a;
   border-radius: 10px; padding: 1px 8px; font-size: 11px; font-weight: 600;

@@ -2626,6 +2626,8 @@ function toggleChecklistNA(event, bidId, itemId) {
 // ─────────────────────────────────────────────
 let _projectsCache = [];
 let _projectSearchTimer = null;
+let _projFilter = 'all';   // 'all' | 'has_job' | 'no_job' | 'active' | 'no_bids'
+let _projSort   = 'name';  // 'name' | 'name_z' | 'bids' | 'value' | 'active'
 
 async function renderProjects(main) {
   const search = document.getElementById('proj-search')?.value || '';
@@ -2634,16 +2636,41 @@ async function renderProjects(main) {
   const params = search ? `?search=${encodeURIComponent(search)}` : '';
   _projectsCache = await api.get('/api/projects' + params);
 
-  const rows = _projectsCache.map(p => {
-    // Resolve estimator initials from State.team
+  // ── Client-side filter ────────────────────────────────────────────────────
+  let filtered = _projectsCache.filter(p => {
+    if (_projFilter === 'has_job')  return !!p.job_number;
+    if (_projFilter === 'no_job')   return !p.job_number;
+    if (_projFilter === 'active')   return (p.active_count || 0) > 0;
+    if (_projFilter === 'no_bids')  return (p.bid_count || 0) === 0;
+    return true;
+  });
+
+  // ── Client-side sort ──────────────────────────────────────────────────────
+  filtered.sort((a, b) => {
+    if (_projSort === 'name')   return a.name.localeCompare(b.name);
+    if (_projSort === 'name_z') return b.name.localeCompare(a.name);
+    if (_projSort === 'bids')   return (b.bid_count || 0) - (a.bid_count || 0);
+    if (_projSort === 'value')  return (b.total_value || 0) - (a.total_value || 0);
+    if (_projSort === 'active') return (b.active_count || 0) - (a.active_count || 0);
+    return 0;
+  });
+
+  const rows = filtered.map(p => {
+    // Estimator pills
     const estInitials = (p.estimator_ids || [])
       .map(id => State.team.find(t => t.id === id))
       .filter(Boolean)
       .map(t => `<span class="est-pill est-${t.id % 8}">${esc(t.initials)}</span>`)
       .join('');
 
+    // Job # tag — red when present, dashed muted when missing
+    const jobTag = p.job_number
+      ? `<span class="proj-tag proj-tag-job">${esc(p.job_number)}</span>`
+      : `<span class="proj-tag proj-tag-nojob">no job #</span>`;
+
+    // Bid #s — blue
     const bidNums = (p.bid_numbers || []).slice(0, 6)
-      .map(n => `<span class="proj-tag">#${esc(n)}</span>`).join('');
+      .map(n => `<span class="proj-tag proj-tag-bid">#${esc(n)}</span>`).join('');
     const extraNums = (p.bid_numbers || []).length > 6
       ? `<span class="proj-tag proj-tag-muted">+${p.bid_numbers.length - 6} more</span>` : '';
 
@@ -2662,7 +2689,8 @@ async function renderProjects(main) {
           ${activeBadge}
         </div>
         <div class="proj-meta">
-          ${bidNums}${extraNums}
+          ${jobTag}
+          ${(bidNums || extraNums) ? `<span class="proj-meta-sep">·</span>${bidNums}${extraNums}` : ''}
           ${estInitials ? `<span class="proj-meta-sep">·</span>${estInitials}` : ''}
           ${customers ? `<span class="proj-meta-sep">·</span><span class="proj-meta-customers">${customers}</span>` : ''}
         </div>
@@ -2678,23 +2706,62 @@ async function renderProjects(main) {
     </div>`;
   }).join('');
 
+  // ── Filter buttons ────────────────────────────────────────────────────────
+  const filterBtns = [
+    { key: 'all',     label: 'All' },
+    { key: 'has_job', label: '🔴 Has Job #' },
+    { key: 'no_job',  label: 'No Job #' },
+    { key: 'active',  label: 'Active Bids' },
+    { key: 'no_bids', label: 'No Bids' },
+  ].map(f => `<button class="proj-filter-btn${_projFilter === f.key ? ' active' : ''}"
+    onclick="setProjectFilter('${f.key}')">${f.label}</button>`).join('');
+
+  const noJobCount  = _projectsCache.filter(p => !p.job_number).length;
+  const hasJobCount = _projectsCache.filter(p =>  p.job_number).length;
+  const subtitleExtra = _projFilter !== 'all'
+    ? ` (${filtered.length} of ${_projectsCache.length})`
+    : ` — ${hasJobCount} with job #, ${noJobCount} without`;
+
   main.innerHTML = `
     <div class="page-header">
       <div>
         <div class="page-title">🏗️ Projects</div>
-        <div class="page-subtitle">${_projectsCache.length} projects</div>
+        <div class="page-subtitle">${filtered.length} project${filtered.length !== 1 ? 's' : ''}${subtitleExtra}</div>
       </div>
       <button class="btn btn-primary btn-sm" onclick="openNewProjectModal()">+ New Project</button>
     </div>
-    <div class="filter-bar">
+    <div class="filter-bar" style="flex-wrap:wrap;row-gap:8px">
       <input type="text" id="proj-search" placeholder="Search projects…"
-             value="${esc(search)}" oninput="debounceProjects()" />
+             value="${esc(search)}" oninput="debounceProjects()"
+             style="flex:1;min-width:180px;max-width:300px" />
+      <div class="proj-filter-btns">${filterBtns}</div>
+      <select class="proj-sort-select" onchange="setProjectSort(this.value)">
+        <option value="name"   ${_projSort === 'name'   ? 'selected' : ''}>Sort: Name A→Z</option>
+        <option value="name_z" ${_projSort === 'name_z' ? 'selected' : ''}>Sort: Name Z→A</option>
+        <option value="bids"   ${_projSort === 'bids'   ? 'selected' : ''}>Sort: Most Bids</option>
+        <option value="value"  ${_projSort === 'value'  ? 'selected' : ''}>Sort: Highest Value</option>
+        <option value="active" ${_projSort === 'active' ? 'selected' : ''}>Sort: Most Active</option>
+      </select>
     </div>
     <div class="card" style="padding:0">
-      ${_projectsCache.length
+      ${filtered.length
         ? rows
-        : '<div class="empty-state"><div class="empty-state-icon">🏗️</div><div class="empty-state-title">No projects yet</div><div class="empty-state-desc">Run the project migration in Settings to auto-group existing bids.</div></div>'}
+        : `<div class="empty-state">
+             <div class="empty-state-icon">🏗️</div>
+             <div class="empty-state-title">${_projFilter === 'all' ? 'No projects yet' : 'No projects match this filter'}</div>
+             <div class="empty-state-desc">${_projFilter === 'all' ? 'Run the project migration in Settings to auto-group existing bids.' : 'Try a different filter or search term.'}</div>
+           </div>`}
     </div>`;
+}
+
+function setProjectFilter(f) {
+  _projFilter = f;
+  renderProjects(document.getElementById('main'));
+}
+
+function setProjectSort(s) {
+  _projSort = s;
+  renderProjects(document.getElementById('main'));
 }
 
 function debounceProjects() {
