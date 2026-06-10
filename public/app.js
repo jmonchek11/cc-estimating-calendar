@@ -3274,10 +3274,11 @@ let _jobAuditSearch = '';
 let _jobAuditGroups = {};     // keyed by normalized job # — lets inline form functions find group data
 
 // Strips RFC/COR suffix from a job number to get the base number.
-// "636031 RFC-20" → "636031",  "636031" → "636031",  "26001COR003" → "26001"
+// "636031 RFC-20" → "636031",  "636031 RFC" → "636031",  "26001COR003" → "26001"
+// Uses \d* (0 or more digits) so bare "RFC" / "COR" with no number still gets stripped.
 function normalizeJobNum(jn) {
   if (!jn) return null;
-  const stripped = jn.replace(/\s*(RFC|COR)\s*-?\s*\d+/gi, '').replace(/[-\s.]+$/, '').trim();
+  const stripped = jn.replace(/\s*(RFC|COR)\s*[-#]?\s*\d*/gi, '').replace(/[-\s.]+$/, '').trim();
   return stripped || jn.trim();
 }
 
@@ -3320,7 +3321,7 @@ function renderJobAuditContent() {
   const groups = {};
 
   for (const p of projects) {
-    const norm = p.job_number.trim();
+    const norm = normalizeJobNum(p.job_number) || p.job_number.trim();
     if (!groups[norm]) groups[norm] = { job_number: norm, projects: [], bids: [] };
     groups[norm].projects.push(p);
   }
@@ -3334,7 +3335,8 @@ function renderJobAuditContent() {
     let status;
     if (!b.project_id) {
       status = 'unlinked';
-    } else if (b.linked_project_job_number && b.linked_project_job_number.trim() === norm) {
+    } else if (b.linked_project_job_number &&
+               (normalizeJobNum(b.linked_project_job_number) || b.linked_project_job_number.trim()) === norm) {
       status = 'ok';
     } else {
       // Linked to a project that doesn't carry this job #
