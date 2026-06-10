@@ -2636,8 +2636,10 @@ function toggleChecklistNA(event, bidId, itemId) {
 // ─────────────────────────────────────────────
 let _projectsCache = [];
 let _projectSearchTimer = null;
-let _projFilter = 'all';   // 'all' | 'has_job' | 'no_job' | 'active' | 'no_bids'
-let _projSort   = 'name';  // 'name' | 'name_z' | 'bids' | 'value' | 'active'
+let _projFilter     = 'all';   // 'all' | 'has_job' | 'no_job' | 'active' | 'no_bids'
+let _projSort       = 'name';  // 'name' | 'name_z' | 'bids' | 'value' | 'active'
+let _projSelectMode = false;
+let _projSelected   = new Set(); // project ids selected for bulk delete
 
 async function renderProjects(main) {
   const search = document.getElementById('proj-search')?.value || '';
@@ -2691,8 +2693,15 @@ async function renderProjects(main) {
       ? `<span class="proj-active-badge">${p.active_count} active</span>` : '';
     const valueStr = p.total_value ? fmtCompact(p.total_value) : '';
 
+    const isSelected = _projSelectMode && _projSelected.has(p.id);
     return `
-    <div class="proj-row" onclick="openProjectPanel(${p.id})">
+    <div class="proj-row${isSelected ? ' proj-row-selected' : ''}"
+         onclick="${_projSelectMode ? `toggleProjSelect(${p.id})` : `openProjectPanel(${p.id})`}">
+      ${_projSelectMode ? `
+      <div style="display:flex;align-items:center;padding-right:10px;flex-shrink:0">
+        <input type="checkbox" class="proj-select-cb" data-id="${p.id}"
+               ${isSelected ? 'checked' : ''} style="pointer-events:none;width:16px;height:16px" />
+      </div>` : ''}
       <div style="flex:1;min-width:0">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           <span class="proj-name">${esc(p.name)}</span>
@@ -2710,8 +2719,8 @@ async function renderProjects(main) {
           <span>${p.bid_count} bid${p.bid_count !== 1 ? 's' : ''}</span>
           ${valueStr ? `<span>${valueStr}</span>` : ''}
         </div>
-        <button class="btn btn-ghost btn-sm" style="color:var(--primary)"
-                onclick="openRebidModal(${p.id},'${esc(p.name)}')">+ Re-bid</button>
+        ${_projSelectMode ? '' : `<button class="btn btn-ghost btn-sm" style="color:var(--primary)"
+                onclick="openRebidModal(${p.id},'${esc(p.name)}')">+ Re-bid</button>`}
       </div>
     </div>`;
   }).join('');
@@ -2728,9 +2737,33 @@ async function renderProjects(main) {
 
   const noJobCount  = _projectsCache.filter(p => !p.job_number).length;
   const hasJobCount = _projectsCache.filter(p =>  p.job_number).length;
+  const noBidCount  = _projectsCache.filter(p => (p.bid_count || 0) === 0).length;
   const subtitleExtra = _projFilter !== 'all'
     ? ` (${filtered.length} of ${_projectsCache.length})`
     : ` — ${hasJobCount} with job #, ${noJobCount} without`;
+
+  const isAdmin = State.currentUser?.is_admin;
+
+  // Selection action bar (shown when select mode is active)
+  const selBar = _projSelectMode ? `
+    <div id="proj-sel-bar" style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;flex-wrap:wrap">
+      <span id="proj-sel-count" style="font-size:13px;font-weight:600;color:#991b1b;white-space:nowrap">
+        ${_projSelected.size} selected
+      </span>
+      <button class="btn btn-ghost btn-sm" onclick="selectAllNoBidProjects()"
+              style="color:#991b1b;border-color:#fca5a5">
+        ☑ Select All with No Bids (${noBidCount})
+      </button>
+      <button class="btn btn-ghost btn-sm" onclick="clearProjSelection()"
+              style="color:var(--text-muted)">Clear</button>
+      <div style="flex:1"></div>
+      <button id="proj-del-selected" class="btn btn-sm"
+              style="background:#dc2626;color:white;border-color:#dc2626"
+              ${_projSelected.size === 0 ? 'disabled' : ''}
+              onclick="deleteSelectedProjects()">
+        🗑 Delete Selected (${_projSelected.size})
+      </button>
+    </div>` : '';
 
   main.innerHTML = `
     <div class="page-header">
@@ -2738,7 +2771,15 @@ async function renderProjects(main) {
         <div class="page-title">🏗️ Projects</div>
         <div class="page-subtitle">${filtered.length} project${filtered.length !== 1 ? 's' : ''}${subtitleExtra}</div>
       </div>
-      <button class="btn btn-primary btn-sm" onclick="openNewProjectModal()">+ New Project</button>
+      <div style="display:flex;gap:8px;align-items:center">
+        ${isAdmin ? `<button class="btn btn-sm" onclick="toggleProjSelectMode()"
+          style="${_projSelectMode
+            ? 'background:#fef2f2;color:#dc2626;border:1.5px solid #fca5a5'
+            : 'background:white;color:var(--text-muted);border:1.5px solid var(--border)'}">
+          ${_projSelectMode ? '✕ Cancel' : '☑ Select'}
+        </button>` : ''}
+        ${!_projSelectMode ? `<button class="btn btn-primary btn-sm" onclick="openNewProjectModal()">+ New Project</button>` : ''}
+      </div>
     </div>
     <div class="filter-bar" style="flex-wrap:wrap;row-gap:8px">
       <input type="text" id="proj-search" placeholder="Search projects…"
@@ -2753,6 +2794,7 @@ async function renderProjects(main) {
         <option value="active" ${_projSort === 'active' ? 'selected' : ''}>Sort: Most Active</option>
       </select>
     </div>
+    ${selBar}
     <div class="card" style="padding:0">
       ${filtered.length
         ? rows
@@ -2777,6 +2819,87 @@ function setProjectSort(s) {
 function debounceProjects() {
   clearTimeout(_projectSearchTimer);
   _projectSearchTimer = setTimeout(() => renderProjects(document.getElementById('main')), 300);
+}
+
+// ── Project select / bulk-delete ──────────────────────────────────────────────
+function toggleProjSelectMode() {
+  _projSelectMode = !_projSelectMode;
+  _projSelected.clear();
+  renderProjects(document.getElementById('main'));
+}
+
+function toggleProjSelect(id) {
+  if (_projSelected.has(id)) _projSelected.delete(id);
+  else _projSelected.add(id);
+  // Update checkbox visual
+  const cb = document.querySelector(`.proj-select-cb[data-id="${id}"]`);
+  if (cb) cb.checked = _projSelected.has(id);
+  cb?.closest('.proj-row')?.classList.toggle('proj-row-selected', _projSelected.has(id));
+  // Update selection bar in-place (no full re-render)
+  const n = _projSelected.size;
+  const countEl = document.getElementById('proj-sel-count');
+  if (countEl) countEl.textContent = `${n} selected`;
+  const delBtn = document.getElementById('proj-del-selected');
+  if (delBtn) {
+    delBtn.disabled = n === 0;
+    delBtn.textContent = `🗑 Delete Selected (${n})`;
+  }
+}
+
+function selectAllNoBidProjects() {
+  // Select all zero-bid projects from the full cache (not just visible filtered ones)
+  _projectsCache.filter(p => (p.bid_count || 0) === 0).forEach(p => _projSelected.add(p.id));
+  // Update all visible checkboxes
+  document.querySelectorAll('.proj-select-cb').forEach(cb => {
+    const id = Number(cb.dataset.id);
+    const proj = _projectsCache.find(p => p.id === id);
+    if (proj && (proj.bid_count || 0) === 0) {
+      cb.checked = true;
+      cb.closest('.proj-row')?.classList.add('proj-row-selected');
+    }
+  });
+  const n = _projSelected.size;
+  const countEl = document.getElementById('proj-sel-count');
+  if (countEl) countEl.textContent = `${n} selected`;
+  const delBtn = document.getElementById('proj-del-selected');
+  if (delBtn) { delBtn.disabled = n === 0; delBtn.textContent = `🗑 Delete Selected (${n})`; }
+}
+
+function clearProjSelection() {
+  _projSelected.clear();
+  document.querySelectorAll('.proj-select-cb').forEach(cb => {
+    cb.checked = false;
+    cb.closest('.proj-row')?.classList.remove('proj-row-selected');
+  });
+  const countEl = document.getElementById('proj-sel-count');
+  if (countEl) countEl.textContent = '0 selected';
+  const delBtn = document.getElementById('proj-del-selected');
+  if (delBtn) { delBtn.disabled = true; delBtn.textContent = '🗑 Delete Selected (0)'; }
+}
+
+async function deleteSelectedProjects() {
+  const ids = Array.from(_projSelected);
+  if (!ids.length) return;
+  const n = ids.length;
+  confirmWithPassword(
+    {
+      title: `Delete ${n} Empty Project${n !== 1 ? 's' : ''}`,
+      body: `You are about to permanently delete <strong>${n} empty project${n !== 1 ? 's' : ''}</strong>. This cannot be undone.`,
+      confirmLabel: `Delete ${n} Project${n !== 1 ? 's' : ''}`,
+    },
+    async () => {
+      let ok = 0, fail = 0;
+      for (const id of ids) {
+        try { await api.del(`/api/projects/${id}`); ok++; }
+        catch (e) { fail++; console.error(`Delete project ${id}:`, e.message); }
+      }
+      _projectPickerCache = null;
+      _projSelectMode = false;
+      _projSelected.clear();
+      showToast(`Deleted ${ok} project${ok !== 1 ? 's' : ''}${fail ? ` · ${fail} failed` : ''}`);
+      renderProjects(document.getElementById('main'));
+    }
+  );
 }
 
 function openNewProjectModal() {

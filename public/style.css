@@ -393,6 +393,8 @@ tbody td {
 }
 .proj-row:last-child { border-bottom: none; }
 .proj-row:hover { background: #f8fafc; }
+.proj-row.proj-row-selected { background: #eff6ff !important; }
+.proj-row.proj-row-selected:hover { background: #dbeafe !important; }
 .proj-name { font-size: 14px; font-weight: 600; color: var(--text); }
 .proj-meta {
   display: flex; align-items: center; flex-wrap: wrap; gap: 4px;
