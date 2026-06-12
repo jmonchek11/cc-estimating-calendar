@@ -2503,10 +2503,14 @@ function adminOverrideStage() {
   const stageSelect   = document.getElementById('f-stage');
   const stageReadonly = document.getElementById('f-stage-readonly');
   const overrideLink  = document.getElementById('f-stage-override-link');
+  const coGroup       = document.getElementById('f-co_number-group');
   if (!stageSelect) return;
   stageSelect.style.display   = '';
   if (stageReadonly)  stageReadonly.style.display  = 'none';
   if (overrideLink)   overrideLink.style.display   = 'none';
+  stageSelect.onchange = () => {
+    if (coGroup) coGroup.style.display = stageSelect.value === 'active_co' ? '' : 'none';
+  };
   stageSelect.focus();
 }
 
@@ -4998,10 +5002,18 @@ function openBidModal(bidId = null, defaultStage = 'opportunity', highlightIssue
   const stageSelect   = document.getElementById('f-stage');
   const stageReadonly = document.getElementById('f-stage-readonly');
   const overrideLinkEl = document.getElementById('f-stage-override-link');
+  const coGroup = document.getElementById('f-co_number-group');
+
+  function syncCoField(stage) {
+    if (coGroup) coGroup.style.display = (stage === 'active_co') ? '' : 'none';
+  }
+
   if (!bidId) {
     if (stageSelect)    stageSelect.style.display    = '';
     if (stageReadonly)  stageReadonly.style.display   = 'none';
     if (overrideLinkEl) overrideLinkEl.style.display  = 'none';
+    syncCoField(defaultStage || 'opportunity');
+    if (stageSelect) stageSelect.onchange = () => syncCoField(stageSelect.value);
   }
 
   if (bidId) {
@@ -5040,6 +5052,7 @@ function openBidModal(bidId = null, defaultStage = 'opportunity', highlightIssue
       }
       const overrideLink = document.getElementById('f-stage-override-link');
       if (overrideLink) overrideLink.style.display = State.currentUser?.is_admin ? '' : 'none';
+      syncCoField(b.stage === 'active_co' || b.co_number ? 'active_co' : b.stage);
       document.getElementById('f-notes').value = b.notes || '';
       document.getElementById('f-award_date').value = b.award_date || '';
       document.getElementById('f-awarded_contractor').value = b.awarded_contractor || '';

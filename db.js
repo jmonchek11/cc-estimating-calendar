@@ -1111,14 +1111,21 @@ async function updateBid(id, data) {
   }
 
   // Auto-fill customer when linking to a project and the bid has no customer.
-  // Only fires when project_id is being set to a new value AND customer is not
-  // explicitly included in this update (don't overwrite an intentional change).
   if ('project_id' in data && data.project_id && !('customer' in data)) {
     const current = await Bid.findById(Number(id)).select('customer project_id').lean();
     const isNewLink = current && Number(current.project_id) !== Number(data.project_id);
     if (current && !current.customer && isNewLink) {
       const inherited = await getProjectPrimaryCustomer(data.project_id);
       if (inherited) update.customer = inherited;
+    }
+  }
+
+  // Auto-inherit job_number from linked project when a base bid is marked awarded.
+  if (update.stage === 'awarded' && !update.job_number) {
+    const current = await Bid.findById(Number(id)).select('project_id job_number co_number').lean();
+    if (current?.project_id && !current.job_number && !current.co_number) {
+      const proj = await Project.findById(current.project_id).select('job_number').lean();
+      if (proj?.job_number) update.job_number = proj.job_number;
     }
   }
 
