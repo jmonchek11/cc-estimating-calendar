@@ -531,7 +531,7 @@ async function getLinkedCOs(bidId) {
     });
   }
   const raw = await Bid.aggregate([
-    { $match: { is_deleted: 0, $or: conditions } },
+    { $match: { _id: { $ne: Number(bidId) }, is_deleted: 0, $or: conditions } },
     ...BID_PIPELINE,
     { $sort: { created_at: 1 } },
   ]).then(r => r.map(formatBid));
