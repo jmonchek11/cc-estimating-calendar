@@ -1,6 +1,6 @@
 # LIS Estimating Calendar v2 — Gold-Standard Data Model Specification
 
-**Status:** DRAFT — for team review
+**Status:** DRAFT v2 — open questions resolved June 12, 2026 (see §7); awaiting full-team sign-off
 **Author:** Joe Monchek + Claude
 **Date:** June 12, 2026
 **Purpose:** Define the correct database structure and application workflow before any further development. Once approved by the team, this document is the single source of truth. Implementation either migrates the current app to this model or rebuilds fresh against it — but the model itself does not change without re-approval here.
@@ -30,6 +30,7 @@ erDiagram
     BID ||--o{ FOLLOWUP : "parent_type=bid"
     CHANGE_ORDER ||--o{ FOLLOWUP : "parent_type=change_order"
     TEAM_MEMBER ||--o{ BID : "estimator / salesperson"
+    TEAM_MEMBER ||--o{ JOB : "pm"
     TEAM_MEMBER ||--o{ CHANGE_ORDER : "estimator"
 
     PROJECT {
@@ -51,7 +52,9 @@ erDiagram
         date date_received
         date due_date
         date start_date
-        decimal estimate_amount "set at SUBMIT only"
+        string drawing_stage "free text: 50% budget, 80% budget, 100% CD, etc"
+        decimal estimate_amount "set at SUBMIT - current value incl revisions"
+        json revisions "[{rev_num, amount, date, notes}] post-submit customer revisions"
         string jurisdiction "IBEW local - set at SUBMIT only"
         date date_submitted "set at SUBMIT only"
         string approved_by "set at SUBMIT only"
@@ -74,6 +77,7 @@ erDiagram
         int winning_bid_id FK "NULLABLE - legacy jobs have no bid"
         string job_number "NULLABLE until accounting assigns - lives ONLY here"
         int awarded_company_id FK "who awarded us the work"
+        int pm_id FK "PM assigned to the job - gets CO follow-up notifications"
         date award_date
         datetime created_at
         datetime updated_at
@@ -90,6 +94,7 @@ erDiagram
         date start_date
         decimal estimate_amount "set at SUBMIT only"
         date date_submitted "set at SUBMIT only"
+        string approved_by "set at SUBMIT - PM, estimator, or salesperson"
         date approval_date "set at APPROVE only"
         date next_followup_date "managed by follow-up timer"
         text notes
@@ -195,14 +200,19 @@ stateDiagram-v2
 | Transition | Button | Required inputs | System actions |
 |---|---|---|---|
 | → `opportunity` | Create Opportunity | Project (pick existing or create new) | Bid created with FK to project. Most opportunities immediately advance, but some stay here for internal discussion and never become bids. |
-| `opportunity` → `active_bid` | Start Bid | Customer company(ies), customer contact(s), estimator, salesperson, date received, due date. Optional: sub-estimators with scope (data, fire alarm, lighting, lighting controls, etc.), start date | Bid # assigned (B-year-sequence). |
+| `opportunity` → `active_bid` | Start Bid | Customer company(ies), customer contact(s), estimator, salesperson, date received, due date. Optional: sub-estimators with scope (data, fire alarm, lighting, lighting controls, etc.), start date, drawing stage (free text: "50% budget", "80% budget", "100% CD"…) | Bid # assigned (B-year-sequence). **Bid #s exist only from this point — opportunities have no bid #.** |
 | `active_bid` → `submitted` | Submit Bid | Estimate amount $, IBEW local jurisdiction, date estimate sent, estimate approved by | Follow-up timer starts: `next_followup_date = date_submitted + Settings.fu_initial_days`. Salesperson notified (email + webapp). |
+| `submitted` (stays) | Add Revision | Revised amount $, revision date, notes (what the customer requested) | Appends to `revisions[]`; `estimate_amount` updates to the new value. For customer-requested changes after submission that aren't a full re-bid. Each pricing round that IS a full re-bid gets its own new Bid under the same Project. |
 | `submitted` → `submitted` | Log Follow-up (outcome: no decision) | Who was contacted, contact method (phone/email/in person), notes | Timer restarts: `next_followup_date = today + Settings.fu_recurring_days`. |
 | `submitted` → `awarded` | Awarded | Winning customer (picker shown ONLY if bid went to multiple companies; auto-selected if one), award date (autofilled today, editable) | **Job record created** (`project_id`, `winning_bid_id`, `awarded_company_id`, `award_date`, `job_number = null`). All-user award email sent. |
 | `submitted` → `not_awarded` | Not Awarded | Date notified (autofilled today, editable), customer feedback notes (optional) | Final state. |
 | `opportunity`/`active_bid` → `closed` | Close | Closure date, approved by, reason | Final state. For opportunities we decided not to bid, or bids we stopped mid-estimate. |
 
 **Fields that DO NOT EXIST on the bid form during `opportunity`/`active_bid`:** job #, estimate $, jurisdiction, date estimate sent, estimate approved by, next follow-up date, bid result, award date, awarded contractor. They are collected by the transition modals, never by the edit form.
+
+**Post-submission price changes — two distinct paths:**
+1. **Data-entry error fix:** `estimate_amount` is directly editable after submission by **admins only**.
+2. **Customer-requested revision** (not a full re-bid): the "Add Revision" action logs the revision (amount, date, notes) to `revisions[]` and updates the current amount — any user involved with the bid can do this. Full re-prices at a new drawing stage are a **new Bid** under the same Project.
 
 ### 2.2 Job Lifecycle
 
@@ -213,8 +223,9 @@ stateDiagram-v2
     job_created --> job_numbered : accounting assigns job #
 ```
 
-- A Job is born when a bid is awarded — **or created manually** for legacy work bid before this system existed (AMY James Martin, William H Gray 30th Street Station, etc.). Legacy jobs have `winning_bid_id = null`.
+- A Job is born when a bid is awarded — **or created manually at any time** for legacy work bid before this system existed. Manual Job creation is a permanent feature, not a migration-only tool, so legacy jobs can be added after launch as they come up. Legacy jobs have `winning_bid_id = null`.
 - `job_number` is **nullable by design**: accounting assigns it after the contract arrives, sometimes days or weeks after award. The UI shows "Job # pending" until set.
+- **`pm_id`** — the PM assigned to the job. Set at/after award (or at manual creation). The Job's PM receives CO follow-up notifications (§2.3).
 - Change orders attach to Jobs regardless of whether a job # exists yet (they FK to `job_id`, the internal ID, not the number).
 
 ### 2.3 Change Order Lifecycle
@@ -228,19 +239,21 @@ stateDiagram-v2
     submitted_co --> approved : "Approved" button
     submitted_co --> not_approved : "Not Approved" button
     submitted_co --> voided : "Void" button
+    voided --> active_co : "Reopen" (if never submitted)
+    voided --> submitted_co : "Reopen" (if previously submitted)
+    not_approved --> submitted_co : "Reopen"
     approved --> [*]
-    not_approved --> [*]
-    voided --> [*]
 ```
 
 | Transition | Button | Required inputs | System actions |
 |---|---|---|---|
 | → `active_co` | + Add Change Order (from Job view) | RFC/CO #, name (description of work), due date, start date. Optional: estimator | Cannot be created without a parent Job. |
-| `active_co` → `submitted_co` | Submit CO | Estimate amount $, date submitted *(flagged — see Open Questions Q3)* | Follow-up timer starts; salesperson/PM notified (email + webapp). |
+| `active_co` → `submitted_co` | Submit CO | Estimate amount $, date submitted, approved by (free pick — can be a PM, estimator, or salesperson) | Follow-up timer starts; **the Job's PM** (`Job.pm_id`) notified (email + webapp). |
 | `submitted_co` → `submitted_co` | Log Follow-up (no decision) | Who contacted, method, notes | Timer restarts per Settings. |
 | `submitted_co` → `approved` | Approved | Approval date (autofilled today, editable) | CO joins the Job's approved-CO list. |
-| `submitted_co` → `not_approved` | Not Approved | Date notified, notes (optional) | Final state. |
-| any active state → `voided` | Void | Reason | Customer canceled the RFC / work not proceeding. |
+| `submitted_co` → `not_approved` | Not Approved | Date notified, notes (optional) | Reopenable (below). |
+| any active state → `voided` | Void | Reason | **Any user** can void. Customer canceled the RFC / work not proceeding. |
+| `voided`/`not_approved` → reopen | Reopen | — | **Any user** can reopen. Returns to `submitted_co` if it had been submitted, otherwise `active_co`. Follow-up timer restarts on reopen to `submitted_co`. |
 
 **Terminology note:** RFC (request for change), COR (change order request), and CO (change order) are all the same entity. The `co_number` field stores whatever prefix the customer's system uses (RFC-20, COR-3, CO-7).
 
@@ -262,8 +275,10 @@ stateDiagram-v2
 | date_received | ○ | ●R | ● | ● | ● | ● |
 | due_date | ○ | ●R | ● | ● | ● | ● |
 | start_date | — | ○ | ○ | ○ | ○ | ○ |
+| drawing_stage | — | ○ | ○ | ○ | ○ | ○ |
 | notes | ○ | ○ | ○ | ○ | ○ | ○ |
-| estimate_amount | ✕ | ✕ | ●R (set at submit) | ● | ● | ✕ |
+| estimate_amount | ✕ | ✕ | ●R (set at submit; admin-only direct edit after) | ● | ● | ✕ |
+| revisions[] | ✕ | ✕ | ○ (Add Revision action) | ● | ● | ✕ |
 | jurisdiction | ✕ | ✕ | ●R (set at submit) | ● | ● | ✕ |
 | date_submitted | ✕ | ✕ | ●R (set at submit) | ● | ● | ✕ |
 | approved_by | ✕ | ✕ | ●R (set at submit) | ● | ● | ✕ |
@@ -287,6 +302,7 @@ Legend: **●R** required · **●** present (read-only or editable per role) ·
 | estimator_id | ○ | ○ | ○ | ○ | ○ |
 | estimate_amount | ✕ | ●R (set at submit) | ● | ● | ✕ |
 | date_submitted | ✕ | ●R (set at submit) | ● | ● | ✕ |
+| approved_by | ✕ | ●R (set at submit) | ● | ● | ✕ |
 | next_followup_date | ✕ | ● system-managed | ✕ | ✕ | ✕ |
 | approval_date | ✕ | ✕ | ●R | ✕ | ✕ |
 
@@ -305,7 +321,7 @@ Legend: **●R** required · **●** present (read-only or editable per role) ·
 | 5 | `Contact.company` is free text | Cannot reliably link contacts to the companies we bid to | `Contact.company_id` FK to Company |
 | 6 | `stage` + `status` are **redundant** (`status:'Awarded'` duplicates `stage:'awarded'`) | Two fields must be kept in sync manually; the "null stage" bug came from exactly this class of problem | Single `stage` field; `status` eliminated |
 | 7 | No `submitted` stage — current `follow_up` stage conflates "submitted, awaiting decision" with the follow-up activity | Awkward stage naming; submission data (`date_estimate_sent`) can exist on non-submitted bids | Explicit `submitted` stage entered only via Submit button |
-| 8 | `phases` sub-document on Bid (50% Budget, 80% DD, CD Pricing…) | Phases are snapshots of bid fields — more duplicated data | See Open Questions Q4 — likely becomes "re-bid creates a new Bid under the same Project" (a pattern that already exists) |
+| 8 | `phases` sub-document on Bid (50% Budget, 80% DD, CD Pricing…) | Phases are snapshots of bid fields — more duplicated data | **Resolved (Q4):** each pricing round is a separate Bid under the same Project, with a `drawing_stage` free-text field ("50% budget", "80% budget", "100% CD"…). Post-submission customer tweaks use `revisions[]` instead of a new bid (Q5) |
 | 9 | `reminders` sub-document array on Bid | Can't attach reminders to Jobs or COs | Polymorphic `Reminder` entity |
 | 10 | `parent_bid_id` links CO-bids to awarded bids, but `getLinkedCOs` ALSO matches by job_number string | Dual-path linking caused the bid-shows-as-its-own-CO bug | Single FK: `ChangeOrder.job_id` |
 
@@ -364,7 +380,8 @@ Features built in v1, mapped onto the new model:
 | Project auto-grouping / duplicate review | ⚠️ Migration-only | Used during import; not needed at runtime since bids are born with a project FK |
 | Data Cleanup page (issue chips, RFC/COR cleanup, customer propagation, job-number scan, bulk link) | ❌ Obsolete by design | These tools exist to reconcile the duplicated datapoints v2 eliminates. The "Awarded No Job #" view survives as a normal filter (jobs awaiting accounting's job #). |
 | Admin stage override | ⚠️ Keep, rarely needed | Still useful for correcting mistakes, but bad-stage data shouldn't occur in v2 |
-| Bid "phases" (50% Budget, 80% DD…) | ❓ Open Question Q4 | Likely replaced by re-bid-under-same-project |
+| Admin-only project rename (✏️ pencil) | ✅ | Confirmed (Q1) — many projects were misnamed in the original Excel; rename stays admin-only |
+| Bid "phases" (50% Budget, 80% DD…) | ✅ Replaced | Resolved (Q4): re-bid-under-same-project + `drawing_stage` text field per bid; `revisions[]` for post-submit customer tweaks |
 
 ---
 
@@ -376,7 +393,7 @@ Import from the current database ONLY records matching:
 - `bid_number` starts with `B26`, **OR**
 - any of `start_date` / `date_submitted (date_estimate_sent)` / `due_date (estimate_due_date)` falls in 2026
 
-Everything else stays in the old database (kept read-only for historical reference) — it is NOT deleted, just not migrated.
+Everything else stays in the old database (kept read-only for historical reference) — it is NOT deleted, just not migrated. **Future phase (per Q10):** pre-2026 history will eventually be imported in *summarized* form (e.g., per-customer/per-year win-loss totals) for long-term analytics, after v2 is stable.
 
 ### 6.2 Derivation rules (old → new)
 
@@ -385,7 +402,7 @@ Everything else stays in the old database (kept read-only for historical referen
 | Bid with `stage ∉ {active_co}` and no `co_number` | **Bid** row. Stage mapping: `opportunity→opportunity`, `active_bid→active_bid`, `follow_up→submitted`, `awarded→awarded`, `not_awarded→not_awarded`, `closed→closed` |
 | Bid with `stage='active_co'` or `co_number` set | **ChangeOrder** row, attached to the Job matching its job_number string (manual review queue for unmatched) |
 | Awarded bid | Bid row + minted **Job** (`winning_bid_id` set, `job_number` from old bid/project, `awarded_company_id` from customer string match) |
-| Known legacy jobs (AMY James Martin, William H Gray 30th St, + list TBD) | **Job** rows created manually with `winning_bid_id = null` |
+| Known legacy jobs (full list, per Q8): AMY James Martin, William H Gray 30th Street Station, Bridesburg Recreation Center, CHOP Fuel Oil, Dillworth Plaza, Friend's Center 3rd Floor Renovations, Temple Infusion, UPenn Vlest Shoji Hall Lab Fitout | **Job** rows created manually with `winning_bid_id = null`. Manual Job creation is a permanent feature — more legacy jobs can be added any time after launch |
 | Distinct customer strings across `customer`–`customer5` + `Contact.company` | **Company** rows after normalization (trim, case-fold, collapse punctuation). Fuzzy near-matches (e.g. "Torcon" vs "Torcon Inc.") go to a manual merge-review list — the IgnoredPair review UI pattern is reused for this |
 | `Bid.customer`–`customer5` values | **BID_CUSTOMER** join rows pointing at the deduped Company |
 | `customer_contacts` sub-docs | Contact links on the matching BID_CUSTOMER row |
@@ -423,21 +440,23 @@ A seed script generates a realistic test database exercising **every lifecycle p
 
 ---
 
-## 7. Open Questions for Team Review
+## 7. Resolved Decisions (answered by JM, June 12, 2026)
 
-| # | Question | Why it matters |
-|---|---|---|
-| Q1 | Can a Project be renamed after a Job exists under it? Admin-only? | Project name is now the single name shown everywhere, including on awarded work |
-| Q2 | Who can void a CO, and can a voided/not-approved CO be reopened? | Defines the CO state machine's escape hatches |
-| Q3 | **CO submission fields:** the workflow description didn't list what's entered at Submit CO. Assumed: estimate $ + date submitted. Confirm — and does a CO need jurisdiction/approved-by like a bid? | §2.3 / §3.2 are provisional on this |
-| Q4 | What replaces **phases** (50% Budget, 80% DD, CD Pricing, Final Bid)? Proposal: each pricing round is a separate Bid under the same Project (matching the "Bid 1 – Budget Only / Bid 2 – Awarded" hierarchy). Or do phases stay as a sub-record on Bid? | Affects Bid entity shape |
-| Q5 | Can estimate $ be edited after submission (e.g. value-engineering reprice), or does a reprice require a new bid/phase? | Field editability rules in §3.1 |
-| Q6 | Is `salesperson` on a CO the same person as the bid's salesperson, or a PM assigned per Job? Should Job have a `pm_id`? | Determines who gets CO follow-up notifications |
-| Q7 | Multiple awards on one bid — can two customers both award us (split award)? Assumed NO (one winner). | `awarded_company_id` is single-valued |
-| Q8 | Full list of legacy jobs to create manually (beyond AMY James Martin, William H Gray 30th St) | Migration §6.2 |
-| Q9 | Do opportunities get a bid # at creation, or only when they become active bids? Assumed: only at `active_bid` (B-numbers are for real bids). | Bid numbering rules |
-| Q10 | Historical pre-2026 data: keep old app read-only forever, or eventually import summarized history? | Long-term analytics depth |
+All questions from the initial draft are resolved and folded into §1–§6 above. Recorded here for the audit trail:
+
+| # | Question | Decision | Folded into |
+|---|---|---|---|
+| Q1 | Project rename after a Job exists? | **Yes, admin-only** — many projects were misnamed in the original Excel file | §5 feature inventory |
+| Q2 | Who can void a CO; reopenable? | **Anyone** can void; voided and not-approved COs **can be reopened** (back to `submitted_co` if previously submitted, else `active_co`) | §2.3 state machine |
+| Q3 | Submit CO fields | **CO estimate $, date submitted, approved by** (approver can be a PM, estimator, or salesperson). No jurisdiction on COs | §2.3, §3.2 |
+| Q4 | What replaces phases | **Each pricing round = separate Bid under the same Project**, with a free-text `drawing_stage` field per bid ("50% budget", "80% budget", "100% CD"…) | §1 ERD, §2.1, §3.1, §4.1 #8 |
+| Q5 | Edit estimate $ after submission | **Admin-only direct edit** for data-entry errors. Customer-requested changes that aren't a full re-bid use the **Add Revision** action (`revisions[]`: amount, date, notes) which updates the current amount | §1 ERD, §2.1, §3.1 |
+| Q6 | Who gets CO follow-up notifications | **The PM assigned to the Job** — `Job.pm_id` added | §1 ERD, §2.2, §2.3 |
+| Q7 | Split awards | **No — exactly one winner** per bid | §2.1 (as designed) |
+| Q8 | Legacy job list | AMY James Martin, William H Gray 30th Street Station, Bridesburg Recreation Center, CHOP Fuel Oil, Dillworth Plaza, Friend's Center 3rd Floor Renovations, Temple Infusion, UPenn Vlest Shoji Hall Lab Fitout. Manual Job creation is a **permanent feature** — more can be added after launch | §2.2, §6.2 |
+| Q9 | When is bid # assigned | **Only at `active_bid`** — opportunities have no bid # | §2.1 |
+| Q10 | Pre-2026 history | Old app/DB kept read-only; **summarized history imported eventually** in a future phase | §6.1 |
 
 ---
 
-*Once every open question is resolved and the team approves this document, implementation begins per §6.4 — fake data first, real data only after sign-off.*
+*All decisions resolved. Next step: full-team review and sign-off, then implementation begins per §6.4 — fake data first, real data only after sign-off.*
