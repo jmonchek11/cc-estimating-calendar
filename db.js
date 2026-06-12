@@ -1782,6 +1782,53 @@ async function importContacts(buffer) {
   return stats;
 }
 
+// ── Email helpers ─────────────────────────────────────────────────────────────
+
+async function getBidRaw(id) {
+  return Bid.findById(Number(id))
+    .select('estimator_id salesperson_id stage project_name bid_number estimate_due_date estimate_amount customer project_entity_name')
+    .lean();
+}
+
+async function getActiveUserEmails() {
+  const members = await TeamMember.find({
+    active: 1,
+    email: { $exists: true, $nin: [null, ''] },
+  }).select('_id name initials email').lean();
+  return members.map(m => ({ id: m._id, name: m.name, initials: m.initials, email: m.email }));
+}
+
+async function getDueReminders() {
+  const todayStr = new Date().toISOString().split('T')[0];
+  const bids = await Bid.find({
+    is_deleted: 0,
+    reminders: {
+      $elemMatch: {
+        remind_on: { $lte: todayStr },
+        dismissed: { $ne: 1 },
+        emailed:   { $ne: 1 },
+      },
+    },
+  }, { _id: 1, project_name: 1, bid_number: 1, reminders: 1, estimator_id: 1, salesperson_id: 1, estimate_due_date: 1, estimate_amount: 1, customer: 1 }).lean();
+
+  const result = [];
+  for (const bid of bids) {
+    for (const r of (bid.reminders || [])) {
+      if (r.remind_on <= todayStr && r.dismissed != 1 && r.emailed != 1) {
+        result.push({ bid, reminder: r });
+      }
+    }
+  }
+  return result;
+}
+
+async function markReminderEmailed(bidId, rid) {
+  await Bid.updateOne(
+    { _id: Number(bidId), 'reminders.rid': rid },
+    { $set: { 'reminders.$.emailed': 1 } }
+  );
+}
+
 module.exports = {
   getTeam, getAllTeam, createTeamMember, updateTeamMember,
   loginUser, getMember, setPassword, adminSetTempPassword, verifyUserPassword, getMyStats,
@@ -1804,4 +1851,5 @@ module.exports = {
   getBidContacts, addBidContact, removeBidContact,
   getContacts, getContact, createContact, updateContact, deleteContact, importContacts,
   seedTeamData,
+  getBidRaw, getActiveUserEmails, getDueReminders, markReminderEmailed,
 };

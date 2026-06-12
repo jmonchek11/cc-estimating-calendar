@@ -2378,6 +2378,21 @@ async function renderSettings(main) {
 
     ${isAdmin ? `
     <div class="card" style="max-width:640px;margin-top:20px">
+      <div class="section-title">📧 Email Notifications</div>
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">
+        Notifications send from <strong>libertyintsolutions@gmail.com</strong>.
+        Use <em>Test Email</em> to confirm the connection is working before relying on it,
+        and <em>Send Digest Now</em> to push the weekly digest on demand.
+      </p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-secondary btn-sm" onclick="sendTestEmail()">📨 Test Email</button>
+        <button class="btn btn-secondary btn-sm" onclick="sendDigestNow()">📊 Send Digest Now</button>
+      </div>
+      <div id="email-test-result" style="margin-top:10px;font-size:13px"></div>
+    </div>` : ''}
+
+    ${isAdmin ? `
+    <div class="card" style="max-width:640px;margin-top:20px">
       <div class="section-title">📥 Import Excel File</div>
       <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px">
         Upload the latest <strong>Estimating Calendar.xlsx</strong> to sync all bids into the database.
@@ -2478,6 +2493,28 @@ async function saveFollowupSettings() {
     const saved = document.getElementById('s-fu-saved');
     if (saved) { saved.style.display = 'inline'; setTimeout(() => { saved.style.display = 'none'; }, 2000); }
   } catch (e) { alert('Save failed: ' + e.message); }
+}
+
+async function sendTestEmail() {
+  const el = document.getElementById('email-test-result');
+  if (el) el.innerHTML = '<span style="color:#64748b">Sending…</span>';
+  try {
+    const res = await api.post('/api/admin/test-email', {});
+    if (el) el.innerHTML = `<span style="color:#16a34a">✓ ${res.message || 'Test email sent!'}</span>`;
+  } catch (e) {
+    if (el) el.innerHTML = `<span style="color:#dc2626">✗ ${e.message}</span>`;
+  }
+}
+
+async function sendDigestNow() {
+  const el = document.getElementById('email-test-result');
+  if (el) el.innerHTML = '<span style="color:#64748b">Sending digest…</span>';
+  try {
+    const res = await api.post('/api/admin/send-digest', {});
+    if (el) el.innerHTML = `<span style="color:#16a34a">✓ ${res.message || 'Digest sent!'}</span>`;
+  } catch (e) {
+    if (el) el.innerHTML = `<span style="color:#dc2626">✗ ${e.message}</span>`;
+  }
 }
 
 async function toggleTeamMember(id, currentActive) {

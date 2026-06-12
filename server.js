@@ -4,7 +4,9 @@ const session = require('express-session');
 const MongoStore = require('connect-mongo');
 const mongoose = require('mongoose');
 const path = require('path');
+const cron = require('node-cron');
 const db = require('./db');
+const mailer = require('./mailer');
 
 const app = express();
 app.use(express.json({ limit: '25mb' }));
@@ -163,6 +165,36 @@ app.post('/api/auth/verify-password', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Admin-only: send test email + trigger digest on demand
+app.post('/api/admin/test-email', async (req, res) => {
+  try {
+    const actor = await db.getMember(req.session.userId);
+    if (!actor?.is_admin) return res.status(403).json({ error: 'Admin only' });
+    await mailer.sendMail({
+      to: actor.email,
+      subject: '✅ LIS Estimating Calendar — Email Connected',
+      html: `<div style="font-family:sans-serif;padding:24px;max-width:500px">
+        <h2 style="color:#166534">✅ Email is working!</h2>
+        <p>The LIS Estimating Calendar email system is connected and ready.<br>
+        Notifications will be sent from <strong>${process.env.EMAIL_USER || 'libertyintsolutions@gmail.com'}</strong>.</p>
+        <p style="color:#64748b;font-size:13px">Sent to: ${actor.email}</p>
+      </div>`,
+    });
+    res.json({ ok: true, sent_to: actor.email });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/admin/send-digest', async (req, res) => {
+  try {
+    const actor = await db.getMember(req.session.userId);
+    if (!actor?.is_admin) return res.status(403).json({ error: 'Admin only' });
+    const [digest, users] = await Promise.all([db.getDigest(), db.getActiveUserEmails()]);
+    const { subject, html } = mailer.emailDigest(digest);
+    await mailer.sendMail({ to: users.map(u => u.email), subject, html });
+    res.json({ ok: true, sent_to: users.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── TEAM ──────────────────────────────────────────────────────────────────────
 app.get('/api/team', async (req, res) => {
   try { res.json(await db.getAllTeam()); }
@@ -247,8 +279,48 @@ app.get('/api/bids/:id', async (req, res) => {
 });
 
 app.put('/api/bids/:id', async (req, res) => {
-  try { res.json(await db.updateBid(req.params.id, req.body)); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  try {
+    const oldBid = await db.getBidRaw(req.params.id);
+    const updated = await db.updateBid(req.params.id, req.body);
+    res.json(updated);
+
+    // Fire email notifications asynchronously — never block the response
+    (async () => {
+      try {
+        const actor = req.session.userId ? await db.getMember(req.session.userId) : null;
+        const actorName = actor?.name || 'A team member';
+
+        // Assignment — estimator changed to a new person
+        const newEstId = req.body.estimator_id != null ? Number(req.body.estimator_id) : undefined;
+        if (newEstId && newEstId !== oldBid?.estimator_id && newEstId !== actor?.id) {
+          const recipient = await db.getMember(newEstId);
+          if (recipient?.email) {
+            const { subject, html } = mailer.emailAssigned(updated, recipient.name, actorName, 'estimator');
+            await mailer.sendMail({ to: recipient.email, subject, html });
+          }
+        }
+
+        // Assignment — salesperson changed to a new person
+        const newSpId = req.body.salesperson_id != null ? Number(req.body.salesperson_id) : undefined;
+        if (newSpId && newSpId !== oldBid?.salesperson_id && newSpId !== actor?.id) {
+          const recipient = await db.getMember(newSpId);
+          if (recipient?.email) {
+            const { subject, html } = mailer.emailAssigned(updated, recipient.name, actorName, 'salesperson');
+            await mailer.sendMail({ to: recipient.email, subject, html });
+          }
+        }
+
+        // Bid awarded — notify all active users with email
+        if (req.body.stage === 'awarded' && oldBid?.stage !== 'awarded') {
+          const users = await db.getActiveUserEmails();
+          const { subject, html } = mailer.emailAwarded(updated, actorName);
+          await mailer.sendMail({ to: users.map(u => u.email), subject, html });
+        }
+      } catch (e) {
+        console.error('[email trigger PUT /bids]', e.message);
+      }
+    })();
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 app.delete('/api/bids/:id', async (req, res) => {
@@ -353,8 +425,40 @@ app.get('/api/bids/:id/followups', async (req, res) => {
 });
 
 app.post('/api/bids/:id/followups', async (req, res) => {
-  try { res.json(await db.logFollowup(req.params.id, req.body)); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  try {
+    const result = await db.logFollowup(req.params.id, req.body);
+    res.json(result);
+
+    (async () => {
+      try {
+        const bid = await db.getBidRaw(req.params.id);
+        if (!bid) return;
+        const actor = req.session.userId ? await db.getMember(req.session.userId) : null;
+        const actorName = actor?.name || 'A team member';
+
+        // Collect estimator + salesperson emails (skip the person who logged it)
+        const recipientIds = [bid.estimator_id, bid.salesperson_id]
+          .filter(id => id && id !== actor?.id);
+        const emails = [];
+        for (const id of [...new Set(recipientIds)]) {
+          const m = await db.getMember(id);
+          if (m?.email) emails.push(m.email);
+        }
+        if (!emails.length) return;
+
+        const fullBid = await db.getBid(req.params.id);
+        const { subject, html } = mailer.emailFollowup(
+          fullBid,
+          req.body.notes || req.body.note || '',
+          req.body.next_followup_date || null,
+          actorName
+        );
+        await mailer.sendMail({ to: emails, subject, html });
+      } catch (e) {
+        console.error('[email trigger POST /followups]', e.message);
+      }
+    })();
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 // ── ESTIMATOR PROFILE ─────────────────────────────────────────────────────────
@@ -606,3 +710,47 @@ mongoose.connect(MONGODB_URI)
     console.error('MongoDB connection failed:', err.message);
     process.exit(1);
   });
+
+// ── Cron jobs (Eastern time) ──────────────────────────────────────────────────
+
+// Daily 7 AM ET — send reminder emails for due reminders
+cron.schedule('0 7 * * *', async () => {
+  console.log('[cron] running daily reminder check');
+  try {
+    const due = await db.getDueReminders();
+    if (!due.length) return console.log('[cron] no reminders due today');
+    const team = await db.getAllTeam();
+    const memberMap = Object.fromEntries(team.map(m => [m.id, m]));
+
+    for (const { bid, reminder } of due) {
+      const recipientIds = [bid.estimator_id, bid.salesperson_id].filter(Boolean);
+      const emails = [...new Set(recipientIds)]
+        .map(id => memberMap[id])
+        .filter(m => m?.email)
+        .map(m => ({ email: m.email, name: m.name }));
+
+      for (const r of emails) {
+        const { subject, html } = mailer.emailReminder(bid, reminder, r.name);
+        await mailer.sendMail({ to: r.email, subject, html });
+      }
+      await db.markReminderEmailed(bid._id, reminder.rid);
+    }
+    console.log(`[cron] sent reminder emails for ${due.length} reminder(s)`);
+  } catch (e) {
+    console.error('[cron] reminder error:', e.message);
+  }
+}, { timezone: 'America/New_York' });
+
+// Monday 6 AM ET — weekly digest to all users with email on file
+cron.schedule('0 6 * * 1', async () => {
+  console.log('[cron] running weekly digest');
+  try {
+    const [digest, users] = await Promise.all([db.getDigest(), db.getActiveUserEmails()]);
+    if (!users.length) return console.log('[cron] no users with email — skipping digest');
+    const { subject, html } = mailer.emailDigest(digest);
+    await mailer.sendMail({ to: users.map(u => u.email), subject, html });
+    console.log(`[cron] weekly digest sent to ${users.length} user(s)`);
+  } catch (e) {
+    console.error('[cron] digest error:', e.message);
+  }
+}, { timezone: 'America/New_York' });
