@@ -36,6 +36,10 @@ app.use((req, res, next) => {
   next();
 });
 
+// ── V2 PREVIEW (isolated test database — see docs/DATA_MODEL_SPEC.md) ─────────
+app.use(require('./v2/routes'));
+app.get('/v2', (req, res) => res.sendFile(path.join(__dirname, 'public', 'v2.html')));
+
 // ── TV Kiosk ──────────────────────────────────────────────────────────────────
 // Support both /tv?token=xxx  AND  /tv/xxx  (path style — friendlier for Fully Kiosk)
 app.get('/tv',       (req, res) => res.sendFile(path.join(__dirname, 'public', 'tv.html')));
