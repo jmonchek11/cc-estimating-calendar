@@ -4396,11 +4396,12 @@ async function renderContacts(main) {
   // Client-side filter
   let contacts = _contactsCache;
   if (search) {
+    const digits = search.replace(/\D/g, '');
     contacts = contacts.filter(c =>
       (c.full_name  || '').toLowerCase().includes(search) ||
       (c.company    || '').toLowerCase().includes(search) ||
       (c.email      || '').toLowerCase().includes(search) ||
-      (c.phone      || '').includes(search.replace(/\D/g,''))
+      (digits && (c.phone || '').includes(digits))
     );
   }
   if (companyVal) contacts = contacts.filter(c => c.company === companyVal);
