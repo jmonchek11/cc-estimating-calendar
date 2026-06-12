@@ -139,6 +139,9 @@ function getBidIssues(bid) {
   if (!bid.salesperson_id)
     issues.push({ key: 'no_salesperson', label: 'No Salesperson',   color: '#059669' });
 
+  if (bid.stage === 'awarded' && !bid.job_number)
+    issues.push({ key: 'awarded_no_job', label: 'Awarded No Job #', color: '#0891b2' });
+
   if (isActive) {
     if (!bid.estimate_due_date)
       issues.push({ key: 'no_due_date',  label: 'No Due Date',      color: '#d97706' });
@@ -2090,6 +2093,7 @@ async function renderCleanup(main) {
 
   // Issue chip definitions (only show chips that have data)
   const CHIP_DEFS = [
+    { key: 'awarded_no_job', label: 'Awarded No Job #', color: '#0891b2' },
     { key: 'no_price',       label: 'No Price',         color: '#dc2626' },
     { key: 'no_customer',    label: 'No Customer',      color: '#9333ea' },
     { key: 'no_estimator',   label: 'No Estimator',     color: '#2563eb' },
