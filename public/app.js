@@ -2495,6 +2495,17 @@ async function saveFollowupSettings() {
   } catch (e) { alert('Save failed: ' + e.message); }
 }
 
+function adminOverrideStage() {
+  const stageSelect   = document.getElementById('f-stage');
+  const stageReadonly = document.getElementById('f-stage-readonly');
+  const overrideLink  = document.getElementById('f-stage-override-link');
+  if (!stageSelect) return;
+  stageSelect.style.display   = '';
+  if (stageReadonly)  stageReadonly.style.display  = 'none';
+  if (overrideLink)   overrideLink.style.display   = 'none';
+  stageSelect.focus();
+}
+
 async function sendTestEmail() {
   const el = document.getElementById('email-test-result');
   if (el) el.innerHTML = '<span style="color:#64748b">Sending…</span>';
@@ -4939,9 +4950,11 @@ function openBidModal(bidId = null, defaultStage = 'opportunity', highlightIssue
   // Stage field: editable for new bids, read-only for existing
   const stageSelect   = document.getElementById('f-stage');
   const stageReadonly = document.getElementById('f-stage-readonly');
+  const overrideLinkEl = document.getElementById('f-stage-override-link');
   if (!bidId) {
-    if (stageSelect)   stageSelect.style.display   = '';
-    if (stageReadonly) stageReadonly.style.display  = 'none';
+    if (stageSelect)    stageSelect.style.display    = '';
+    if (stageReadonly)  stageReadonly.style.display   = 'none';
+    if (overrideLinkEl) overrideLinkEl.style.display  = 'none';
   }
 
   if (bidId) {
@@ -4972,12 +4985,14 @@ function openBidModal(bidId = null, defaultStage = 'opportunity', highlightIssue
       document.getElementById('f-estimate_approved_by').value = b.estimate_approved_by || '';
       document.getElementById('f-bid_result').value = b.bid_result || '';
       document.getElementById('f-next_followup_date').value = b.next_followup_date || '';
-      // Stage: show as read-only for existing bids
+      // Stage: show as read-only for existing bids; admins get an override link
       if (stageSelect)   stageSelect.style.display   = 'none';
       if (stageReadonly) {
         stageReadonly.style.display = '';
         stageReadonly.textContent   = stageName(b.stage);
       }
+      const overrideLink = document.getElementById('f-stage-override-link');
+      if (overrideLink) overrideLink.style.display = State.currentUser?.is_admin ? '' : 'none';
       document.getElementById('f-notes').value = b.notes || '';
       document.getElementById('f-award_date').value = b.award_date || '';
       document.getElementById('f-awarded_contractor').value = b.awarded_contractor || '';
