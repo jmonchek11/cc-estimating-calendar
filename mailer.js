@@ -247,16 +247,16 @@ function emailDigest(digest) {
         ${dueDateRows(digest.upcomingDueDates)}
       </div>
 
-      <div class="section">
-        <div class="section-title">⚠️ Overdue Follow-ups</div>
-        ${overdueRows(digest.overdueFollowups)}
-      </div>
-
       ${(digest.newThisWeek || []).length ? `
       <div class="section">
         <div class="section-title">🆕 New Bids This Week (${digest.newThisWeek.length})</div>
         ${bidListRows(digest.newThisWeek)}
       </div>` : ''}
+
+      <div class="section">
+        <div class="section-title">⚠️ Overdue Follow-ups</div>
+        ${overdueRows(digest.overdueFollowups)}
+      </div>
 
       <a href="${APP_URL}" class="btn">Open App</a>
     `),

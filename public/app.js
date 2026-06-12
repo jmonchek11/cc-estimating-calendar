@@ -1740,11 +1740,6 @@ async function renderDigest(main) {
       </div>` : ''}
 
       <div class="digest-section">
-        <div class="digest-section-title">⚠️ Overdue Follow-ups (${(d.overdueFollowups || []).length})</div>
-        ${bidList(d.overdueFollowups)}
-      </div>
-
-      <div class="digest-section">
         <div class="digest-section-title">📅 Upcoming Due Dates — Next 7 Days</div>
         ${bidList(d.upcomingDueDates, true)}
       </div>
@@ -1777,6 +1772,11 @@ async function renderDigest(main) {
           <thead><tr><th>Salesperson</th><th style="text-align:center">Active</th><th style="text-align:center">Overdue F/U</th></tr></thead>
           <tbody>${salespersonRows}</tbody>
         </table>
+      </div>
+
+      <div class="digest-section">
+        <div class="digest-section-title">⚠️ Overdue Follow-ups (${(d.overdueFollowups || []).length})</div>
+        ${bidList(d.overdueFollowups)}
       </div>
     </div>`;
 }
