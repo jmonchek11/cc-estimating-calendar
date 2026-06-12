@@ -5,65 +5,81 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>v2 Preview — LIS Estimating</title>
 <link rel="icon" href="/favicon.ico">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/style.css">
 <style>
-  :root {
-    --bg: #f1f5f9; --card: #fff; --border: #e2e8f0; --text: #0f172a;
-    --muted: #64748b; --primary: #2563eb; --success: #16a34a; --danger: #dc2626;
-    --amber: #d97706; --orange: #f97316;
+  /* Page scaffolding (no sidebar in the preview — single column like a report) */
+  body { padding: 0; margin: 0; }
+  .v2-banner {
+    background: #1e293b; padding: 12px 24px;
+    display: flex; align-items: center; gap: 12px;
   }
-  * { box-sizing: border-box; margin: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); }
-  .topbar { background: #1e293b; color: #fff; padding: 14px 28px; display: flex; align-items: center; gap: 14px; }
-  .topbar h1 { font-size: 16px; font-weight: 800; }
-  .topbar .tag { background: #f59e0b; color: #1e293b; font-size: 11px; font-weight: 800; padding: 2px 10px; border-radius: 10px; letter-spacing: .5px; }
-  .topbar .sub { color: #94a3b8; font-size: 12px; margin-left: auto; }
-  .wrap { max-width: 980px; margin: 24px auto; padding: 0 16px; }
-  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 14px; overflow: hidden; }
-  .proj-head { padding: 14px 18px; display: flex; align-items: center; gap: 12px; cursor: pointer; }
-  .proj-head:hover { background: #f8fafc; }
-  .proj-name { font-weight: 800; font-size: 15px; flex: 1; min-width: 0; }
-  .proj-meta { font-size: 12px; color: var(--muted); }
-  .pill { font-size: 10px; font-weight: 800; padding: 2px 9px; border-radius: 10px; letter-spacing: .4px; white-space: nowrap; }
-  .pill-job { background: #dcfce7; color: #166534; }
-  .pill-pending { background: #fef3c7; color: #92400e; }
-  .pill-legacy { background: #ede9fe; color: #5b21b6; }
-  .pill-active { background: #dbeafe; color: #1e40af; }
-  .hier { display: none; border-top: 1px solid var(--border); padding: 14px 18px 18px; }
-  .hier.open { display: block; }
-  .node { border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; margin-top: 10px; }
-  .node-awarded { border-left: 4px solid var(--success); background: #f0fdf4; }
-  .node-job { border-left: 4px solid #0891b2; background: #ecfeff; margin-left: 26px; }
-  .node-co { border-left: 3px solid var(--orange); background: #fffbf5; margin-left: 52px; padding: 8px 12px; }
-  .node-title { font-weight: 700; font-size: 13px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  .node-sub { font-size: 12px; color: var(--muted); margin-top: 3px; line-height: 1.5; }
-  .badge { font-size: 10px; font-weight: 800; padding: 1px 8px; border-radius: 9px; }
-  .st-awarded { background: var(--success); color: #fff; }
-  .st-submitted { background: #2563eb; color: #fff; }
-  .st-active_bid { background: #f59e0b; color: #fff; }
-  .st-opportunity { background: #94a3b8; color: #fff; }
-  .st-not_awarded { background: #fee2e2; color: #991b1b; }
-  .st-closed { background: #e2e8f0; color: #475569; }
-  .st-active_co { background: #f59e0b; color: #fff; }
-  .st-submitted_co { background: #2563eb; color: #fff; }
-  .st-approved { background: var(--success); color: #fff; }
-  .st-not_approved { background: #fee2e2; color: #991b1b; }
-  .st-voided { background: #e2e8f0; color: #475569; }
+  .v2-banner .ttl { color: #fff; font-size: 15px; font-weight: 700; }
+  .v2-banner .tag { background: #f59e0b; color: #1e293b; font-size: 10px; font-weight: 800; padding: 2px 10px; border-radius: 10px; letter-spacing: .5px; }
+  .v2-banner .sub { color: #94a3b8; font-size: 12px; margin-left: auto; }
+  .v2-banner a { color: #7dd3fc; text-decoration: none; }
+  .v2-wrap { max-width: 920px; margin: 24px auto; padding: 0 20px; }
+
+  /* Hierarchy nesting — matches the v1 project panel look */
+  .v2-hier { display: none; border-top: 1px solid var(--border); padding: 14px 20px 18px; background: #fcfdfe; }
+  .v2-hier.open { display: block; }
+  .v2-bid {
+    display: flex; align-items: flex-start; gap: 10px;
+    border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--card-bg); padding: 12px 14px; margin-top: 10px;
+    box-shadow: var(--shadow);
+  }
+  .v2-bid.awarded { border-left: 3px solid #16a34a; background: #f0fdf4; }
+  .v2-job {
+    display: flex; align-items: flex-start; gap: 10px;
+    border: 1px solid var(--border); border-left: 3px solid #0891b2;
+    border-radius: var(--radius); background: #f0fdff; padding: 10px 14px;
+    margin: 8px 0 0 28px;
+  }
+  .v2-co {
+    display: flex; align-items: flex-start; gap: 8px;
+    padding: 8px 12px 8px 14px; margin-left: 56px;
+    border-left: 2px solid var(--border);
+  }
+  .v2-co:last-child { border-radius: 0 0 6px 0; }
+  .v2-fu {
+    border-top: 1px dashed var(--border); margin-top: 8px; padding-top: 6px;
+    font-size: 12px; color: var(--text-muted);
+  }
+  .v2-fu-row { padding: 2px 0; }
+  .awarded-pill {
+    display: inline-block; background: #16a34a; color: #fff;
+    font-size: 10px; font-weight: 700; padding: 1px 8px; border-radius: 10px;
+  }
+  .pending-pill {
+    display: inline-block; background: #fef3c7; color: #92400e;
+    font-size: 10px; font-weight: 700; padding: 1px 8px; border-radius: 10px;
+  }
+  .legacy-pill {
+    display: inline-block; background: #ede9fe; color: #5b21b6;
+    font-size: 10px; font-weight: 700; padding: 1px 8px; border-radius: 10px;
+  }
   .amount { font-weight: 700; color: #166534; }
-  .overdue { color: var(--danger); font-weight: 700; }
-  .ini { display: inline-block; background: #e0e7ff; color: #3730a3; font-size: 10px; font-weight: 800; padding: 2px 6px; border-radius: 8px; }
-  .fu { border-top: 1px dashed var(--border); margin-top: 8px; padding-top: 8px; font-size: 12px; color: var(--muted); }
-  .fu-row { padding: 3px 0; }
-  .err { background: #fee2e2; color: #991b1b; padding: 16px 20px; border-radius: 10px; font-size: 14px; }
-  .loading { color: var(--muted); padding: 30px; text-align: center; }
+  .overdue-txt { color: #dc2626; font-weight: 700; }
+  .err-card { background: #fee2e2; color: #991b1b; padding: 16px 20px; border-radius: var(--radius); font-size: 14px; }
 </style>
 </head>
 <body>
-  <div class="topbar">
-    <h1>🏗️ LIS Estimating Calendar</h1>
+  <div class="v2-banner">
+    <span class="ttl">🏗️ LIS Estimating Calendar</span>
     <span class="tag">V2 PREVIEW</span>
-    <span class="sub">Test data only — estimating_v2_test · <a href="/" style="color:#7dd3fc">back to live app</a></span>
+    <span class="sub">Test data only · <a href="/">← back to live app</a></span>
   </div>
-  <div class="wrap" id="main"><div class="loading">Loading…</div></div>
+  <div class="v2-wrap">
+    <div class="page-header">
+      <div>
+        <div class="page-title">🏗️ Projects — New Data Model</div>
+        <div class="page-subtitle">Project → Bids → Job → Change Orders · fake dataset for review</div>
+      </div>
+    </div>
+    <div class="card" style="padding:0" id="main"><div style="padding:30px;text-align:center;color:var(--text-muted)">Loading…</div></div>
+  </div>
 
 <script>
 const fmt$ = n => n == null ? '' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
@@ -71,49 +87,61 @@ const fmtD = d => { if (!d) return ''; const [y,m,dd] = d.split('-'); return `${
 const esc = s => (s ?? '').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const today = new Date().toISOString().split('T')[0];
 const STAGE = {
-  opportunity:'Opportunity', active_bid:'Active Bid', submitted:'Submitted', awarded:'AWARDED',
+  opportunity:'Opportunity', active_bid:'Active Bid', submitted:'Submitted', awarded:'Awarded',
   not_awarded:'Not Awarded', closed:'Closed',
   active_co:'Active CO', submitted_co:'Submitted CO', approved:'Approved', not_approved:'Not Approved', voided:'Voided',
 };
+const STAGE_COLOR = {
+  opportunity:'#64748b', active_bid:'#d97706', submitted:'#2563eb', awarded:'#16a34a',
+  not_awarded:'#dc2626', closed:'#64748b',
+  active_co:'#d97706', submitted_co:'#2563eb', approved:'#16a34a', not_approved:'#dc2626', voided:'#64748b',
+};
 const METHOD = { phone:'📞 phone', email:'✉️ email', in_person:'🤝 in person', other:'other' };
+
+const stageBadge = s => `<span class="badge badge-stage" style="color:${STAGE_COLOR[s]};font-weight:700">${STAGE[s] || s}</span>`;
+const ini = m => m ? `<span class="initials-pill" style="transform:scale(.85);transform-origin:center" title="${esc(m.name || '')}">${esc(m.initials)}</span>` : '';
 
 async function load() {
   const main = document.getElementById('main');
   let projects;
   try {
     const r = await fetch('/api/v2/projects');
-    if (r.status === 401) { main.innerHTML = '<div class="err">Not logged in. <a href="/">Log in on the main app</a> first, then come back to /v2.html.</div>'; return; }
+    if (r.status === 401) { main.innerHTML = '<div class="err-card">Not logged in. <a href="/">Log in on the main app</a> first, then come back to /v2.</div>'; return; }
     projects = await r.json();
-  } catch (e) { main.innerHTML = `<div class="err">${esc(e.message)}</div>`; return; }
+  } catch (e) { main.innerHTML = `<div class="err-card">${esc(e.message)}</div>`; return; }
 
   main.innerHTML = projects.map(p => `
-    <div class="card">
-      <div class="proj-head" onclick="toggle(${p.id})">
+    <div>
+      <div class="proj-row" onclick="toggle(${p.id})">
         <div style="flex:1;min-width:0">
           <div class="proj-name">${esc(p.name)}</div>
           <div class="proj-meta">
-            ${p.bid_count} bid${p.bid_count!==1?'s':''} · ${p.job_count} job${p.job_count!==1?'s':''} · ${p.co_count} CO${p.co_count!==1?'s':''}
-            ${p.pipeline_value ? ` · pipeline <span class="amount">${fmt$(p.pipeline_value)}</span>` : ''}
-            ${p.won_value ? ` · won <span class="amount">${fmt$(p.won_value)}</span>` : ''}
-            ${p.customers.length ? ` · ${esc(p.customers.join(', '))}` : ''}
+            ${p.bid_count} bid${p.bid_count!==1?'s':''}
+            <span class="proj-meta-sep">·</span> ${p.job_count} job${p.job_count!==1?'s':''}
+            <span class="proj-meta-sep">·</span> ${p.co_count} CO${p.co_count!==1?'s':''}
+            ${p.pipeline_value ? `<span class="proj-meta-sep">·</span> pipeline <span class="amount">${fmt$(p.pipeline_value)}</span>` : ''}
+            ${p.won_value ? `<span class="proj-meta-sep">·</span> won <span class="amount">${fmt$(p.won_value)}</span>` : ''}
+            ${p.customers.length ? `<span class="proj-meta-sep">·</span> <span class="proj-meta-customers">${esc(p.customers.join(', '))}</span>` : ''}
           </div>
         </div>
-        ${p.job_numbers.map(j => `<span class="pill pill-job">JOB ${esc(j)}</span>`).join('')}
-        ${p.job_number_pending ? '<span class="pill pill-pending">JOB # PENDING</span>' : ''}
-        ${p.is_legacy ? '<span class="pill pill-legacy">LEGACY</span>' : ''}
-        ${p.active_count ? `<span class="pill pill-active">${p.active_count} ACTIVE</span>` : ''}
+        <div style="display:flex;gap:6px;align-items:center;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end">
+          ${p.job_numbers.map(j => `<span class="proj-active-badge">Job ${esc(j)}</span>`).join('')}
+          ${p.job_number_pending ? '<span class="pending-pill">JOB # PENDING</span>' : ''}
+          ${p.is_legacy ? '<span class="legacy-pill">LEGACY</span>' : ''}
+          ${p.active_count ? `<span class="badge badge-bid">${p.active_count} active</span>` : ''}
+        </div>
       </div>
-      <div class="hier" id="hier-${p.id}"></div>
+      <div class="v2-hier" id="hier-${p.id}"></div>
     </div>`).join('');
 }
 
 async function toggle(id) {
   const el = document.getElementById('hier-' + id);
   if (el.classList.contains('open')) { el.classList.remove('open'); return; }
-  document.querySelectorAll('.hier.open').forEach(h => h.classList.remove('open'));
+  document.querySelectorAll('.v2-hier.open').forEach(h => h.classList.remove('open'));
   el.classList.add('open');
   if (el.dataset.loaded) return;
-  el.innerHTML = '<div class="loading">Loading…</div>';
+  el.innerHTML = '<div style="padding:16px;color:var(--text-muted)">Loading…</div>';
   const d = await (await fetch('/api/v2/projects/' + id)).json();
   el.dataset.loaded = '1';
   el.innerHTML = renderHierarchy(d);
@@ -123,61 +151,60 @@ function renderHierarchy(d) {
   let html = '';
   const jobByWinningBid = {};
   d.jobs.forEach(j => { if (j.winning_bid_id) jobByWinningBid[j.winning_bid_id] = j; });
-
   for (const b of d.bids) {
     html += bidNode(b);
     const job = jobByWinningBid[b.id];
     if (job) html += jobNode(job);
   }
-  // Legacy / unattached jobs (no winning bid in system)
-  for (const j of d.jobs.filter(j => !j.winning_bid_id)) {
-    html += jobNode(j, true);
-  }
-  return html || '<div class="node-sub">Nothing here yet.</div>';
+  for (const j of d.jobs.filter(j => !j.winning_bid_id)) html += jobNode(j, true);
+  return html || '<div style="padding:10px;color:var(--text-muted);font-size:13px">Nothing here yet.</div>';
 }
 
 function bidNode(b) {
   const isAwarded = b.stage === 'awarded';
-  const fuOverdue = b.next_followup_date && b.next_followup_date < today;
   return `
-    <div class="node ${isAwarded ? 'node-awarded' : ''}">
-      <div class="node-title">
-        ${isAwarded ? '✓' : ''} ${b.bid_number ? esc(b.bid_number) : '<em style="color:var(--muted)">no bid #</em>'}
-        <span class="badge st-${b.stage}">${STAGE[b.stage]}</span>
-        ${b.drawing_stage ? `<span class="badge" style="background:#ede9fe;color:#5b21b6">${esc(b.drawing_stage)}</span>` : ''}
-        ${b.estimate_amount ? `<span class="amount">${fmt$(b.estimate_amount)}</span>` : ''}
-        ${b.revisions.length ? `<span class="badge" style="background:#fef3c7;color:#92400e">REV ${b.revisions.length}</span>` : ''}
+    <div class="v2-bid ${isAwarded ? 'awarded' : ''}">
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:${isAwarded?'800':'600'};font-size:13px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          ${isAwarded ? '✓' : ''} ${b.bid_number ? esc(b.bid_number) : '<em style="color:var(--text-muted);font-weight:400">no bid #</em>'}
+          ${isAwarded ? '<span class="awarded-pill">AWARDED</span>' : stageBadge(b.stage)}
+          ${b.drawing_stage ? `<span class="badge" style="background:#ede9fe;color:#5b21b6">${esc(b.drawing_stage)}</span>` : ''}
+          ${b.estimate_amount ? `<span class="amount">${fmt$(b.estimate_amount)}</span>` : ''}
+          ${b.revisions.length ? `<span class="badge" style="background:#fef3c7;color:#92400e">Rev ${b.revisions.length}</span>` : ''}
+        </div>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:4px;line-height:1.6">
+          ${b.customers.length ? `Bid to: <strong style="color:var(--text)">${esc(b.customers.map(c=>c.name).join(', '))}</strong>` : ''}
+          ${b.awarded_company ? ` · Won by <strong style="color:#16a34a">${esc(b.awarded_company.name)}</strong> ${fmtD(b.award_date)}` : ''}
+          <br>
+          ${b.estimator ? `Est: ${ini(b.estimator)}` : ''}
+          ${b.sub_estimators.map(s => `${ini(s)}<span style="font-size:10px">${esc(s.scope)}</span>`).join(' ')}
+          ${b.salesperson ? ` Sales: ${ini(b.salesperson)}` : ''}
+          ${b.due_date ? ` · Due ${fmtD(b.due_date)}` : ''}
+          ${b.date_submitted ? ` · Submitted ${fmtD(b.date_submitted)} (${esc(b.approved_by)}, Local ${esc(b.jurisdiction)})` : ''}
+          ${b.next_followup_date ? ` · Next F/U: <span class="${b.next_followup_date < today ? 'overdue-txt' : ''}">${fmtD(b.next_followup_date)}${b.next_followup_date < today ? ' — OVERDUE' : ''}</span>` : ''}
+          ${b.close_reason ? `<br>Closed ${fmtD(b.closed_date)} by ${esc(b.closed_approved_by)} — ${esc(b.close_reason)}` : ''}
+          ${b.not_awarded_notes ? `<br><span style="color:#dc2626">Not awarded ${fmtD(b.date_not_awarded)}:</span> ${esc(b.not_awarded_notes)}` : ''}
+          ${b.notes ? `<br>📝 ${esc(b.notes)}` : ''}
+        </div>
+        ${b.followups.length ? `<div class="v2-fu">${b.followups.map(fuRow).join('')}</div>` : ''}
       </div>
-      <div class="node-sub">
-        ${b.customers.length ? `Bid to: <strong>${esc(b.customers.map(c=>c.name).join(', '))}</strong>` : ''}
-        ${b.awarded_company ? ` · Won by <strong style="color:var(--success)">${esc(b.awarded_company.name)}</strong> on ${fmtD(b.award_date)}` : ''}
-        <br>
-        ${b.estimator ? `Est: <span class="ini">${esc(b.estimator.initials)}</span>` : ''}
-        ${b.sub_estimators.map(s => `<span class="ini" title="${esc(s.scope)}">${esc(s.initials || '?')}·${esc(s.scope)}</span>`).join(' ')}
-        ${b.salesperson ? ` Sales: <span class="ini">${esc(b.salesperson.initials)}</span>` : ''}
-        ${b.due_date ? ` · Due ${fmtD(b.due_date)}` : ''}
-        ${b.date_submitted ? ` · Submitted ${fmtD(b.date_submitted)} (apprvd: ${esc(b.approved_by)}, Local ${esc(b.jurisdiction)})` : ''}
-        ${b.next_followup_date ? ` · Next F/U: <span class="${b.next_followup_date < today ? 'overdue' : ''}">${fmtD(b.next_followup_date)}${b.next_followup_date < today ? ' OVERDUE' : ''}</span>` : ''}
-        ${b.close_reason ? `<br>Closed ${fmtD(b.closed_date)} by ${esc(b.closed_approved_by)} — ${esc(b.close_reason)}` : ''}
-        ${b.not_awarded_notes ? `<br><span style="color:var(--danger)">Not awarded ${fmtD(b.date_not_awarded)}:</span> ${esc(b.not_awarded_notes)}` : ''}
-        ${b.notes ? `<br>📝 ${esc(b.notes)}` : ''}
-      </div>
-      ${b.followups.length ? `<div class="fu">${b.followups.map(fuRow).join('')}</div>` : ''}
     </div>`;
 }
 
 function jobNode(j, legacy = false) {
   return `
-    <div class="node node-job">
-      <div class="node-title">
-        🏭 ${j.job_number ? `Job <strong>${esc(j.job_number)}</strong>` : '<span class="pill pill-pending">JOB # PENDING — accounting</span>'}
-        ${legacy ? '<span class="pill pill-legacy">LEGACY — bid pre-dates system</span>' : ''}
-      </div>
-      <div class="node-sub">
-        ${j.awarded_company ? `Awarded by <strong>${esc(j.awarded_company.name)}</strong>` : ''}
-        ${j.award_date ? ` on ${fmtD(j.award_date)}` : ''}
-        ${j.pm ? ` · PM: <span class="ini">${esc(j.pm.initials)}</span> ${esc(j.pm.name)}` : ''}
-        · ${j.change_orders.length} change order${j.change_orders.length!==1?'s':''}
+    <div class="v2-job">
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:700;font-size:13px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          🏭 ${j.job_number ? `Job <span style="color:#0e7490">${esc(j.job_number)}</span>` : '<span class="pending-pill">JOB # PENDING — accounting</span>'}
+          ${legacy ? '<span class="legacy-pill">LEGACY — bid pre-dates system</span>' : ''}
+        </div>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:3px">
+          ${j.awarded_company ? `Awarded by <strong style="color:var(--text)">${esc(j.awarded_company.name)}</strong>` : ''}
+          ${j.award_date ? ` ${fmtD(j.award_date)}` : ''}
+          ${j.pm ? ` · PM: ${ini(j.pm)} ${esc(j.pm.name)}` : ''}
+          · ${j.change_orders.length} change order${j.change_orders.length!==1?'s':''}
+        </div>
       </div>
     </div>
     ${j.change_orders.map(coNode).join('')}`;
@@ -186,34 +213,37 @@ function jobNode(j, legacy = false) {
 function coNode(co) {
   const fuOverdue = co.next_followup_date && co.next_followup_date < today;
   return `
-    <div class="node node-co">
-      <div class="node-title">
-        <span style="color:var(--orange)">${esc(co.co_number)}</span> ${esc(co.name)}
-        <span class="badge st-${co.stage}">${STAGE[co.stage]}</span>
-        ${co.estimate_amount ? `<span class="amount">${fmt$(co.estimate_amount)}</span>` : ''}
+    <div class="v2-co">
+      <span class="badge badge-co" style="flex-shrink:0">CO</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:600;font-size:13px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span style="color:#d97706">${esc(co.co_number)}</span> ${esc(co.name)}
+          ${stageBadge(co.stage)}
+          ${co.estimate_amount ? `<span class="amount">${fmt$(co.estimate_amount)}</span>` : ''}
+        </div>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:2px">
+          ${co.estimator ? `Est: ${ini(co.estimator)}` : ''}
+          ${co.due_date ? ` · Due ${fmtD(co.due_date)}` : ''}
+          ${co.date_submitted ? ` · Submitted ${fmtD(co.date_submitted)} (${esc(co.approved_by)})` : ''}
+          ${co.approval_date ? ` · <span style="color:#16a34a;font-weight:700">Approved ${fmtD(co.approval_date)}</span>` : ''}
+          ${co.next_followup_date ? ` · Next F/U: <span class="${fuOverdue ? 'overdue-txt' : ''}">${fmtD(co.next_followup_date)}${fuOverdue ? ' — OVERDUE' : ''}</span>` : ''}
+          ${co.void_reason ? ` · Voided: ${esc(co.void_reason)}` : ''}
+          ${co.not_approved_notes ? ` · ${esc(co.not_approved_notes)}` : ''}
+        </div>
+        ${co.followups.length ? `<div class="v2-fu">${co.followups.map(fuRow).join('')}</div>` : ''}
       </div>
-      <div class="node-sub">
-        ${co.estimator ? `Est: <span class="ini">${esc(co.estimator.initials)}</span>` : ''}
-        ${co.due_date ? ` · Due ${fmtD(co.due_date)}` : ''}
-        ${co.date_submitted ? ` · Submitted ${fmtD(co.date_submitted)} (apprvd: ${esc(co.approved_by)})` : ''}
-        ${co.approval_date ? ` · <span style="color:var(--success);font-weight:700">Approved ${fmtD(co.approval_date)}</span>` : ''}
-        ${co.next_followup_date ? ` · Next F/U: <span class="${fuOverdue ? 'overdue' : ''}">${fmtD(co.next_followup_date)}${fuOverdue ? ' OVERDUE' : ''}</span>` : ''}
-        ${co.void_reason ? ` · Voided: ${esc(co.void_reason)}` : ''}
-        ${co.not_approved_notes ? ` · ${esc(co.not_approved_notes)}` : ''}
-      </div>
-      ${co.followups.length ? `<div class="fu">${co.followups.map(fuRow).join('')}</div>` : ''}
     </div>`;
 }
 
 function fuRow(f) {
-  return `<div class="fu-row">
-    ${fmtD(f.followup_date)} — <span class="ini">${esc(f.contacted_by?.initials || '?')}</span>
+  return `<div class="v2-fu-row">
+    ${fmtD(f.followup_date)} — ${ini(f.contacted_by)}
     ${METHOD[f.contact_method] || ''} w/ <strong>${esc(f.customer_contact || '?')}</strong>:
     ${esc(f.notes || '')}
     ${f.outcome === 'no_decision' && f.next_followup_date ? `→ next ${fmtD(f.next_followup_date)}` : ''}
-    ${f.outcome === 'awarded' ? '<span style="color:var(--success);font-weight:700">→ AWARDED</span>' : ''}
-    ${f.outcome === 'approved' ? '<span style="color:var(--success);font-weight:700">→ APPROVED</span>' : ''}
-    ${f.outcome === 'not_awarded' ? '<span class="overdue">→ NOT AWARDED</span>' : ''}
+    ${f.outcome === 'awarded' ? '<span style="color:#16a34a;font-weight:700">→ AWARDED</span>' : ''}
+    ${f.outcome === 'approved' ? '<span style="color:#16a34a;font-weight:700">→ APPROVED</span>' : ''}
+    ${f.outcome === 'not_awarded' ? '<span class="overdue-txt">→ NOT AWARDED</span>' : ''}
   </div>`;
 }
 
