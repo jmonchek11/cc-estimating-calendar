@@ -399,9 +399,15 @@ async function renderDashboard(main) {
       </div>
     </div>`).join('') || `<div class="text-muted" style="padding:8px 0;font-size:13px">${isMine ? 'No overdue follow-ups for you 🎉' : 'No overdue follow-ups 🎉'}</div>`;
 
-  const dueSoon = dueSoonList.map(b => `
+  const _in7  = new Date(Date.now() +  7 * 86400000).toISOString().split('T')[0];
+  const _in14 = new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0];
+
+  const dueSoon = dueSoonList.map(b => {
+    const due = b.estimate_due_date;
+    const dotColor = due <= _in7 ? 'dot-red' : due <= _in14 ? 'dot-yellow' : 'dot-green';
+    return `
     <div class="attention-item" style="cursor:pointer" onclick="openJobPanel(${b.id})">
-      <div class="attention-dot dot-yellow"></div>
+      <div class="attention-dot ${dotColor}"></div>
       <div>
         <div class="attention-name">${esc(b.project_name)}</div>
         <div class="attention-meta">
@@ -410,7 +416,8 @@ async function renderDashboard(main) {
           ${b.estimate_amount ? ` · ${fmt(b.estimate_amount, 'currency')}` : ''}
         </div>
       </div>
-    </div>`).join('') || `<div class="text-muted" style="padding:8px 0;font-size:13px">${isMine ? 'No estimates due for you this week' : 'No bids due this week'}</div>`;
+    </div>`;
+  }).join('') || `<div class="text-muted" style="padding:8px 0;font-size:13px">${isMine ? 'No upcoming estimates for you' : 'No upcoming estimates'}</div>`;
 
   const recentRows = recentList.map(b => `
     <div class="activity-item" style="cursor:pointer" onclick="openJobPanel(${b.id})">
@@ -474,7 +481,7 @@ async function renderDashboard(main) {
         ${attentionItems}
       </div>
       <div class="card">
-        <div class="section-title">📅 ${scopeLabel} Estimates Due This Week</div>
+        <div class="section-title">📅 ${scopeLabel} Upcoming Estimates</div>
         ${dueSoon}
       </div>
     </div>

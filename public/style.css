@@ -201,6 +201,7 @@ body {
 }
 .dot-red { background: var(--danger); }
 .dot-yellow { background: var(--warning); }
+.dot-green { background: #16a34a; }
 .dot-blue { background: var(--primary); }
 
 .attention-name { font-weight: 600; font-size: 13px; }

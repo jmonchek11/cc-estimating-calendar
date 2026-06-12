@@ -253,10 +253,11 @@ async function getMyStats(userId) {
       { $match: {
         is_deleted: 0,
         $or: [{ estimator_id: uid }, { salesperson_id: uid }, { 'sub_estimators.estimator_id': uid }],
-        estimate_due_date: { $gte: todayStr, $lte: weekAhead },
+        estimate_due_date: { $gte: todayStr },
         stage: { $in: ['opportunity', 'active_bid', 'active_co'] }
       }},
       { $sort: { estimate_due_date: 1 } },
+      { $limit: 15 },
       ...BID_PIPELINE,
     ]).then(r => r.map(formatBid)),
 
@@ -317,11 +318,11 @@ async function getStats() {
     Bid.aggregate([
       { $match: {
         is_deleted: 0,
-        estimate_due_date: { $gte: todayStr, $lte: weekAhead },
+        estimate_due_date: { $gte: todayStr },
         stage: { $in: ['opportunity', 'active_bid', 'active_co'] }
       }},
       { $sort: { estimate_due_date: 1 } },
-      { $limit: 10 },
+      { $limit: 15 },
       ...BID_PIPELINE,
     ]).then(r => r.map(formatBid)),
 
