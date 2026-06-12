@@ -1,0 +1,236 @@
+/**
+ * v2/models.js — Mongoose models for the v2 data model
+ *
+ * Source of truth: docs/DATA_MODEL_SPEC.md
+ * Every datapoint lives in exactly ONE place:
+ *   job_number  → Job only
+ *   bid_number  → Bid only
+ *   co_number   → ChangeOrder only
+ *   project name→ Project only
+ *   customer    → Company only (referenced by ID everywhere)
+ *
+ * All models are registered on a dedicated connection so v2 can coexist
+ * with the v1 app in the same process if ever needed.
+ */
+const mongoose = require('mongoose');
+
+const V2_DB_NAME = process.env.V2_DB_NAME || 'estimating_v2_test';
+
+let conn = null;
+function getConnection() {
+  if (!conn) {
+    if (!process.env.MONGODB_URI) throw new Error('MONGODB_URI not set');
+    conn = mongoose.createConnection(process.env.MONGODB_URI, { dbName: V2_DB_NAME });
+  }
+  return conn;
+}
+
+const opts = { _id: false, versionKey: false };
+const ts = () => new Date().toISOString().replace('T', ' ').substring(0, 19);
+
+// ── Schemas ───────────────────────────────────────────────────────────────────
+
+const ProjectSchema = new mongoose.Schema({
+  _id:        Number,                       // internal only — never shown in UI
+  name:       { type: String, required: true },
+  created_by: { type: Number, default: null },
+  created_at: { type: String, default: ts },
+  updated_at: { type: String, default: ts },
+}, opts);
+
+const BID_STAGES = ['opportunity', 'active_bid', 'submitted', 'awarded', 'not_awarded', 'closed'];
+
+const BidSchema = new mongoose.Schema({
+  _id:            Number,
+  project_id:     { type: Number, required: true },              // FK → Project
+  bid_number:     { type: String, default: null },               // B26-XXXX — assigned at active_bid only
+  stage:          { type: String, enum: BID_STAGES, required: true, default: 'opportunity' },
+
+  estimator_id:   { type: Number, default: null },               // FK → TeamMember
+  salesperson_id: { type: Number, default: null },               // FK → TeamMember
+  sub_estimators: { type: [{ estimator_id: Number, scope: String }], default: [] },
+
+  date_received:  { type: String, default: null },
+  due_date:       { type: String, default: null },
+  start_date:     { type: String, default: null },
+  drawing_stage:  { type: String, default: null },               // "50% budget", "80% budget", "100% CD"…
+  notes:          { type: String, default: null },
+
+  // Set at SUBMIT only
+  estimate_amount:{ type: Number, default: null },               // current value (reflects latest revision)
+  jurisdiction:   { type: String, default: null },               // IBEW local
+  date_submitted: { type: String, default: null },
+  approved_by:    { type: String, default: null },
+
+  // Post-submit customer-requested revisions (not full re-bids)
+  revisions:      { type: [{ rev_num: Number, amount: Number, date: String, notes: String }], default: [] },
+
+  // Set at AWARD only
+  award_date:         { type: String, default: null },
+  awarded_company_id: { type: Number, default: null },           // FK → Company (single winner)
+
+  // Set at NOT-AWARDED only
+  date_not_awarded:  { type: String, default: null },
+  not_awarded_notes: { type: String, default: null },
+
+  // Set at CLOSE only
+  closed_date:        { type: String, default: null },
+  closed_approved_by: { type: String, default: null },
+  close_reason:       { type: String, default: null },
+
+  // System-managed while submitted
+  next_followup_date: { type: String, default: null },
+
+  created_at: { type: String, default: ts },
+  updated_at: { type: String, default: ts },
+}, opts);
+
+const JobSchema = new mongoose.Schema({
+  _id:                Number,
+  project_id:         { type: Number, required: true },          // FK → Project
+  winning_bid_id:     { type: Number, default: null },           // NULLABLE — legacy jobs have no bid
+  job_number:         { type: String, default: null },           // NULLABLE until accounting assigns
+  awarded_company_id: { type: Number, default: null },           // FK → Company
+  pm_id:              { type: Number, default: null },           // FK → TeamMember — gets CO follow-up notifications
+  award_date:         { type: String, default: null },
+  created_at: { type: String, default: ts },
+  updated_at: { type: String, default: ts },
+}, opts);
+
+const CO_STAGES = ['active_co', 'submitted_co', 'approved', 'not_approved', 'voided'];
+
+const ChangeOrderSchema = new mongoose.Schema({
+  _id:            Number,
+  job_id:         { type: Number, required: true },              // FK → Job — a CO cannot exist without a Job
+  co_number:      { type: String, required: true },              // RFC-001 / COR-12 / CO-7
+  name:           { type: String, required: true },              // description of the work
+  stage:          { type: String, enum: CO_STAGES, required: true, default: 'active_co' },
+  was_submitted:  { type: Number, default: 0 },                  // drives Reopen target (submitted_co vs active_co)
+
+  estimator_id:   { type: Number, default: null },
+  due_date:       { type: String, default: null },
+  start_date:     { type: String, default: null },
+  notes:          { type: String, default: null },
+
+  // Set at SUBMIT only
+  estimate_amount:{ type: Number, default: null },
+  date_submitted: { type: String, default: null },
+  approved_by:    { type: String, default: null },               // PM, estimator, or salesperson
+
+  // Set at APPROVE only
+  approval_date:  { type: String, default: null },
+
+  // Void / not-approved bookkeeping
+  void_reason:        { type: String, default: null },
+  date_not_approved:  { type: String, default: null },
+  not_approved_notes: { type: String, default: null },
+
+  next_followup_date: { type: String, default: null },
+
+  created_at: { type: String, default: ts },
+  updated_at: { type: String, default: ts },
+}, opts);
+
+const CompanySchema = new mongoose.Schema({
+  _id:        Number,
+  name:       { type: String, required: true },                  // single source for customer names
+  city:       { type: String, default: null },
+  state:      { type: String, default: null },
+  domain:     { type: String, default: null },
+  created_at: { type: String, default: ts },
+  updated_at: { type: String, default: ts },
+}, opts);
+
+const BidCustomerSchema = new mongoose.Schema({
+  _id:         Number,
+  bid_id:      { type: Number, required: true },                 // FK → Bid
+  company_id:  { type: Number, required: true },                 // FK → Company
+  contact_ids: { type: [Number], default: [] },                  // FK → Contact (at this company, for this bid)
+}, opts);
+
+const ContactSchema = new mongoose.Schema({
+  _id:        Number,
+  company_id: { type: Number, required: true },                  // FK → Company (no free-text company)
+  first_name: { type: String, default: null },
+  last_name:  { type: String, default: null },
+  phone:      { type: String, default: null },
+  email:      { type: String, default: null },
+  notes:      { type: String, default: null },
+  active:     { type: Number, default: 1 },
+  created_at: { type: String, default: ts },
+  updated_at: { type: String, default: ts },
+}, opts);
+
+const FollowupSchema = new mongoose.Schema({
+  _id:              Number,
+  parent_type:      { type: String, enum: ['bid', 'change_order'], required: true },
+  parent_id:        { type: Number, required: true },
+  followup_date:    { type: String, required: true },
+  contacted_by:     { type: Number, default: null },             // FK → TeamMember
+  contact_method:   { type: String, enum: ['phone', 'email', 'in_person', 'other'], default: 'phone' },
+  customer_contact: { type: String, default: null },             // who they spoke to
+  notes:            { type: String, default: null },
+  outcome:          { type: String, enum: ['no_decision', 'awarded', 'not_awarded', 'approved', 'not_approved', 'other'], default: 'no_decision' },
+  next_followup_date: { type: String, default: null },
+  created_at: { type: String, default: ts },
+}, opts);
+
+const ReminderSchema = new mongoose.Schema({
+  _id:         Number,
+  parent_type: { type: String, enum: ['bid', 'job', 'change_order'], required: true },
+  parent_id:   { type: Number, required: true },
+  note:        { type: String, default: null },
+  remind_on:   { type: String, required: true },
+  dismissed:   { type: Number, default: 0 },
+  emailed:     { type: Number, default: 0 },
+  created_by:  { type: Number, default: null },
+  created_at:  { type: String, default: ts },
+}, opts);
+
+// Carried over from v1 unchanged
+const TeamMemberSchema = new mongoose.Schema({
+  _id:      Number,
+  name:     { type: String, required: true },
+  initials: { type: String, required: true, uppercase: true },
+  role:     { type: String, enum: ['estimator', 'sales', 'pm', 'admin'], default: 'estimator' },
+  active:   { type: Number, default: 1 },
+  email:    { type: String, lowercase: true, trim: true, default: null },
+  password_hash:        { type: String, default: null },
+  must_change_password: { type: Boolean, default: true },
+  is_admin: { type: Boolean, default: false },
+  last_seen:{ type: Date, default: null },
+  created_at: { type: String, default: ts },
+}, opts);
+
+const SettingsSchema = new mongoose.Schema({
+  _id: String,                                                   // 'company'
+  fu_initial_days:   { type: Number, default: 3 },
+  fu_recurring_days: { type: Number, default: 7 },
+}, opts);
+
+const CounterSchema = new mongoose.Schema({
+  _id: String,
+  seq: { type: Number, default: 0 },
+}, opts);
+
+// ── Export models bound to the v2 connection ──────────────────────────────────
+
+function getModels() {
+  const c = getConnection();
+  return {
+    Project:     c.model('Project', ProjectSchema, 'projects'),
+    Bid:         c.model('Bid', BidSchema, 'bids'),
+    Job:         c.model('Job', JobSchema, 'jobs'),
+    ChangeOrder: c.model('ChangeOrder', ChangeOrderSchema, 'change_orders'),
+    Company:     c.model('Company', CompanySchema, 'companies'),
+    BidCustomer: c.model('BidCustomer', BidCustomerSchema, 'bid_customers'),
+    Contact:     c.model('Contact', ContactSchema, 'contacts'),
+    Followup:    c.model('Followup', FollowupSchema, 'followups'),
+    Reminder:    c.model('Reminder', ReminderSchema, 'reminders'),
+    TeamMember:  c.model('TeamMember', TeamMemberSchema, 'teammembers'),
+    Settings:    c.model('Settings', SettingsSchema, 'settings'),
+    Counter:     c.model('Counter', CounterSchema, 'counters'),
+  };
+}
+
+module.exports = { getConnection, getModels, V2_DB_NAME, BID_STAGES, CO_STAGES };
