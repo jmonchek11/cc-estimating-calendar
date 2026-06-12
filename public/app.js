@@ -3194,29 +3194,74 @@ async function openProjectPanel(projectId) {
     api.get(`/api/projects/${projectId}/bids`),
   ]);
 
-  const ACTIVE = ['opportunity','active_bid','active_co','follow_up'];
-  const activeBids  = bids.filter(b => ACTIVE.includes(b.stage));
-  const closedBids  = bids.filter(b => !ACTIVE.includes(b.stage));
-  const totalValue  = bids.reduce((s,b) => s + (b.estimate_amount||0), 0);
-  const wonValue    = bids.filter(b=>b.stage==='awarded').reduce((s,b)=>s+(b.estimate_amount||0),0);
+  const totalValue = bids.reduce((s,b) => s + (b.estimate_amount||0), 0);
+  const wonValue   = bids.filter(b=>b.stage==='awarded').reduce((s,b)=>s+(b.estimate_amount||0),0);
+
+  // Separate base bids from COs
+  const coBids   = bids.filter(b => b.stage === 'active_co' || !!b.co_number);
+  const baseBids = bids.filter(b => b.stage !== 'active_co' && !b.co_number);
+
+  // Sort base bids: awarded first, then active stages, then closed
+  const _bStageOrder = { awarded:0, follow_up:1, active_bid:2, opportunity:3, not_awarded:4, closed:5 };
+  baseBids.sort((a,b) => (_bStageOrder[a.stage]??9) - (_bStageOrder[b.stage]??9));
+
+  // Find COs belonging to a base bid
+  function getCOsForBid(bid) {
+    return coBids.filter(co =>
+      (co.parent_bid_id && co.parent_bid_id === bid.id) ||
+      (!co.parent_bid_id && bid.job_number && co.job_number === bid.job_number)
+    );
+  }
+  // COs with no matched parent shown at bottom
+  const matchedCOIds = new Set(baseBids.flatMap(b => getCOsForBid(b).map(c => c.id)));
+  const orphanCOs = coBids.filter(c => !matchedCOIds.has(c.id));
+
+  function coRow(co) {
+    const estM = State.team.find(t => t.id === co.estimator_id);
+    const stageColor = co.stage==='awarded'?'#16a34a':co.stage==='not_awarded'?'#dc2626':'#f97316';
+    return `
+      <div style="display:flex;align-items:center;gap:8px;padding:7px 10px 7px 20px;
+                  border-left:2px solid #e2e8f0;margin-left:12px;cursor:pointer;border-radius:0 6px 6px 0"
+           class="clickable-row" onclick="document.getElementById('project-panel').remove();setTimeout(()=>openJobPanel(${co.id}),80)">
+        <span style="font-size:10px;font-weight:700;color:#f97316;background:#fff7ed;padding:1px 6px;border-radius:4px;flex-shrink:0">CO</span>
+        <div style="flex:1;min-width:0">
+          <span style="font-size:13px;font-weight:600">${esc(co.co_number || co.bid_number || '—')}</span>
+          ${co.project_name ? `<span style="font-size:12px;color:var(--text-muted);margin-left:6px">${esc(co.project_name)}</span>` : ''}
+        </div>
+        ${co.estimate_amount ? `<span style="font-size:12px;font-weight:600;color:#166534;flex-shrink:0">${fmt(co.estimate_amount,'currency')}</span>` : ''}
+        <span style="font-size:11px;font-weight:700;color:${stageColor};flex-shrink:0">${stageName(co.stage)}</span>
+        ${estM ? estPill(estM.initials, estM.id) : ''}
+      </div>`;
+  }
 
   function bidCard(b) {
     const estM = State.team.find(t => t.id === b.estimator_id);
-    const stageColor = b.stage==='awarded'?'#16a34a':b.stage==='not_awarded'?'#dc2626':b.stage==='closed'?'#64748b':'var(--primary)';
+    const isAwarded = b.stage === 'awarded';
+    const isActive  = ['opportunity','active_bid','follow_up'].includes(b.stage);
+    const stageColor = isAwarded ? '#16a34a' : b.stage==='not_awarded' ? '#dc2626' : b.stage==='closed' ? '#64748b' : 'var(--primary)';
+    const cos = getCOsForBid(b);
     return `
-      <div class="proj-bid-card clickable-row" onclick="openJobPanel(${b.id})">
-        <div style="flex:1;min-width:0">
-          <div style="font-weight:700;font-size:13px">${esc(b.project_name)}
-            ${b.bid_number?`<span style="color:var(--text-muted);font-weight:400;font-size:12px"> #${esc(b.bid_number)}</span>`:''}
+      <div style="margin-bottom:${cos.length?'0':'8'}px">
+        <div class="proj-bid-card clickable-row${isAwarded?' proj-bid-awarded':''}"
+             onclick="document.getElementById('project-panel').remove();setTimeout(()=>openJobPanel(${b.id}),80)"
+             style="${isAwarded?'border-left:3px solid #16a34a;background:#f0fdf4;':''}">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:13px;${isAwarded?'font-weight:800':'font-weight:600'}">
+              ${isAwarded?'✓ ':''} ${esc(b.project_name)}
+              ${b.bid_number?`<span style="color:var(--text-muted);font-weight:400;font-size:12px"> #${esc(b.bid_number)}</span>`:''}
+              ${isAwarded?`<span style="font-size:11px;font-weight:700;color:#fff;background:#16a34a;padding:1px 7px;border-radius:10px;margin-left:6px">AWARDED</span>`:''}
+            </div>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:2px">
+              <span style="color:${stageColor};font-weight:600">${stageName(b.stage)}</span>
+              ${b.estimate_amount ? ' · ' + fmt(b.estimate_amount,'currency') : ''}
+              ${estM ? ' · ' + estPill(estM.initials, estM.id) : ''}
+              ${isActive && b.estimate_due_date ? ' · Due ' + fmt(b.estimate_due_date,'date') : ''}
+            </div>
           </div>
-          <div style="font-size:12px;color:var(--text-muted);margin-top:2px">
-            <span style="color:${stageColor};font-weight:600">${stageName(b.stage)}</span>
-            ${b.estimate_amount ? ' · ' + fmt(b.estimate_amount,'currency') : ''}
-            ${estM ? ' · ' + estPill(estM.initials, estM.id) : ''}
-            ${b.estimate_due_date ? ' · Due ' + fmt(b.estimate_due_date,'date') : ''}
-          </div>
+          ${jurisdictionBadge(b.jurisdiction,{small:true})}
         </div>
-        ${jurisdictionBadge(b.jurisdiction,{small:true})}
+        ${cos.map(coRow).join('')}
+        ${cos.length ? '<div style="margin-bottom:8px"></div>' : ''}
       </div>`;
   }
 
@@ -3253,12 +3298,10 @@ async function openProjectPanel(projectId) {
         </div>
       </div>
       <div style="flex:1;overflow-y:auto;padding:16px 24px">
-        ${activeBids.length ? `
-          <div class="jp-section-title" style="margin-bottom:10px">Active (${activeBids.length})</div>
-          ${activeBids.map(bidCard).join('')}` : ''}
-        ${closedBids.length ? `
-          <div class="jp-section-title" style="margin-top:16px;margin-bottom:10px">Closed / Decided (${closedBids.length})</div>
-          ${closedBids.map(bidCard).join('')}` : ''}
+        ${baseBids.length ? baseBids.map(bidCard).join('') : ''}
+        ${orphanCOs.length ? `
+          <div class="jp-section-title" style="margin-top:12px;margin-bottom:8px">Other Change Orders</div>
+          ${orphanCOs.map(coRow).join('')}` : ''}
         ${!bids.length ? '<div class="empty-state" style="padding:20px 0"><div class="empty-state-desc">No bids linked to this project yet.</div></div>' : ''}
         <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
           <div class="jp-section-title" style="margin-bottom:8px">Add Existing Bid to This Project</div>
@@ -6262,6 +6305,7 @@ function renderJobPanelContent(bid, followups, contacts = [], linkedCOs = []) {
                 style="font-size:11px;${bid.project_id ? 'color:var(--text-muted)' : 'color:var(--primary);font-weight:600'}">
           🏗️ ${bid.project_id ? (bid.project_entity_name ? `Project: ${esc(bid.project_entity_name)}` : 'Change Project') : 'Link to Project'}
         </button>
+        ${bid.project_id ? `<button class="btn btn-ghost btn-sm" onclick="closeJobPanel();setTimeout(()=>openProjectPanel(${bid.project_id}),80)" style="font-size:11px;color:var(--primary);font-weight:600">View Project →</button>` : ''}
       </div>
       <div id="project-relink-${bid.id}" style="display:none;margin-top:8px;position:relative"
            data-old-project-id="${bid.project_id || ''}"
