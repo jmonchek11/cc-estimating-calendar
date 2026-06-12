@@ -63,6 +63,43 @@
   .amount { font-weight: 700; color: #166534; }
   .overdue-txt { color: #dc2626; font-weight: 700; }
   .err-card { background: #fee2e2; color: #991b1b; padding: 16px 20px; border-radius: var(--radius); font-size: 14px; }
+
+  /* Action buttons + modal */
+  .v2-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .v2-btn {
+    font-family: inherit; font-size: 11px; font-weight: 700; padding: 4px 12px;
+    border-radius: 6px; border: none; cursor: pointer; color: #fff; transition: opacity .12s;
+  }
+  .v2-btn:hover { opacity: .85; }
+  .v2-btn.green { background: #16a34a; } .v2-btn.blue { background: #2563eb; }
+  .v2-btn.red { background: #dc2626; } .v2-btn.gray { background: #64748b; }
+  .v2-btn.amber { background: #d97706; } .v2-btn.outline { background: #fff; color: #475569; border: 1px solid var(--border); }
+  .v2-overlay {
+    position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 100;
+    display: flex; align-items: center; justify-content: center; padding: 16px;
+  }
+  .v2-modal {
+    background: #fff; border-radius: 10px; width: 100%; max-width: 440px;
+    max-height: 88vh; overflow-y: auto; box-shadow: 0 20px 50px rgba(0,0,0,.25);
+  }
+  .v2-modal-hd {
+    padding: 14px 20px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    font-weight: 800; font-size: 14px;
+  }
+  .v2-modal-bd { padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; }
+  .v2-modal-ft { padding: 0 20px 18px; display: flex; gap: 8px; justify-content: flex-end; }
+  .v2-field label { display: block; font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 4px; }
+  .v2-field label .req { color: #dc2626; }
+  .v2-field input, .v2-field select, .v2-field textarea {
+    width: 100%; font-family: inherit; font-size: 13px; padding: 7px 10px;
+    border: 1px solid var(--border); border-radius: 6px; background: #fff; color: var(--text);
+  }
+  .v2-field input:focus, .v2-field select:focus, .v2-field textarea:focus {
+    outline: none; border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,.1);
+  }
+  .v2-check { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 3px 0; cursor: pointer; }
+  .v2-modal-err { color: #dc2626; font-size: 12px; font-weight: 600; display: none; padding: 0 20px 10px; }
 </style>
 </head>
 <body>
@@ -76,6 +113,10 @@
       <div>
         <div class="page-title">🏗️ Projects — New Data Model</div>
         <div class="page-subtitle">Project → Bids → Job → Change Orders · fake dataset for review</div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="v2-btn blue" style="padding:8px 14px;font-size:12px" onclick="actNewOpportunity()">+ New Opportunity</button>
+        <button class="v2-btn outline" style="padding:8px 14px;font-size:12px" onclick="actNewLegacyJob()">+ Legacy Job</button>
       </div>
     </div>
     <div class="card" style="padding:0" id="main"><div style="padding:30px;text-align:center;color:var(--text-muted)">Loading…</div></div>
@@ -101,6 +142,21 @@ const METHOD = { phone:'📞 phone', email:'✉️ email', in_person:'🤝 in pe
 const stageBadge = s => `<span class="badge badge-stage" style="color:${STAGE_COLOR[s]};font-weight:700">${STAGE[s] || s}</span>`;
 const ini = m => m ? `<span class="initials-pill" style="transform:scale(.85);transform-origin:center" title="${esc(m.name || '')}">${esc(m.initials)}</span>` : '';
 
+let META = { companies: [], team: [] };
+let OPEN_PROJECT = null;          // project id whose hierarchy is expanded
+let DETAIL_CACHE = {};            // project id → detail payload (for award winner picker)
+
+async function api(method, url, body) {
+  const r = await fetch(url, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+  return data;
+}
+
 async function load() {
   const main = document.getElementById('main');
   let projects;
@@ -108,6 +164,7 @@ async function load() {
     const r = await fetch('/api/v2/projects');
     if (r.status === 401) { main.innerHTML = '<div class="err-card">Not logged in. <a href="/">Log in on the main app</a> first, then come back to /v2.</div>'; return; }
     projects = await r.json();
+    if (!META.companies.length) META = await api('GET', '/api/v2/meta');
   } catch (e) { main.innerHTML = `<div class="err-card">${esc(e.message)}</div>`; return; }
 
   main.innerHTML = projects.map(p => `
@@ -137,14 +194,34 @@ async function load() {
 
 async function toggle(id) {
   const el = document.getElementById('hier-' + id);
-  if (el.classList.contains('open')) { el.classList.remove('open'); return; }
+  if (el.classList.contains('open')) { el.classList.remove('open'); OPEN_PROJECT = null; return; }
   document.querySelectorAll('.v2-hier.open').forEach(h => h.classList.remove('open'));
   el.classList.add('open');
+  OPEN_PROJECT = id;
   if (el.dataset.loaded) return;
   el.innerHTML = '<div style="padding:16px;color:var(--text-muted)">Loading…</div>';
-  const d = await (await fetch('/api/v2/projects/' + id)).json();
+  const d = await api('GET', '/api/v2/projects/' + id);
+  DETAIL_CACHE[id] = d;
   el.dataset.loaded = '1';
   el.innerHTML = renderHierarchy(d);
+}
+
+// Refresh everything after an action, keeping the current project expanded
+async function refresh() {
+  const keep = OPEN_PROJECT;
+  DETAIL_CACHE = {};
+  await load();
+  if (keep != null) {
+    const el = document.getElementById('hier-' + keep);
+    if (el) {
+      el.classList.add('open');
+      OPEN_PROJECT = keep;
+      const d = await api('GET', '/api/v2/projects/' + keep);
+      DETAIL_CACHE[keep] = d;
+      el.dataset.loaded = '1';
+      el.innerHTML = renderHierarchy(d);
+    }
+  }
 }
 
 function renderHierarchy(d) {
@@ -187,8 +264,26 @@ function bidNode(b) {
           ${b.notes ? `<br>📝 ${esc(b.notes)}` : ''}
         </div>
         ${b.followups.length ? `<div class="v2-fu">${b.followups.map(fuRow).join('')}</div>` : ''}
+        ${bidActions(b)}
       </div>
     </div>`;
+}
+
+function bidActions(b) {
+  let btns = '';
+  if (b.stage === 'opportunity') {
+    btns = `<button class="v2-btn blue" onclick="actStartBid(${b.id})">→ Start Bid</button>
+            <button class="v2-btn gray" onclick="actCloseBid(${b.id})">Close</button>`;
+  } else if (b.stage === 'active_bid') {
+    btns = `<button class="v2-btn green" onclick="actSubmitBid(${b.id})">Submit Bid</button>
+            <button class="v2-btn gray" onclick="actCloseBid(${b.id})">Close</button>`;
+  } else if (b.stage === 'submitted') {
+    btns = `<button class="v2-btn blue" onclick="actLogFollowup('bid',${b.id})">📝 Log Follow-up</button>
+            <button class="v2-btn amber" onclick="actAddRevision(${b.id})">Add Revision</button>
+            <button class="v2-btn green" onclick="actAwardBid(${b.id})">✓ Awarded</button>
+            <button class="v2-btn red" onclick="actNotAwarded(${b.id})">✗ Not Awarded</button>`;
+  }
+  return btns ? `<div class="v2-actions">${btns}</div>` : '';
 }
 
 function jobNode(j, legacy = false) {
@@ -204,6 +299,11 @@ function jobNode(j, legacy = false) {
           ${j.award_date ? ` ${fmtD(j.award_date)}` : ''}
           ${j.pm ? ` · PM: ${ini(j.pm)} ${esc(j.pm.name)}` : ''}
           · ${j.change_orders.length} change order${j.change_orders.length!==1?'s':''}
+        </div>
+        <div class="v2-actions">
+          ${!j.job_number ? `<button class="v2-btn amber" onclick="actSetJobNumber(${j.id})">Set Job #</button>` : ''}
+          ${!j.pm ? `<button class="v2-btn outline" onclick="actSetPM(${j.id})">Assign PM</button>` : ''}
+          <button class="v2-btn blue" onclick="actAddCO(${j.id})">+ Add Change Order</button>
         </div>
       </div>
     </div>
@@ -231,8 +331,25 @@ function coNode(co) {
           ${co.not_approved_notes ? ` · ${esc(co.not_approved_notes)}` : ''}
         </div>
         ${co.followups.length ? `<div class="v2-fu">${co.followups.map(fuRow).join('')}</div>` : ''}
+        ${coActions(co)}
       </div>
     </div>`;
+}
+
+function coActions(co) {
+  let btns = '';
+  if (co.stage === 'active_co') {
+    btns = `<button class="v2-btn green" onclick="actSubmitCO(${co.id})">Submit CO</button>
+            <button class="v2-btn gray" onclick="actVoidCO(${co.id})">Void</button>`;
+  } else if (co.stage === 'submitted_co') {
+    btns = `<button class="v2-btn blue" onclick="actLogFollowup('change_order',${co.id})">📝 Log Follow-up</button>
+            <button class="v2-btn green" onclick="actApproveCO(${co.id})">✓ Approved</button>
+            <button class="v2-btn red" onclick="actNotApprovedCO(${co.id})">✗ Not Approved</button>
+            <button class="v2-btn gray" onclick="actVoidCO(${co.id})">Void</button>`;
+  } else if (co.stage === 'voided' || co.stage === 'not_approved') {
+    btns = `<button class="v2-btn outline" onclick="actReopenCO(${co.id})">↩ Reopen</button>`;
+  }
+  return btns ? `<div class="v2-actions">${btns}</div>` : '';
 }
 
 function fuRow(f) {
@@ -245,6 +362,220 @@ function fuRow(f) {
     ${f.outcome === 'approved' ? '<span style="color:#16a34a;font-weight:700">→ APPROVED</span>' : ''}
     ${f.outcome === 'not_awarded' ? '<span class="overdue-txt">→ NOT AWARDED</span>' : ''}
   </div>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FORM MODAL FRAMEWORK
+// fields: [{ id, label, type: text|number|date|select|textarea|multicheck, required, options, value, placeholder }]
+// ═══════════════════════════════════════════════════════════════════════════
+function showForm(title, fields, onSubmit, submitLabel = 'Save', submitClass = 'blue') {
+  document.getElementById('v2-form-overlay')?.remove();
+  const ov = document.createElement('div');
+  ov.className = 'v2-overlay'; ov.id = 'v2-form-overlay';
+  ov.onclick = e => { if (e.target === ov) ov.remove(); };
+
+  const fieldHtml = fields.map(f => {
+    const req = f.required ? ' <span class="req">*</span>' : '';
+    if (f.type === 'select') {
+      return `<div class="v2-field"><label>${f.label}${req}</label>
+        <select id="vf-${f.id}">
+          ${f.required ? '' : '<option value="">—</option>'}
+          ${f.options.map(o => `<option value="${o.value}" ${o.value == f.value ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
+        </select></div>`;
+    }
+    if (f.type === 'multicheck') {
+      return `<div class="v2-field"><label>${f.label}${req}</label>
+        ${f.options.map(o => `<label class="v2-check"><input type="checkbox" data-multi="${f.id}" value="${o.value}"> ${esc(o.label)}</label>`).join('')}</div>`;
+    }
+    if (f.type === 'textarea') {
+      return `<div class="v2-field"><label>${f.label}${req}</label>
+        <textarea id="vf-${f.id}" rows="3" placeholder="${esc(f.placeholder || '')}"></textarea></div>`;
+    }
+    return `<div class="v2-field"><label>${f.label}${req}</label>
+      <input id="vf-${f.id}" type="${f.type || 'text'}" value="${esc(f.value ?? '')}" placeholder="${esc(f.placeholder || '')}" ${f.type === 'number' ? 'step="any"' : ''}></div>`;
+  }).join('');
+
+  ov.innerHTML = `
+    <div class="v2-modal">
+      <div class="v2-modal-hd">${title}<button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">✕</button></div>
+      <div class="v2-modal-bd">${fieldHtml}</div>
+      <div class="v2-modal-err" id="vf-err"></div>
+      <div class="v2-modal-ft">
+        <button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">Cancel</button>
+        <button class="v2-btn ${submitClass}" id="vf-submit">${submitLabel}</button>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+
+  document.getElementById('vf-submit').onclick = async () => {
+    const data = {};
+    let missing = [];
+    for (const f of fields) {
+      if (f.type === 'multicheck') {
+        data[f.id] = [...ov.querySelectorAll(`input[data-multi="${f.id}"]:checked`)].map(c => Number(c.value));
+        if (f.required && !data[f.id].length) missing.push(f.label);
+      } else {
+        const v = document.getElementById('vf-' + f.id)?.value?.trim();
+        data[f.id] = v || null;
+        if (f.required && !v) missing.push(f.label);
+      }
+    }
+    const errEl = document.getElementById('vf-err');
+    if (missing.length) { errEl.textContent = 'Required: ' + missing.join(', '); errEl.style.display = 'block'; return; }
+    try {
+      await onSubmit(data);
+      ov.remove();
+      await refresh();
+    } catch (e) { errEl.textContent = e.message; errEl.style.display = 'block'; }
+  };
+}
+
+const teamOpts = (roleFilter) => META.team
+  .filter(t => !roleFilter || roleFilter.includes(t.role))
+  .map(t => ({ value: t.id, label: `${t.name} (${t.initials})` }));
+const companyOpts = () => META.companies.map(c => ({ value: c.id, label: c.name }));
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ACTIONS — one per state-machine transition
+// ═══════════════════════════════════════════════════════════════════════════
+function actNewOpportunity() {
+  showForm('💡 New Opportunity', [
+    { id: 'project_name', label: 'Project Name', type: 'text', required: true, placeholder: 'e.g. Einstein ED Renovation' },
+    { id: 'notes', label: 'Notes (internal discussion)', type: 'textarea', placeholder: 'Why are we considering this?' },
+  ], data => api('POST', '/api/v2/opportunities', data), 'Create Opportunity');
+}
+
+function actNewLegacyJob() {
+  showForm('🏭 New Legacy Job (bid pre-dates system)', [
+    { id: 'project_name', label: 'Project Name', type: 'text', required: true },
+    { id: 'job_number', label: 'Job # (if known)', type: 'text', placeholder: '26-XXXX' },
+    { id: 'awarded_company_id', label: 'Customer (who awarded us)', type: 'select', options: companyOpts() },
+    { id: 'pm_id', label: 'PM', type: 'select', options: teamOpts(['pm', 'sales', 'estimator']) },
+    { id: 'award_date', label: 'Award Date', type: 'date' },
+  ], data => api('POST', '/api/v2/jobs', data), 'Create Job');
+}
+
+function actStartBid(bidId) {
+  showForm('→ Start Bid', [
+    { id: 'company_ids', label: 'Customer(s) — who are we bidding to?', type: 'multicheck', required: true, options: companyOpts() },
+    { id: 'estimator_id', label: 'Estimator', type: 'select', required: true, options: teamOpts(['estimator']) },
+    { id: 'salesperson_id', label: 'Salesperson', type: 'select', required: true, options: teamOpts(['sales']) },
+    { id: 'date_received', label: 'Date Received', type: 'date', required: true, value: today },
+    { id: 'due_date', label: 'Due Date', type: 'date', required: true },
+    { id: 'start_date', label: 'Start Date', type: 'date' },
+    { id: 'drawing_stage', label: 'Drawing Stage', type: 'text', placeholder: '50% budget, 80% budget, 100% CD…' },
+  ], data => api('POST', `/api/v2/bids/${bidId}/start`, data), 'Start Bid');
+}
+
+function actSubmitBid(bidId) {
+  showForm('📤 Submit Bid', [
+    { id: 'estimate_amount', label: 'Estimate Amount $', type: 'number', required: true },
+    { id: 'jurisdiction', label: 'IBEW Local Jurisdiction', type: 'text', required: true, placeholder: '98' },
+    { id: 'date_submitted', label: 'Date Estimate Sent', type: 'date', required: true, value: today },
+    { id: 'approved_by', label: 'Estimate Approved By', type: 'text', required: true },
+  ], data => api('POST', `/api/v2/bids/${bidId}/submit`, data), 'Submit Bid', 'green');
+}
+
+function actAwardBid(bidId) {
+  const detail = DETAIL_CACHE[OPEN_PROJECT];
+  const bid = detail?.bids.find(b => b.id === bidId);
+  const customers = bid?.customers || [];
+  const fields = [];
+  if (customers.length > 1) {
+    fields.push({ id: 'awarded_company_id', label: 'Which customer awarded us?', type: 'select', required: true,
+                  options: customers.map(c => ({ value: c.id, label: c.name })) });
+  }
+  fields.push({ id: 'award_date', label: 'Award Date', type: 'date', required: true, value: today });
+  fields.push({ id: 'pm_id', label: 'Assign PM (can be set later)', type: 'select', options: teamOpts(['pm', 'sales', 'estimator']) });
+  showForm('🎉 Mark Awarded', fields, data => api('POST', `/api/v2/bids/${bidId}/award`, data), 'Confirm Awarded', 'green');
+}
+
+function actNotAwarded(bidId) {
+  showForm('✗ Not Awarded', [
+    { id: 'date_not_awarded', label: 'Date Notified', type: 'date', required: true, value: today },
+    { id: 'not_awarded_notes', label: 'Customer Feedback', type: 'textarea', placeholder: 'Price too high, went with incumbent…' },
+  ], data => api('POST', `/api/v2/bids/${bidId}/not-awarded`, data), 'Confirm Not Awarded', 'red');
+}
+
+function actCloseBid(bidId) {
+  showForm('Close Opportunity / Bid', [
+    { id: 'closed_date', label: 'Closure Date', type: 'date', required: true, value: today },
+    { id: 'closed_approved_by', label: 'Closure Approved By', type: 'text', required: true },
+    { id: 'close_reason', label: 'Reason', type: 'textarea', required: true, placeholder: 'Why are we not bidding / stopping?' },
+  ], data => api('POST', `/api/v2/bids/${bidId}/close`, data), 'Close', 'gray');
+}
+
+function actAddRevision(bidId) {
+  showForm('Add Revision (customer-requested change)', [
+    { id: 'amount', label: 'Revised Amount $', type: 'number', required: true },
+    { id: 'date', label: 'Revision Date', type: 'date', required: true, value: today },
+    { id: 'notes', label: 'What changed?', type: 'textarea' },
+  ], data => api('POST', `/api/v2/bids/${bidId}/revisions`, data), 'Add Revision', 'amber');
+}
+
+function actLogFollowup(parentType, parentId) {
+  showForm('📝 Log Follow-up', [
+    { id: 'contact_method', label: 'How did you contact them?', type: 'select', required: true, options: [
+      { value: 'phone', label: '📞 Phone call' }, { value: 'email', label: '✉️ Email' },
+      { value: 'in_person', label: '🤝 In person' }, { value: 'other', label: 'Other' } ] },
+    { id: 'customer_contact', label: 'Who did you speak to?', type: 'text', required: true },
+    { id: 'notes', label: 'What was discussed?', type: 'textarea', required: true },
+  ], data => api('POST', '/api/v2/followups', { ...data, parent_type: parentType, parent_id: parentId, outcome: 'no_decision' }),
+  'Log (no decision yet — timer restarts)');
+}
+
+function actSetJobNumber(jobId) {
+  showForm('Set Job # (from accounting)', [
+    { id: 'job_number', label: 'Job #', type: 'text', required: true, placeholder: '26-XXXX' },
+  ], data => api('PATCH', `/api/v2/jobs/${jobId}`, data), 'Save', 'amber');
+}
+
+function actSetPM(jobId) {
+  showForm('Assign PM to Job', [
+    { id: 'pm_id', label: 'PM', type: 'select', required: true, options: teamOpts(['pm', 'sales', 'estimator']) },
+  ], data => api('PATCH', `/api/v2/jobs/${jobId}`, data), 'Assign');
+}
+
+function actAddCO(jobId) {
+  showForm('+ Add Change Order', [
+    { id: 'co_number', label: 'RFC / COR / CO #', type: 'text', required: true, placeholder: 'RFC-01' },
+    { id: 'name', label: 'Description of Work', type: 'text', required: true },
+    { id: 'due_date', label: 'Due Date', type: 'date', required: true },
+    { id: 'start_date', label: 'Start Date', type: 'date', required: true, value: today },
+    { id: 'estimator_id', label: 'Estimator', type: 'select', options: teamOpts(['estimator']) },
+  ], data => api('POST', `/api/v2/jobs/${jobId}/change-orders`, data), 'Create CO');
+}
+
+function actSubmitCO(coId) {
+  showForm('📤 Submit Change Order', [
+    { id: 'estimate_amount', label: 'CO Estimate $', type: 'number', required: true },
+    { id: 'date_submitted', label: 'Date Submitted', type: 'date', required: true, value: today },
+    { id: 'approved_by', label: 'Approved By (PM / estimator / salesperson)', type: 'text', required: true },
+  ], data => api('POST', `/api/v2/change-orders/${coId}/submit`, data), 'Submit CO', 'green');
+}
+
+function actApproveCO(coId) {
+  showForm('✓ Change Order Approved', [
+    { id: 'approval_date', label: 'Approval Date', type: 'date', required: true, value: today },
+  ], data => api('POST', `/api/v2/change-orders/${coId}/approve`, data), 'Confirm Approved', 'green');
+}
+
+function actNotApprovedCO(coId) {
+  showForm('✗ Change Order Not Approved', [
+    { id: 'date_not_approved', label: 'Date Notified', type: 'date', required: true, value: today },
+    { id: 'not_approved_notes', label: 'Notes', type: 'textarea' },
+  ], data => api('POST', `/api/v2/change-orders/${coId}/not-approved`, data), 'Confirm', 'red');
+}
+
+function actVoidCO(coId) {
+  showForm('Void Change Order', [
+    { id: 'void_reason', label: 'Reason', type: 'textarea', required: true, placeholder: 'Customer canceled the RFC…' },
+  ], data => api('POST', `/api/v2/change-orders/${coId}/void`, data), 'Void', 'gray');
+}
+
+async function actReopenCO(coId) {
+  try { await api('POST', `/api/v2/change-orders/${coId}/reopen`); await refresh(); }
+  catch (e) { alert(e.message); }
 }
 
 load();

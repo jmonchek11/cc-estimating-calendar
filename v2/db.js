@@ -193,4 +193,346 @@ function stageRank(stage) {
   return { awarded: 0, submitted: 1, active_bid: 2, opportunity: 3, not_awarded: 4, closed: 5 }[stage] ?? 9;
 }
 
-module.exports = { getProjects, getProjectDetail, nextId };
+// ═══════════════════════════════════════════════════════════════════════════
+// STATE MACHINE — all transitions per DATA_MODEL_SPEC.md §2
+// Every transition validates the current stage and collects exactly the
+// required fields for that transition. Illegal transitions throw.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const ts = () => new Date().toISOString().replace('T', ' ').substring(0, 19);
+const today = () => new Date().toISOString().split('T')[0];
+
+function addDays(dateStr, days) {
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setDate(d.getDate() + Number(days));
+  return d.toISOString().split('T')[0];
+}
+
+async function getSettings() {
+  const { Settings } = getModels();
+  return (await Settings.findById('company').lean()) || { fu_initial_days: 3, fu_recurring_days: 7 };
+}
+
+function require_(data, fields) {
+  const missing = fields.filter(f => data[f] === undefined || data[f] === null || data[f] === '');
+  if (missing.length) throw new Error(`Missing required: ${missing.join(', ')}`);
+}
+
+async function loadBid(id) {
+  const { Bid } = getModels();
+  const bid = await Bid.findById(Number(id)).lean();
+  if (!bid) throw new Error('Bid not found');
+  return bid;
+}
+
+async function loadCO(id) {
+  const { ChangeOrder } = getModels();
+  const co = await ChangeOrder.findById(Number(id)).lean();
+  if (!co) throw new Error('Change order not found');
+  return co;
+}
+
+// Lists for form dropdowns
+async function getMeta() {
+  const M = getModels();
+  const [companies, team] = await Promise.all([
+    M.Company.find().sort({ name: 1 }).lean(),
+    M.TeamMember.find({ active: 1 }).sort({ name: 1 }).lean(),
+  ]);
+  return {
+    companies: companies.map(c => ({ id: c._id, name: c.name })),
+    team: team.map(t => ({ id: t._id, name: t.name, initials: t.initials, role: t.role })),
+  };
+}
+
+// ── Opportunity creation ──────────────────────────────────────────────────────
+// Creates a Project (or attaches to an existing one) + an opportunity Bid.
+async function createOpportunity({ project_id, project_name, notes, created_by }) {
+  const M = getModels();
+  let pid = project_id ? Number(project_id) : null;
+  if (!pid) {
+    require_({ project_name }, ['project_name']);
+    pid = await nextId('projects');
+    await M.Project.create({ _id: pid, name: project_name.trim(), created_by: created_by || null });
+  }
+  const bidId = await nextId('bids');
+  await M.Bid.create({ _id: bidId, project_id: pid, stage: 'opportunity', notes: notes || null });
+  return { project_id: pid, bid_id: bidId };
+}
+
+// ── opportunity → active_bid ("Start Bid") ────────────────────────────────────
+async function startBid(id, data) {
+  const M = getModels();
+  const bid = await loadBid(id);
+  if (bid.stage !== 'opportunity') throw new Error(`Cannot start bid from stage '${bid.stage}'`);
+  require_(data, ['company_ids', 'estimator_id', 'salesperson_id', 'date_received', 'due_date']);
+  if (!Array.isArray(data.company_ids) || !data.company_ids.length) throw new Error('At least one customer company is required');
+
+  const counter = await M.Counter.findByIdAndUpdate('bid_number_2026', { $inc: { seq: 1 } }, { new: true, upsert: true });
+  const bid_number = `B26-${String(counter.seq).padStart(4, '0')}`;
+
+  await M.Bid.updateOne({ _id: bid._id }, { $set: {
+    stage: 'active_bid',
+    bid_number,
+    estimator_id: Number(data.estimator_id),
+    salesperson_id: Number(data.salesperson_id),
+    sub_estimators: data.sub_estimators || [],
+    date_received: data.date_received,
+    due_date: data.due_date,
+    start_date: data.start_date || null,
+    drawing_stage: data.drawing_stage || null,
+    updated_at: ts(),
+  }});
+  for (const companyId of data.company_ids) {
+    await M.BidCustomer.create({
+      _id: await nextId('bid_customers'),
+      bid_id: bid._id, company_id: Number(companyId),
+      contact_ids: (data.contact_ids_by_company || {})[companyId] || [],
+    });
+  }
+  return { bid_id: bid._id, bid_number };
+}
+
+// ── active_bid → submitted ("Submit Bid") ─────────────────────────────────────
+async function submitBid(id, data) {
+  const M = getModels();
+  const bid = await loadBid(id);
+  if (bid.stage !== 'active_bid') throw new Error(`Cannot submit from stage '${bid.stage}'`);
+  require_(data, ['estimate_amount', 'jurisdiction', 'date_submitted', 'approved_by']);
+  const s = await getSettings();
+  await M.Bid.updateOne({ _id: bid._id }, { $set: {
+    stage: 'submitted',
+    estimate_amount: Number(data.estimate_amount),
+    jurisdiction: String(data.jurisdiction),
+    date_submitted: data.date_submitted,
+    approved_by: data.approved_by,
+    next_followup_date: addDays(data.date_submitted, s.fu_initial_days),
+    updated_at: ts(),
+  }});
+  return { bid_id: bid._id, next_followup_date: addDays(data.date_submitted, s.fu_initial_days) };
+}
+
+// ── submitted → awarded ("Awarded") — creates the Job ─────────────────────────
+async function awardBid(id, data) {
+  const M = getModels();
+  const bid = await loadBid(id);
+  if (bid.stage !== 'submitted') throw new Error(`Cannot award from stage '${bid.stage}'`);
+  require_(data, ['award_date']);
+
+  const customers = await M.BidCustomer.find({ bid_id: bid._id }).lean();
+  let winner = data.awarded_company_id ? Number(data.awarded_company_id) : null;
+  if (!winner) {
+    if (customers.length === 1) winner = customers[0].company_id;
+    else throw new Error('awarded_company_id required — bid went to multiple customers');
+  }
+  if (!customers.some(c => c.company_id === winner)) throw new Error('Winning company was not on this bid');
+
+  await M.Bid.updateOne({ _id: bid._id }, { $set: {
+    stage: 'awarded', award_date: data.award_date, awarded_company_id: winner,
+    next_followup_date: null, updated_at: ts(),
+  }});
+  const jobId = await nextId('jobs');
+  await M.Job.create({
+    _id: jobId, project_id: bid.project_id, winning_bid_id: bid._id,
+    job_number: null,                                  // accounting assigns later
+    awarded_company_id: winner,
+    pm_id: data.pm_id ? Number(data.pm_id) : null,
+    award_date: data.award_date,
+  });
+  return { bid_id: bid._id, job_id: jobId };
+}
+
+// ── submitted → not_awarded ───────────────────────────────────────────────────
+async function notAwardBid(id, data) {
+  const M = getModels();
+  const bid = await loadBid(id);
+  if (bid.stage !== 'submitted') throw new Error(`Cannot mark not-awarded from stage '${bid.stage}'`);
+  require_(data, ['date_not_awarded']);
+  await M.Bid.updateOne({ _id: bid._id }, { $set: {
+    stage: 'not_awarded', date_not_awarded: data.date_not_awarded,
+    not_awarded_notes: data.not_awarded_notes || null,
+    next_followup_date: null, updated_at: ts(),
+  }});
+  return { bid_id: bid._id };
+}
+
+// ── opportunity / active_bid → closed ─────────────────────────────────────────
+async function closeBid(id, data) {
+  const M = getModels();
+  const bid = await loadBid(id);
+  if (!['opportunity', 'active_bid'].includes(bid.stage)) throw new Error(`Cannot close from stage '${bid.stage}'`);
+  require_(data, ['closed_date', 'closed_approved_by', 'close_reason']);
+  await M.Bid.updateOne({ _id: bid._id }, { $set: {
+    stage: 'closed', closed_date: data.closed_date,
+    closed_approved_by: data.closed_approved_by, close_reason: data.close_reason,
+    updated_at: ts(),
+  }});
+  return { bid_id: bid._id };
+}
+
+// ── Add Revision (submitted only) ─────────────────────────────────────────────
+async function addRevision(id, data) {
+  const M = getModels();
+  const bid = await loadBid(id);
+  if (bid.stage !== 'submitted') throw new Error(`Revisions only apply to submitted bids (stage is '${bid.stage}')`);
+  require_(data, ['amount', 'date']);
+  const rev = {
+    rev_num: (bid.revisions || []).length + 1,
+    amount: Number(data.amount), date: data.date, notes: data.notes || null,
+  };
+  await M.Bid.updateOne({ _id: bid._id }, {
+    $push: { revisions: rev },
+    $set: { estimate_amount: rev.amount, updated_at: ts() },
+  });
+  return { bid_id: bid._id, rev_num: rev.rev_num };
+}
+
+// ── Follow-up logging (bid or change_order; no_decision restarts the timer) ───
+async function logFollowupV2(data) {
+  const M = getModels();
+  require_(data, ['parent_type', 'parent_id', 'contact_method', 'notes']);
+  const s = await getSettings();
+  const outcome = data.outcome || 'no_decision';
+  const next = outcome === 'no_decision' ? addDays(today(), s.fu_recurring_days) : null;
+
+  const fu = await M.Followup.create({
+    _id: await nextId('followups'),
+    parent_type: data.parent_type, parent_id: Number(data.parent_id),
+    followup_date: data.followup_date || today(),
+    contacted_by: data.contacted_by ? Number(data.contacted_by) : null,
+    contact_method: data.contact_method,
+    customer_contact: data.customer_contact || null,
+    notes: data.notes, outcome, next_followup_date: next,
+  });
+
+  if (outcome === 'no_decision') {
+    const Model = data.parent_type === 'bid' ? M.Bid : M.ChangeOrder;
+    await Model.updateOne({ _id: Number(data.parent_id) }, { $set: { next_followup_date: next, updated_at: ts() } });
+  }
+  return { followup_id: fu._id, next_followup_date: next };
+}
+
+// ── Job: manual creation (legacy) + accounting/PM updates ─────────────────────
+async function createLegacyJob(data) {
+  const M = getModels();
+  let pid = data.project_id ? Number(data.project_id) : null;
+  if (!pid) {
+    require_(data, ['project_name']);
+    pid = await nextId('projects');
+    await M.Project.create({ _id: pid, name: data.project_name.trim(), created_by: data.created_by || null });
+  }
+  const jobId = await nextId('jobs');
+  await M.Job.create({
+    _id: jobId, project_id: pid, winning_bid_id: null,   // legacy — no bid in system
+    job_number: data.job_number || null,
+    awarded_company_id: data.awarded_company_id ? Number(data.awarded_company_id) : null,
+    pm_id: data.pm_id ? Number(data.pm_id) : null,
+    award_date: data.award_date || null,
+  });
+  return { project_id: pid, job_id: jobId };
+}
+
+async function updateJob(id, data) {
+  const M = getModels();
+  const upd = { updated_at: ts() };
+  if ('job_number' in data) upd.job_number = data.job_number || null;
+  if ('pm_id' in data) upd.pm_id = data.pm_id ? Number(data.pm_id) : null;
+  const r = await M.Job.updateOne({ _id: Number(id) }, { $set: upd });
+  if (!r.matchedCount) throw new Error('Job not found');
+  return { job_id: Number(id) };
+}
+
+// ── Change Orders ─────────────────────────────────────────────────────────────
+async function createChangeOrder(jobId, data) {
+  const M = getModels();
+  const job = await M.Job.findById(Number(jobId)).lean();
+  if (!job) throw new Error('A change order cannot exist without a Job');
+  require_(data, ['co_number', 'name', 'due_date', 'start_date']);
+  const coId = await nextId('change_orders');
+  await M.ChangeOrder.create({
+    _id: coId, job_id: job._id, stage: 'active_co',
+    co_number: data.co_number, name: data.name,
+    due_date: data.due_date, start_date: data.start_date,
+    estimator_id: data.estimator_id ? Number(data.estimator_id) : null,
+    notes: data.notes || null,
+  });
+  return { co_id: coId };
+}
+
+async function submitCO(id, data) {
+  const M = getModels();
+  const co = await loadCO(id);
+  if (co.stage !== 'active_co') throw new Error(`Cannot submit CO from stage '${co.stage}'`);
+  require_(data, ['estimate_amount', 'date_submitted', 'approved_by']);
+  const s = await getSettings();
+  const next = addDays(data.date_submitted, s.fu_initial_days);
+  await M.ChangeOrder.updateOne({ _id: co._id }, { $set: {
+    stage: 'submitted_co', was_submitted: 1,
+    estimate_amount: Number(data.estimate_amount),
+    date_submitted: data.date_submitted, approved_by: data.approved_by,
+    next_followup_date: next, updated_at: ts(),
+  }});
+  return { co_id: co._id, next_followup_date: next };
+}
+
+async function approveCO(id, data) {
+  const M = getModels();
+  const co = await loadCO(id);
+  if (co.stage !== 'submitted_co') throw new Error(`Cannot approve CO from stage '${co.stage}'`);
+  require_(data, ['approval_date']);
+  await M.ChangeOrder.updateOne({ _id: co._id }, { $set: {
+    stage: 'approved', approval_date: data.approval_date,
+    next_followup_date: null, updated_at: ts(),
+  }});
+  return { co_id: co._id };
+}
+
+async function notApproveCO(id, data) {
+  const M = getModels();
+  const co = await loadCO(id);
+  if (co.stage !== 'submitted_co') throw new Error(`Cannot mark not-approved from stage '${co.stage}'`);
+  require_(data, ['date_not_approved']);
+  await M.ChangeOrder.updateOne({ _id: co._id }, { $set: {
+    stage: 'not_approved', date_not_approved: data.date_not_approved,
+    not_approved_notes: data.not_approved_notes || null,
+    next_followup_date: null, updated_at: ts(),
+  }});
+  return { co_id: co._id };
+}
+
+async function voidCO(id, data) {
+  const M = getModels();
+  const co = await loadCO(id);
+  if (!['active_co', 'submitted_co'].includes(co.stage)) throw new Error(`Cannot void CO from stage '${co.stage}'`);
+  require_(data, ['void_reason']);
+  await M.ChangeOrder.updateOne({ _id: co._id }, { $set: {
+    stage: 'voided', void_reason: data.void_reason,
+    next_followup_date: null, updated_at: ts(),
+  }});
+  return { co_id: co._id };
+}
+
+// Reopen: voided/not_approved → submitted_co if previously submitted, else active_co.
+// Anyone can reopen (per spec Q2). Timer restarts when returning to submitted_co.
+async function reopenCO(id) {
+  const M = getModels();
+  const co = await loadCO(id);
+  if (!['voided', 'not_approved'].includes(co.stage)) throw new Error(`Cannot reopen CO from stage '${co.stage}'`);
+  const target = co.was_submitted ? 'submitted_co' : 'active_co';
+  const s = await getSettings();
+  await M.ChangeOrder.updateOne({ _id: co._id }, { $set: {
+    stage: target,
+    void_reason: null, date_not_approved: null, not_approved_notes: null,
+    next_followup_date: target === 'submitted_co' ? addDays(today(), s.fu_recurring_days) : null,
+    updated_at: ts(),
+  }});
+  return { co_id: co._id, stage: target };
+}
+
+module.exports = {
+  getProjects, getProjectDetail, getMeta, nextId,
+  createOpportunity, startBid, submitBid, awardBid, notAwardBid, closeBid,
+  addRevision, logFollowupV2,
+  createLegacyJob, updateJob,
+  createChangeOrder, submitCO, approveCO, notApproveCO, voidCO, reopenCO,
+};
