@@ -168,7 +168,7 @@ function stageName(stage) {
     opportunity: 'Opportunity', active_bid: 'Active Bid', active_co: 'Change Order',
     follow_up: 'Follow Up', awarded: 'Awarded', not_awarded: 'Not Awarded', closed: 'Closed'
   };
-  return map[stage] || stage;
+  return map[stage] || stage || '—';
 }
 
 function statusBadge(status) {
