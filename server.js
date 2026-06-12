@@ -310,12 +310,12 @@ app.put('/api/bids/:id', async (req, res) => {
           }
         }
 
-        // Bid awarded — notify all active users with email
-        if (req.body.stage === 'awarded' && oldBid?.stage !== 'awarded') {
-          const users = await db.getActiveUserEmails();
-          const { subject, html } = mailer.emailAwarded(updated, actorName);
-          await mailer.sendMail({ to: users.map(u => u.email), subject, html });
-        }
+        // Bid awarded — paused during data cleanup (re-enable when cleanup is done)
+        // if (req.body.stage === 'awarded' && oldBid?.stage !== 'awarded') {
+        //   const users = await db.getActiveUserEmails();
+        //   const { subject, html } = mailer.emailAwarded(updated, actorName);
+        //   await mailer.sendMail({ to: users.map(u => u.email), subject, html });
+        // }
       } catch (e) {
         console.error('[email trigger PUT /bids]', e.message);
       }

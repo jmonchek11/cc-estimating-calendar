@@ -822,8 +822,8 @@ async function renderFollowUps(main) {
   const overdueCnt  = bids.filter(b => b.next_followup_date && followupUrgency(b) === 'overdue').length;
   const todayCnt    = bids.filter(b => b.next_followup_date && followupUrgency(b) === 'today').length;
   const weekCnt     = bids.filter(b => b.next_followup_date && followupUrgency(b) === 'this-week').length;
-  const bidCnt      = bids.filter(b => !b.job_number).length;
-  const coCnt       = bids.filter(b =>  b.job_number).length;
+  const bidCnt      = bids.filter(b => b.stage !== 'active_co' && !b.co_number).length;
+  const coCnt       = bids.filter(b => b.stage === 'active_co' || !!b.co_number).length;
 
   const ownerOptions = State.team.filter(m => m.active)
     .map(m => `<option value="${m.id}">${esc(m.initials)} – ${esc(m.name)}</option>`).join('');
@@ -857,8 +857,8 @@ async function renderFollowUps(main) {
   const rows = bids.map(b => {
     const urgency  = b.next_followup_date ? followupUrgency(b) : 'none';
     const rowClass = urgency === 'overdue' ? 'row-overdue' : urgency === 'today' ? 'row-due-soon' : '';
-    const isCO     = !!b.job_number;
-    const refNum   = isCO ? (b.job_number || b.bid_number) : b.bid_number;
+    const isCO     = b.stage === 'active_co' || !!b.co_number;
+    const refNum   = isCO ? (b.co_number || b.job_number || b.bid_number) : b.bid_number;
     const typeBadge = isCO
       ? `<span class="badge badge-co">CO</span>`
       : `<span class="badge badge-bid">BID</span>`;
@@ -6287,7 +6287,7 @@ const PHASE_LABELS = ['50% Budget', '80% DD', 'CD Pricing', 'Final Bid', 'Re-Bid
 
 function renderLifecycleSection(bid, linkedCOs = []) {
   const phases   = bid.phases || [];
-  const isCO     = !!bid.job_number && bid.stage !== 'awarded';
+  const isCO     = bid.stage === 'active_co' || !!bid.co_number;
   const isActive = ['opportunity','active_bid','active_co','follow_up'].includes(bid.stage);
   const hasPhases = phases.length > 0;
   const hasLinkedCOs = linkedCOs.length > 0;
