@@ -84,9 +84,15 @@ async function main() {
   const jobs = [];
   const cos = [];
   const bidCustomers = [];
+  const submissions = [];
   const followups = [];
   const reminders = [];
   let bidNum = 100;
+  let subId = 0;
+  // helper: one submission row. The bid's denormalized estimate_amount/date_submitted
+  // already reflect the headline (latest/awarded), matching what recomputeBidHeadline would set.
+  const sub = (bid_id, company_id, amount, date, by, type = 'initial', is_current = 1, notes = null) =>
+    submissions.push({ _id: ++subId, bid_id, company_id, amount, date_submitted: date, approved_by: by, submission_type: type, is_current, notes });
   const nextBidNumber = () => `B26-${String(bidNum++).padStart(4, '0')}`;
 
   // ── Scenario 1: opportunity never advanced (internal discussion only) ───────
@@ -215,9 +221,8 @@ async function main() {
     { _id: 8, project_id: 8, stage: 'awarded', bid_number: nextBidNumber(),
       estimator_id: 5, salesperson_id: 7, date_received: day(-120), due_date: day(-90),
       drawing_stage: '100% CD',
-      estimate_amount: 2780000, jurisdiction: '98', date_submitted: day(-88), approved_by: 'Joe Monchek',
-      award_date: day(-40), awarded_company_id: 4,
-      revisions: [{ rev_num: 1, amount: 2780000, date: day(-75), notes: 'Added alternate #2 (lighting controls) at customer request post-submission.' }] },
+      estimate_amount: 2780000, jurisdiction: '98', date_submitted: day(-75), approved_by: 'Joe Monchek',
+      award_date: day(-40), awarded_company_id: 4 },
   );
   bidCustomers.push(
     { _id: 7, bid_id: 7, company_id: 4, contact_ids: [5] },
@@ -261,12 +266,27 @@ async function main() {
     { _id: 1, parent_type: 'bid', parent_id: 10, note: 'Check with JO before next follow-up — pricing may need alternate breakout', remind_on: day(1), created_by: 1 },
   );
 
+  // ── Bid submissions (one row per submission event) ──────────────────────────
+  sub(4, 1, 1840000, day(-28), 'Joe Monchek');                                  // submitted, single customer
+  // Scenario 5/11: bid to 3 customers under one bid #; awarded to company 3
+  sub(5, 1, 925000, day(-58), 'Joe Monchek');
+  sub(5, 3, 925000, day(-58), 'Joe Monchek');                                   // winner
+  sub(5, 4, 925000, day(-58), 'Joe Monchek');
+  sub(6, 6, 3150000, day(-168), 'Joe Monchek');
+  sub(7, 4, 2400000, day(-268), 'Joe Monchek');                                 // not awarded (50% budget)
+  // Scenario 9: best-and-final to same customer (no new drawings) — initial superseded
+  sub(8, 4, 2700000, day(-90), 'Joe Monchek', 'initial', 0);
+  sub(8, 4, 2780000, day(-75), 'Joe Monchek', 'best_and_final', 1, 'Added alternate #2 (lighting controls) per customer');
+  sub(9, 2, 410000, day(-49), 'Joe Monchek');
+  sub(10, 1, 1210000, day(-10), 'Joe Monchek');
+
   // ── Insert everything ────────────────────────────────────────────────────────
   await M.Project.insertMany(projects);
   await M.Bid.insertMany(bids);
   await M.Job.insertMany(jobs);
   await M.ChangeOrder.insertMany(cos);
   await M.BidCustomer.insertMany(bidCustomers);
+  await M.BidSubmission.insertMany(submissions);
   await M.Followup.insertMany(followups);
   await M.Reminder.insertMany(reminders);
 
@@ -275,10 +295,10 @@ async function main() {
     { _id: 'projects', seq: 100 }, { _id: 'bids', seq: 100 }, { _id: 'jobs', seq: 100 },
     { _id: 'change_orders', seq: 100 }, { _id: 'companies', seq: 100 }, { _id: 'contacts', seq: 100 },
     { _id: 'bid_customers', seq: 100 }, { _id: 'followups', seq: 100 }, { _id: 'reminders', seq: 100 },
-    { _id: 'bid_number_2026', seq: bidNum },
+    { _id: 'bid_submissions', seq: 100 }, { _id: 'bid_number_2026', seq: bidNum },
   ]);
 
-  console.log(`\nSeeded: ${projects.length} projects, ${bids.length} bids, ${jobs.length} jobs, ${cos.length} COs, ${bidCustomers.length} bid-customer links, ${followups.length} followups, ${reminders.length} reminders`);
+  console.log(`\nSeeded: ${projects.length} projects, ${bids.length} bids, ${jobs.length} jobs, ${cos.length} COs, ${bidCustomers.length} bid-customer links, ${submissions.length} submissions, ${followups.length} followups, ${reminders.length} reminders`);
 
   // ── Verify scenario coverage ─────────────────────────────────────────────────
   console.log('\nScenario verification:');

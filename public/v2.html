@@ -256,7 +256,7 @@ function bidNode(b) {
           ${b.superseded ? '<span class="badge" style="background:#e2e8f0;color:#64748b">SUPERSEDED</span>' : ''}
           ${b.drawing_stage ? `<span class="badge" style="background:#ede9fe;color:#5b21b6">${esc(b.drawing_stage)}</span>` : ''}
           ${b.estimate_amount ? `<span class="amount">${fmt$(b.estimate_amount)}</span>` : ''}
-          ${b.revisions.length ? `<span class="badge" style="background:#fef3c7;color:#92400e">Rev ${b.revisions.length}</span>` : ''}
+          ${(b.submissions || []).filter(s => s.is_current).length > 1 ? `<span class="badge" style="background:#dbeafe;color:#1e40af">${b.submissions.filter(s => s.is_current).length} customers</span>` : ''}
         </div>
         <div style="font-size:12px;color:var(--text-muted);margin-top:4px;line-height:1.6">
           ${b.customers.length ? `Bid to: <strong style="color:var(--text)">${esc(b.customers.map(c=>c.name).join(', '))}</strong>` : ''}
@@ -266,12 +266,13 @@ function bidNode(b) {
           ${b.sub_estimators.map(s => `${ini(s)}<span style="font-size:10px">${esc(s.scope)}</span>`).join(' ')}
           ${b.salesperson ? ` Sales: ${ini(b.salesperson)}` : ''}
           ${b.due_date ? ` · Due ${fmtD(b.due_date)}` : ''}
-          ${b.date_submitted ? ` · Submitted ${fmtD(b.date_submitted)} (${esc(b.approved_by)}, Local ${esc(b.jurisdiction)})` : ''}
+          ${b.jurisdiction ? ` · Local ${esc(b.jurisdiction)}` : ''}
           ${b.next_followup_date ? ` · Next F/U: <span class="${b.next_followup_date < today ? 'overdue-txt' : ''}">${fmtD(b.next_followup_date)}${b.next_followup_date < today ? ' — OVERDUE' : ''}</span>` : ''}
           ${b.close_reason ? `<br>Closed ${fmtD(b.closed_date)} by ${esc(b.closed_approved_by)} — ${esc(b.close_reason)}` : ''}
           ${b.not_awarded_notes ? `<br><span style="color:#dc2626">Not awarded ${fmtD(b.date_not_awarded)}:</span> ${esc(b.not_awarded_notes)}` : ''}
           ${b.notes ? `<br>📝 ${esc(b.notes)}` : ''}
         </div>
+        ${(b.submissions || []).length ? `<div class="v2-fu"><div style="font-weight:600;color:var(--text);margin-bottom:3px">Submissions</div>${b.submissions.map(submissionRow).join('')}</div>` : ''}
         ${b.followups.length ? `<div class="v2-fu">${b.followups.map(fuRow).join('')}</div>` : ''}
         ${bidActions(b)}
       </div>
@@ -292,8 +293,8 @@ function bidActions(b) {
       workflow = `<button class="v2-btn green" onclick="actSubmitBid(${b.id})">Submit Bid</button>
                   <button class="v2-btn gray" onclick="actCloseBid(${b.id})">Close</button>`;
     } else if (b.stage === 'submitted') {
-      workflow = `<button class="v2-btn blue" onclick="actLogFollowup('bid',${b.id})">📝 Log Follow-up</button>
-                  <button class="v2-btn amber" onclick="actAddRevision(${b.id})">Add Revision</button>
+      workflow = `<button class="v2-btn amber" onclick="actAddSubmission(${b.id})">+ Add Submission</button>
+                  <button class="v2-btn blue" onclick="actLogFollowup('bid',${b.id})">📝 Log Follow-up</button>
                   <button class="v2-btn green" onclick="actAwardBid(${b.id})">✓ Awarded</button>
                   <button class="v2-btn red" onclick="actNotAwarded(${b.id})">✗ Not Awarded</button>`;
     }
@@ -374,6 +375,18 @@ function coActions(co) {
     ? `<button class="v2-btn outline" onclick="actEditCO(${co.id})">✏️ Edit</button>` : '';
   const all = [workflow, adminBtn].filter(Boolean).join('');
   return all ? `<div class="v2-actions">${all}</div>` : '';
+}
+
+const SUB_TYPE = { initial: 'initial', best_and_final: 'best & final', scope_add: 'scope add', scope_remove: 'scope remove', revised: 'revised' };
+function submissionRow(s) {
+  return `<div class="v2-fu-row" ${s.is_current ? '' : 'style="opacity:.5"'}>
+    <strong>${esc(s.company?.name || '—')}</strong> — <span class="amount">${fmt$(s.amount)}</span>
+    · ${SUB_TYPE[s.submission_type] || esc(s.submission_type)}
+    · ${fmtD(s.date_submitted)}${s.approved_by ? ` (appr: ${esc(s.approved_by)})` : ''}
+    ${s.is_current ? '<span class="badge" style="background:#dcfce7;color:#166534">current</span>' : '<span style="font-size:10px">(superseded)</span>'}
+    ${s.notes ? ` · ${esc(s.notes)}` : ''}
+    ${CURRENT_USER?.is_admin ? `<a href="#" onclick="event.preventDefault();actEditSubmission(${s.id})" style="font-size:11px;margin-left:4px">✏️</a>` : ''}
+  </div>`;
 }
 
 function fuRow(f) {
@@ -539,13 +552,40 @@ function actStartBid(bidId) {
   showForm('→ Start Bid', startBidFields(), data => api('POST', `/api/v2/bids/${bidId}/start`, data), 'Start Bid');
 }
 
+// Customers on a bid → dropdown options
+function bidCustomerOpts(bidId) {
+  const b = DETAIL_CACHE[OPEN_PROJECT]?.bids.find(x => x.id === bidId);
+  return (b?.customers || []).map(c => ({ value: c.id, label: c.name }));
+}
+
 function actSubmitBid(bidId) {
+  const custs = bidCustomerOpts(bidId);
   showForm('📤 Submit Bid', [
-    { id: 'estimate_amount', label: 'Estimate Amount $', type: 'number', required: true },
+    { id: 'company_id', label: 'Submit to which customer?', type: 'select', required: true,
+      value: custs.length === 1 ? custs[0].value : undefined, options: custs },
+    { id: 'amount', label: 'Estimate Amount $', type: 'number', required: true },
     { id: 'jurisdiction', label: 'IBEW Local Jurisdiction', type: 'text', required: true, placeholder: '98' },
     { id: 'date_submitted', label: 'Date Estimate Sent', type: 'date', required: true, value: today },
     { id: 'approved_by', label: 'Estimate Approved By', type: 'text', required: true },
+    { id: 'notes', label: 'Notes', type: 'textarea' },
   ], data => api('POST', `/api/v2/bids/${bidId}/submit`, data), 'Submit Bid', 'green');
+}
+
+// Additional submission while submitted: another customer, or best-and-final / scope change
+function actAddSubmission(bidId) {
+  showForm('+ Add Submission', [
+    { id: 'company_id', label: 'Customer', type: 'select', required: true, options: bidCustomerOpts(bidId) },
+    { id: 'submission_type', label: 'Type', type: 'select', required: true, value: 'best_and_final', options: [
+      { value: 'initial', label: 'Initial (another customer)' },
+      { value: 'best_and_final', label: 'Best & Final' },
+      { value: 'scope_add', label: 'Scope add (no new drawings)' },
+      { value: 'scope_remove', label: 'Scope remove (no new drawings)' },
+      { value: 'revised', label: 'Revised' } ] },
+    { id: 'amount', label: 'Amount $', type: 'number', required: true },
+    { id: 'date_submitted', label: 'Date Submitted', type: 'date', required: true, value: today },
+    { id: 'approved_by', label: 'Approved By', type: 'text', required: true },
+    { id: 'notes', label: 'What changed?', type: 'textarea' },
+  ], data => api('POST', `/api/v2/bids/${bidId}/submissions`, data), 'Add Submission', 'amber');
 }
 
 // ── Admin edit (all entities) ─────────────────────────────────────────────────
@@ -579,16 +619,38 @@ function actEditBid(bidId) {
   }
   fields.push({ id: 'notes', label: 'Notes', type: 'textarea', value: b.notes });
   if (b.stage === 'submitted') {
+    // Submission $/date/approver are edited per submission (✏️ on each row).
     fields.push(
-      { id: 'estimate_amount', label: 'Estimate Amount $', type: 'number', value: b.estimate_amount },
       { id: 'jurisdiction', label: 'IBEW Local Jurisdiction', type: 'text', value: b.jurisdiction },
-      { id: 'date_submitted', label: 'Date Estimate Sent', type: 'date', value: b.date_submitted },
-      { id: 'approved_by', label: 'Estimate Approved By', type: 'text', value: b.approved_by },
       { id: 'superseded', label: 'Inactive / Superseded?', type: 'select', value: b.superseded ? 1 : 0,
         options: [{ value: 0, label: 'No — active' }, { value: 1, label: 'Yes — superseded/inactive' }] },
     );
   }
   showForm('✏️ Edit Bid (admin)', fields, data => api('PATCH', `/api/v2/admin/bid/${bidId}`, data), 'Save Changes');
+}
+
+// Admin edit of a single submission row
+function findSubmission(subId) {
+  const d = DETAIL_CACHE[OPEN_PROJECT];
+  if (!d) return null;
+  for (const b of d.bids) { const s = (b.submissions || []).find(x => x.id === subId); if (s) return s; }
+  return null;
+}
+
+function actEditSubmission(subId) {
+  const s = findSubmission(subId) || {};
+  showForm('✏️ Edit Submission (admin)', [
+    { id: 'amount', label: 'Amount $', type: 'number', required: true, value: s.amount },
+    { id: 'date_submitted', label: 'Date Submitted', type: 'date', required: true, value: s.date_submitted },
+    { id: 'approved_by', label: 'Approved By', type: 'text', required: true, value: s.approved_by },
+    { id: 'submission_type', label: 'Type', type: 'select', value: s.submission_type, options: [
+      { value: 'initial', label: 'Initial' }, { value: 'best_and_final', label: 'Best & Final' },
+      { value: 'scope_add', label: 'Scope add' }, { value: 'scope_remove', label: 'Scope remove' },
+      { value: 'revised', label: 'Revised' } ] },
+    { id: 'is_current', label: 'Current?', type: 'select', value: s.is_current ? 1 : 0,
+      options: [{ value: 1, label: 'Yes — current' }, { value: 0, label: 'No — superseded' }] },
+    { id: 'notes', label: 'Notes', type: 'textarea', value: s.notes },
+  ], data => api('PATCH', `/api/v2/admin/bid_submission/${subId}`, data), 'Save Changes');
 }
 
 function actEditJob(jobId) {
@@ -650,13 +712,6 @@ function actCloseBid(bidId) {
   ], data => api('POST', `/api/v2/bids/${bidId}/close`, data), 'Close', 'gray');
 }
 
-function actAddRevision(bidId) {
-  showForm('Add Revision (customer-requested change)', [
-    { id: 'amount', label: 'Revised Amount $', type: 'number', required: true },
-    { id: 'date', label: 'Revision Date', type: 'date', required: true, value: today },
-    { id: 'notes', label: 'What changed?', type: 'textarea' },
-  ], data => api('POST', `/api/v2/bids/${bidId}/revisions`, data), 'Add Revision', 'amber');
-}
 
 function actLogFollowup(parentType, parentId) {
   showForm('📝 Log Follow-up', [

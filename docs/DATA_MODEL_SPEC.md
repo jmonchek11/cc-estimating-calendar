@@ -24,6 +24,8 @@ erDiagram
     PROJECT ||--o{ BID : "has 0..n"
     BID ||--o| JOB : "award creates"
     JOB ||--o{ CHANGE_ORDER : "has 0..n"
+    BID ||--o{ BID_SUBMISSION : "has 1..n (one per customer + best-and-final)"
+    BID_SUBMISSION }o--|| COMPANY : "submitted to"
     BID }o--o{ COMPANY : "bid to (via BID_CUSTOMER)"
     BID_CUSTOMER }o--o{ CONTACT : "contacts on this bid"
     COMPANY ||--o{ CONTACT : "employs"
@@ -53,11 +55,10 @@ erDiagram
         date due_date
         date start_date
         string drawing_stage "free text: 50% budget, 80% budget, 100% CD, etc"
-        decimal estimate_amount "set at SUBMIT - current value incl revisions"
-        json revisions "[{rev_num, amount, date, notes}] post-submit customer revisions"
-        string jurisdiction "IBEW local - set at SUBMIT only"
-        date date_submitted "set at SUBMIT only"
-        string approved_by "set at SUBMIT only"
+        decimal estimate_amount "DENORMALIZED headline - derived from BID_SUBMISSION"
+        date date_submitted "DENORMALIZED headline - derived from BID_SUBMISSION"
+        string approved_by "DENORMALIZED headline - derived from BID_SUBMISSION"
+        string jurisdiction "IBEW local - project-level, set at first submit"
         date award_date "set at AWARD only"
         int awarded_company_id FK "set at AWARD only"
         date closed_date "set at CLOSE only"
@@ -118,6 +119,19 @@ erDiagram
         int bid_id FK
         int company_id FK
         json contact_ids "contacts at this company for this bid"
+    }
+
+    BID_SUBMISSION {
+        int id PK
+        int bid_id FK "required"
+        int company_id FK "which customer we submitted to"
+        decimal amount "the number sent"
+        date date_submitted
+        string approved_by "who approved this number internally"
+        string submission_type "initial | best_and_final | scope_add | scope_remove | revised"
+        string notes
+        bool is_current "latest submission to this customer"
+        datetime created_at
     }
 
     CONTACT {
@@ -206,8 +220,8 @@ stateDiagram-v2
 | → `opportunity` | Create Opportunity | Project (pick existing or create new) | Bid created with FK to project. Most opportunities immediately advance, but some stay here for internal discussion and never become bids. |
 | → `active_bid` (direct) | **+ New Bid** (choose new vs existing project) or **+ Add Bid to Project** | Project (new or existing) + all Start Bid inputs below (including the manually-entered bid #) | Creates the bid straight at `active_bid` with the entered bid # — bypasses the opportunity stage. The "+ Add Bid to Project" button on a project is how each drawing-stage re-bid (50% budget → 70% → 100% CD) gets its own B#### under the same project. **Adding a bid to a project supersedes the project's prior non-terminal bids** (see Superseding below). |
 | `opportunity` → `active_bid` | Start Bid | **Bid # (entered manually)**, customer company(ies), customer contact(s), estimator, salesperson, date received, due date. Optional: sub-estimators with scope (data, fire alarm, lighting, lighting controls, etc.), start date, drawing stage (free text: "50% budget", "80% budget", "100% CD"…) | **Bid # is typed in for now** (generated outside this system); auto-generation is a future goal. **Bid #s exist only from this point — opportunities have no bid #.** |
-| `active_bid` → `submitted` | Submit Bid | Estimate amount $, IBEW local jurisdiction, date estimate sent, estimate approved by | Follow-up timer starts: `next_followup_date = date_submitted + Settings.fu_initial_days`. Salesperson notified (email + webapp). |
-| `submitted` (stays) | Add Revision | Revised amount $, revision date, notes (what the customer requested) | Appends to `revisions[]`; `estimate_amount` updates to the new value. For customer-requested changes after submission that aren't a full re-bid. Each pricing round that IS a full re-bid gets its own new Bid under the same Project. |
+| `active_bid` → `submitted` | Submit Bid | **Customer** (one of the bid's customers), amount $, IBEW jurisdiction, date estimate sent, approved by | Creates the **first BidSubmission** (`submission_type = initial`). Follow-up timer starts: `next_followup_date = date_submitted + Settings.fu_initial_days`. Salesperson notified. |
+| `submitted` (stays) | + Add Submission | Customer, type (`best_and_final`/`scope_add`/`scope_remove`/`initial` to another customer/`revised`), amount $, date, approved by, notes | Creates another **BidSubmission**. Prior current submission to the *same customer* flips `is_current = 0`. Follow-up timer resets. Covers (a) submitting to additional customers under one bid #, and (b) best-and-final / add-or-remove with no new drawings. |
 | `submitted` → `submitted` | Log Follow-up (outcome: no decision) | Who was contacted, contact method (phone/email/in person), notes | Timer restarts: `next_followup_date = today + Settings.fu_recurring_days`. |
 | `submitted` → `awarded` | Awarded | Winning customer (picker shown ONLY if bid went to multiple companies; auto-selected if one), award date (autofilled today, editable) | **Job record created** (`project_id`, `winning_bid_id`, `awarded_company_id`, `award_date`, `job_number = null`). All-user award email sent. |
 | `submitted` → `not_awarded` | Not Awarded | Date notified (autofilled today, editable), customer feedback notes (optional) | Final state. |
@@ -219,9 +233,13 @@ stateDiagram-v2
 
 **Admin editing (admin view only) — see §3.3:** admins can edit fields on any non-terminal entity (Project, opportunity/active/submitted Bid, Job, active/submitted Change Order). For a submitted bid this includes the submission fields (estimate $, jurisdiction, date sent, approved by) and the superseded flag.
 
-**Post-submission price changes — two paths:**
-1. **Data-entry error fix (admin-only):** via Admin Edit (§3.3).
-2. **Customer-requested revision** (not a full re-bid): the "Add Revision" action logs the revision (amount, date, notes) to `revisions[]` and updates the current amount — any user involved with the bid can do this. Full re-prices at a new drawing stage are a **new Bid** under the same Project.
+**Submissions vs. re-bids — the dividing line:**
+- **Same drawings, customer wants a different/added/removed number, or best-and-final** → a **new BidSubmission** on the same bid (via + Add Submission). The prior submission to that customer becomes non-current but stays on the record.
+- **New drawing stage (50% → 70% → 100% CD)** → a **new Bid** under the same Project (re-bid; supersedes the prior bid).
+
+**Bid headline value:** the Bid's `estimate_amount` / `date_submitted` / `approved_by` are **denormalized** from BidSubmission — they show the most-recent current submission while bidding, and switch to the **awarded company's** submission once awarded. Source of truth is the BidSubmission collection; the headline keeps list/pipeline queries simple (one representative number per bid, not a sum across customers).
+
+**Admin editing:** submission $/date/approver are corrected on the **bid_submission** entity (the ✏️ on each submission row); editing one re-derives the bid's headline. See §3.3.
 
 ### 2.2 Job Lifecycle
 
@@ -286,11 +304,11 @@ stateDiagram-v2
 | start_date | — | ○ | ○ | ○ | ○ | ○ |
 | drawing_stage | — | ○ | ○ | ○ | ○ | ○ |
 | notes | ○ | ○ | ○ | ○ | ○ | ○ |
-| estimate_amount | ✕ | ✕ | ●R (set at submit; admin-editable after) | ● | ● | ✕ |
-| revisions[] | ✕ | ✕ | ○ (Add Revision action) | ● | ● | ✕ |
-| jurisdiction | ✕ | ✕ | ●R (set at submit; admin-editable after) | ● | ● | ✕ |
-| date_submitted | ✕ | ✕ | ●R (set at submit; admin-editable after) | ● | ● | ✕ |
-| approved_by | ✕ | ✕ | ●R (set at submit; admin-editable after) | ● | ● | ✕ |
+| estimate_amount | ✕ | ✕ | ● derived from BidSubmission | ● | ● | ✕ |
+| date_submitted | ✕ | ✕ | ● derived from BidSubmission | ● | ● | ✕ |
+| approved_by | ✕ | ✕ | ● derived from BidSubmission | ● | ● | ✕ |
+| jurisdiction | ✕ | ✕ | ●R (set at first submit; admin-editable) | ● | ● | ✕ |
+| BidSubmission rows | ✕ | ✕ | ●R (≥1; one per customer + best-and-final) | ● | ● | ✕ |
 | next_followup_date | ✕ | ✕ | ● system-managed | ✕ | ✕ | ✕ |
 | superseded | ✕ | ● auto/admin | ● auto/admin | ✕ | ✕ | ✕ |
 | award_date | ✕ | ✕ | ✕ | ●R (set at award) | ✕ | ✕ |
@@ -325,7 +343,8 @@ Admins can correct fields on any **non-terminal** entity through an "Edit" actio
 | Project | every project | name |
 | Bid — opportunity | opportunity bids | notes |
 | Bid — active_bid | active bids | bid #, estimator, salesperson, dates, drawing stage, notes |
-| Bid — submitted | submitted bids | the active-bid fields **plus** estimate $, jurisdiction, date sent, approved by, and the **superseded** flag |
+| Bid — submitted | submitted bids | the active-bid fields **plus** jurisdiction and the **superseded** flag (the per-customer $/date/approver live on submissions) |
+| BidSubmission | each submission row (✏️) | amount, date submitted, approved by, type, is_current, notes — editing re-derives the bid headline |
 | Job | every job | job #, PM, awarded company, award date |
 | Change Order — active_co | active COs | co #, name, dates, estimator, notes |
 | Change Order — submitted_co | submitted COs | the active-co fields **plus** estimate $, date submitted, approved by |
@@ -347,7 +366,8 @@ Admins can correct fields on any **non-terminal** entity through an "Edit" actio
 | 5 | `Contact.company` is free text | Cannot reliably link contacts to the companies we bid to | `Contact.company_id` FK to Company |
 | 6 | `stage` + `status` are **redundant** (`status:'Awarded'` duplicates `stage:'awarded'`) | Two fields must be kept in sync manually; the "null stage" bug came from exactly this class of problem | Single `stage` field; `status` eliminated |
 | 7 | No `submitted` stage — current `follow_up` stage conflates "submitted, awaiting decision" with the follow-up activity | Awkward stage naming; submission data (`date_estimate_sent`) can exist on non-submitted bids | Explicit `submitted` stage entered only via Submit button |
-| 8 | `phases` sub-document on Bid (50% Budget, 80% DD, CD Pricing…) | Phases are snapshots of bid fields — more duplicated data | **Resolved (Q4):** each pricing round is a separate Bid under the same Project, with a `drawing_stage` free-text field ("50% budget", "80% budget", "100% CD"…). Post-submission customer tweaks use `revisions[]` instead of a new bid (Q5) |
+| 8 | `phases` sub-document on Bid (50% Budget, 80% DD, CD Pricing…) | Phases are snapshots of bid fields — more duplicated data | **Resolved (Q4):** each pricing round is a separate Bid under the same Project, with a `drawing_stage` free-text field ("50% budget", "80% budget", "100% CD"…). Post-submission customer tweaks (no new drawings) are a new **BidSubmission** on the same bid |
+| 11 | Single submission per bid (flat `estimate_amount`/`date_submitted`/`approved_by` + `revisions[]`) | Can't represent multiple customers under one bid #, or per-customer best-and-final | **BidSubmission** entity: one row per (bid, customer) submission event; bid headline is denormalized from it |
 | 9 | `reminders` sub-document array on Bid | Can't attach reminders to Jobs or COs | Polymorphic `Reminder` entity |
 | 10 | `parent_bid_id` links CO-bids to awarded bids, but `getLinkedCOs` ALSO matches by job_number string | Dual-path linking caused the bid-shows-as-its-own-CO bug | Single FK: `ChangeOrder.job_id` |
 
@@ -407,7 +427,7 @@ Features built in v1, mapped onto the new model:
 | Data Cleanup page (issue chips, RFC/COR cleanup, customer propagation, job-number scan, bulk link) | ❌ Obsolete by design | These tools exist to reconcile the duplicated datapoints v2 eliminates. The "Awarded No Job #" view survives as a normal filter (jobs awaiting accounting's job #). |
 | Admin stage override | ⚠️ Keep, rarely needed | Still useful for correcting mistakes, but bad-stage data shouldn't occur in v2 |
 | Admin-only project rename (✏️ pencil) | ✅ | Confirmed (Q1) — many projects were misnamed in the original Excel; rename stays admin-only |
-| Bid "phases" (50% Budget, 80% DD…) | ✅ Replaced | Resolved (Q4): re-bid-under-same-project + `drawing_stage` text field per bid; `revisions[]` for post-submit customer tweaks |
+| Bid "phases" (50% Budget, 80% DD…) | ✅ Replaced | Resolved (Q4): re-bid-under-same-project + `drawing_stage` text field per bid; **BidSubmission** for post-submit customer tweaks / best-and-final |
 
 ---
 
@@ -476,7 +496,7 @@ All questions from the initial draft are resolved and folded into §1–§6 abov
 | Q2 | Who can void a CO; reopenable? | **Anyone** can void; voided and not-approved COs **can be reopened** (back to `submitted_co` if previously submitted, else `active_co`) | §2.3 state machine |
 | Q3 | Submit CO fields | **CO estimate $, date submitted, approved by** (approver can be a PM, estimator, or salesperson). No jurisdiction on COs | §2.3, §3.2 |
 | Q4 | What replaces phases | **Each pricing round = separate Bid under the same Project**, with a free-text `drawing_stage` field per bid ("50% budget", "80% budget", "100% CD"…) | §1 ERD, §2.1, §3.1, §4.1 #8 |
-| Q5 | Edit estimate $ after submission | **Admin-only direct edit** for data-entry errors. Customer-requested changes that aren't a full re-bid use the **Add Revision** action (`revisions[]`: amount, date, notes) which updates the current amount | §1 ERD, §2.1, §3.1 |
+| Q5 | Edit estimate $ after submission | **Admin** corrects a submission's amount via the bid_submission edit (data-entry fix). Customer-requested changes that aren't a full re-bid are a **new BidSubmission** (best-and-final / scope add/remove). Superseded by the BidSubmission design (structural break #11) | §1 ERD, §2.1, §3.3 |
 | Q6 | Who gets CO follow-up notifications | **The PM assigned to the Job** — `Job.pm_id` added | §1 ERD, §2.2, §2.3 |
 | Q7 | Split awards | **No — exactly one winner** per bid | §2.1 (as designed) |
 | Q8 | Legacy job list | AMY James Martin, William H Gray 30th Street Station, Bridesburg Recreation Center, CHOP Fuel Oil, Dillworth Plaza, Friend's Center 3rd Floor Renovations, Temple Infusion, UPenn Vlest Shoji Hall Lab Fitout. Manual Job creation is a **permanent feature** — more can be added after launch | §2.2, §6.2 |

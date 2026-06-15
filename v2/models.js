@@ -56,14 +56,15 @@ const BidSchema = new mongoose.Schema({
   drawing_stage:  { type: String, default: null },               // "50% budget", "80% budget", "100% CD"…
   notes:          { type: String, default: null },
 
-  // Set at SUBMIT only
-  estimate_amount:{ type: Number, default: null },               // current value (reflects latest revision)
-  jurisdiction:   { type: String, default: null },               // IBEW local
+  // Denormalized "headline" snapshot of the bid's current submission — kept in
+  // sync from BidSubmission (most-recent current submission, or the awarded
+  // company's submission once awarded). Source of truth is the BidSubmission
+  // collection; these exist so list/rollup queries stay simple.
+  estimate_amount:{ type: Number, default: null },
   date_submitted: { type: String, default: null },
   approved_by:    { type: String, default: null },
 
-  // Post-submit customer-requested revisions (not full re-bids)
-  revisions:      { type: [{ rev_num: Number, amount: Number, date: String, notes: String }], default: [] },
+  jurisdiction:   { type: String, default: null },               // IBEW local — project-level, set at first submit
 
   // Set at AWARD only
   award_date:         { type: String, default: null },
@@ -153,6 +154,25 @@ const BidCustomerSchema = new mongoose.Schema({
   contact_ids: { type: [Number], default: [] },                  // FK → Contact (at this company, for this bid)
 }, opts);
 
+// One row per submission EVENT: a number we sent to a specific customer.
+// A bid has many — one per customer, plus best-and-final / scope-change
+// re-submissions to the same customer (no new drawings). Replaces the old
+// per-bid submission fields + revisions[] array.
+const BID_SUBMISSION_TYPES = ['initial', 'best_and_final', 'scope_add', 'scope_remove', 'revised'];
+const BidSubmissionSchema = new mongoose.Schema({
+  _id:             Number,
+  bid_id:          { type: Number, required: true },             // FK → Bid
+  company_id:      { type: Number, required: true },             // FK → Company (who we submitted to)
+  amount:          { type: Number, default: null },
+  date_submitted:  { type: String, default: null },
+  approved_by:     { type: String, default: null },
+  submission_type: { type: String, enum: BID_SUBMISSION_TYPES, default: 'initial' },
+  notes:           { type: String, default: null },
+  is_current:      { type: Number, default: 1 },                 // latest submission to this customer
+  created_at:      { type: String, default: ts },
+  updated_at:      { type: String, default: ts },
+}, opts);
+
 const ContactSchema = new mongoose.Schema({
   _id:        Number,
   company_id: { type: Number, required: true },                  // FK → Company (no free-text company)
@@ -227,8 +247,9 @@ function getModels() {
     Bid:         c.model('Bid', BidSchema, 'bids'),
     Job:         c.model('Job', JobSchema, 'jobs'),
     ChangeOrder: c.model('ChangeOrder', ChangeOrderSchema, 'change_orders'),
-    Company:     c.model('Company', CompanySchema, 'companies'),
-    BidCustomer: c.model('BidCustomer', BidCustomerSchema, 'bid_customers'),
+    Company:       c.model('Company', CompanySchema, 'companies'),
+    BidCustomer:   c.model('BidCustomer', BidCustomerSchema, 'bid_customers'),
+    BidSubmission: c.model('BidSubmission', BidSubmissionSchema, 'bid_submissions'),
     Contact:     c.model('Contact', ContactSchema, 'contacts'),
     Followup:    c.model('Followup', FollowupSchema, 'followups'),
     Reminder:    c.model('Reminder', ReminderSchema, 'reminders'),
@@ -238,4 +259,4 @@ function getModels() {
   };
 }
 
-module.exports = { getConnection, getModels, V2_DB_NAME, BID_STAGES, CO_STAGES };
+module.exports = { getConnection, getModels, V2_DB_NAME, BID_STAGES, CO_STAGES, BID_SUBMISSION_TYPES };

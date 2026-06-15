@@ -63,7 +63,7 @@ router.patch('/api/v2/admin/:entity/:id',     requireAdmin, t(req => v2db.adminU
 router.post('/api/v2/bids/:id/award',         t(req => v2db.awardBid(req.params.id, req.body)));
 router.post('/api/v2/bids/:id/not-awarded',   t(req => v2db.notAwardBid(req.params.id, req.body)));
 router.post('/api/v2/bids/:id/close',         t(req => v2db.closeBid(req.params.id, req.body)));
-router.post('/api/v2/bids/:id/revisions',     t(req => v2db.addRevision(req.params.id, req.body)));
+router.post('/api/v2/bids/:id/submissions',   t(req => v2db.addSubmission(req.params.id, req.body)));
 
 // ── Follow-ups (bid or change_order parent) ───────────────────────────────────
 router.post('/api/v2/followups',              t(req => v2db.logFollowupV2({ ...req.body, contacted_by: req.body.contacted_by || req.session.userId })));

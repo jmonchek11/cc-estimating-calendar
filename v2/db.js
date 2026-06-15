@@ -87,9 +87,10 @@ async function getProjectDetail(projectId) {
   ]);
   const bidIds = bids.map(b => b._id);
   const jobIds = jobs.map(j => j._id);
-  const [cos, bidCustomers] = await Promise.all([
+  const [cos, bidCustomers, submissions] = await Promise.all([
     M.ChangeOrder.find({ job_id: { $in: jobIds } }).lean(),
     M.BidCustomer.find({ bid_id: { $in: bidIds } }).lean(),
+    M.BidSubmission.find({ bid_id: { $in: bidIds } }).sort({ date_submitted: 1, _id: 1 }).lean(),
   ]);
   const allFollowups = await M.Followup.find({
     $or: [
@@ -120,7 +121,18 @@ async function getProjectDetail(projectId) {
     jurisdiction: b.jurisdiction,
     date_submitted: b.date_submitted,
     approved_by: b.approved_by,
-    revisions: b.revisions || [],
+    submissions: submissions
+      .filter(sub => sub.bid_id === b._id)
+      .map(sub => ({
+        id: sub._id,
+        company: companyById[sub.company_id] || null,
+        amount: sub.amount,
+        date_submitted: sub.date_submitted,
+        approved_by: sub.approved_by,
+        submission_type: sub.submission_type,
+        notes: sub.notes,
+        is_current: !!sub.is_current,
+      })),
     award_date: b.award_date,
     awarded_company: b.awarded_company_id ? companyById[b.awarded_company_id] : null,
     date_not_awarded: b.date_not_awarded,
@@ -320,23 +332,90 @@ async function createDirectBid(data) {
   return { project_id, bid_id, bid_number: started.bid_number };
 }
 
-// ── active_bid → submitted ("Submit Bid") ─────────────────────────────────────
+// Resync the bid's denormalized headline (estimate_amount / date_submitted /
+// approved_by) from its submissions. Awarded bids show the winning company's
+// submission; otherwise the most-recent current submission (by date sent).
+async function recomputeBidHeadline(bidId) {
+  const M = getModels();
+  const bid = await M.Bid.findById(bidId).lean();
+  if (!bid) return;
+  let chosen = null;
+  if (bid.stage === 'awarded' && bid.awarded_company_id) {
+    chosen = (await M.BidSubmission.find({ bid_id: bidId, company_id: bid.awarded_company_id })
+      .sort({ is_current: -1, date_submitted: -1, _id: -1 }).limit(1).lean())[0];
+  }
+  if (!chosen) {
+    chosen = (await M.BidSubmission.find({ bid_id: bidId, is_current: 1 })
+      .sort({ date_submitted: -1, _id: -1 }).limit(1).lean())[0];
+  }
+  await M.Bid.updateOne({ _id: bidId }, { $set: {
+    estimate_amount: chosen ? chosen.amount : null,
+    date_submitted:  chosen ? chosen.date_submitted : null,
+    approved_by:     chosen ? chosen.approved_by : null,
+    updated_at: ts(),
+  }});
+}
+
+async function ensureBidCustomer(bidId, companyId) {
+  const M = getModels();
+  const exists = await M.BidCustomer.findOne({ bid_id: bidId, company_id: companyId }).lean();
+  if (!exists) throw new Error('That company is not a customer on this bid');
+}
+
+// ── active_bid → submitted ("Submit Bid") — creates the FIRST BidSubmission ───
 async function submitBid(id, data) {
   const M = getModels();
   const bid = await loadBid(id);
   if (bid.stage !== 'active_bid') throw new Error(`Cannot submit from stage '${bid.stage}'`);
-  require_(data, ['estimate_amount', 'jurisdiction', 'date_submitted', 'approved_by']);
+  require_(data, ['company_id', 'amount', 'jurisdiction', 'date_submitted', 'approved_by']);
+  const companyId = Number(data.company_id);
+  await ensureBidCustomer(bid._id, companyId);
+
   const s = await getSettings();
+  await M.BidSubmission.create({
+    _id: await nextId('bid_submissions'),
+    bid_id: bid._id, company_id: companyId,
+    amount: Number(data.amount), date_submitted: data.date_submitted, approved_by: data.approved_by,
+    submission_type: 'initial', notes: data.notes || null, is_current: 1,
+  });
   await M.Bid.updateOne({ _id: bid._id }, { $set: {
     stage: 'submitted',
-    estimate_amount: Number(data.estimate_amount),
     jurisdiction: String(data.jurisdiction),
-    date_submitted: data.date_submitted,
-    approved_by: data.approved_by,
     next_followup_date: addDays(data.date_submitted, s.fu_initial_days),
     updated_at: ts(),
   }});
+  await recomputeBidHeadline(bid._id);
   return { bid_id: bid._id, next_followup_date: addDays(data.date_submitted, s.fu_initial_days) };
+}
+
+// ── Add another submission to a submitted bid ─────────────────────────────────
+// Another customer, or a best-and-final / scope change to a customer we already
+// submitted to (no new drawings). Resets the follow-up clock.
+async function addSubmission(id, data) {
+  const M = getModels();
+  const bid = await loadBid(id);
+  if (bid.stage !== 'submitted') throw new Error(`Can only add submissions to a submitted bid (stage is '${bid.stage}')`);
+  require_(data, ['company_id', 'amount', 'date_submitted', 'approved_by', 'submission_type']);
+  const companyId = Number(data.company_id);
+  await ensureBidCustomer(bid._id, companyId);
+
+  // The prior current submission to this same customer is no longer current.
+  await M.BidSubmission.updateMany(
+    { bid_id: bid._id, company_id: companyId, is_current: 1 },
+    { $set: { is_current: 0, updated_at: ts() } }
+  );
+  await M.BidSubmission.create({
+    _id: await nextId('bid_submissions'),
+    bid_id: bid._id, company_id: companyId,
+    amount: Number(data.amount), date_submitted: data.date_submitted, approved_by: data.approved_by,
+    submission_type: data.submission_type, notes: data.notes || null, is_current: 1,
+  });
+  const s = await getSettings();
+  await M.Bid.updateOne({ _id: bid._id }, { $set: {
+    next_followup_date: addDays(data.date_submitted, s.fu_initial_days), updated_at: ts(),
+  }});
+  await recomputeBidHeadline(bid._id);
+  return { bid_id: bid._id };
 }
 
 // ── Admin: edit any field on any entity (admin view only) ─────────────────────
@@ -344,19 +423,22 @@ async function submitBid(id, data) {
 // active / submitted), Jobs, and Change Orders (active / submitted). The route
 // enforces admin; this whitelists editable fields per entity and never changes
 // `stage` (transitions stay in the state machine).
+// Bid submission fields (estimate $, date sent, approved by) are edited on the
+// bid_submission entity, not the bid — the bid's headline is derived from them.
 const ADMIN_EDITABLE = {
-  project:      ['name'],
-  bid:          ['bid_number', 'estimator_id', 'salesperson_id', 'date_received', 'due_date', 'start_date',
-                 'drawing_stage', 'notes', 'estimate_amount', 'jurisdiction', 'date_submitted', 'approved_by', 'superseded'],
-  job:          ['job_number', 'pm_id', 'awarded_company_id', 'award_date'],
-  change_order: ['co_number', 'name', 'due_date', 'start_date', 'estimator_id', 'notes',
-                 'estimate_amount', 'date_submitted', 'approved_by'],
+  project:        ['name'],
+  bid:            ['bid_number', 'estimator_id', 'salesperson_id', 'date_received', 'due_date', 'start_date',
+                   'drawing_stage', 'notes', 'jurisdiction', 'superseded'],
+  job:            ['job_number', 'pm_id', 'awarded_company_id', 'award_date'],
+  change_order:   ['co_number', 'name', 'due_date', 'start_date', 'estimator_id', 'notes',
+                   'estimate_amount', 'date_submitted', 'approved_by'],
+  bid_submission: ['company_id', 'amount', 'date_submitted', 'approved_by', 'submission_type', 'notes', 'is_current'],
 };
-const NUMERIC_FK = new Set(['estimator_id', 'salesperson_id', 'pm_id', 'awarded_company_id']);
+const NUMERIC_FK = new Set(['estimator_id', 'salesperson_id', 'pm_id', 'awarded_company_id', 'company_id']);
 
 async function adminUpdate(entity, id, data) {
   const M = getModels();
-  const Model = { project: M.Project, bid: M.Bid, job: M.Job, change_order: M.ChangeOrder }[entity];
+  const Model = { project: M.Project, bid: M.Bid, job: M.Job, change_order: M.ChangeOrder, bid_submission: M.BidSubmission }[entity];
   if (!Model) throw new Error('Unknown entity: ' + entity);
   const allowed = ADMIN_EDITABLE[entity];
   const upd = { updated_at: ts() };
@@ -364,12 +446,17 @@ async function adminUpdate(entity, id, data) {
     if (!(f in data)) continue;
     let v = data[f] === '' ? null : data[f];
     if (NUMERIC_FK.has(f)) v = v ? Number(v) : null;
-    else if (f === 'estimate_amount') v = (v == null) ? null : Number(v);
-    else if (f === 'superseded') v = v ? 1 : 0;
+    else if (f === 'amount') v = (v == null) ? null : Number(v);
+    else if (f === 'superseded' || f === 'is_current') v = v ? 1 : 0;
     upd[f] = v;
   }
   const r = await Model.updateOne({ _id: Number(id) }, { $set: upd });
   if (!r.matchedCount) throw new Error(entity + ' not found');
+  // Editing a submission can change the bid's derived headline.
+  if (entity === 'bid_submission') {
+    const sub = await M.BidSubmission.findById(Number(id)).lean();
+    if (sub) await recomputeBidHeadline(sub.bid_id);
+  }
   return { entity, id: Number(id) };
 }
 
@@ -392,6 +479,7 @@ async function awardBid(id, data) {
     stage: 'awarded', award_date: data.award_date, awarded_company_id: winner,
     next_followup_date: null, updated_at: ts(),
   }});
+  await recomputeBidHeadline(bid._id);   // headline now reflects the winner's submission
   const jobId = await nextId('jobs');
   await M.Job.create({
     _id: jobId, project_id: bid.project_id, winning_bid_id: bid._id,
@@ -429,23 +517,6 @@ async function closeBid(id, data) {
     updated_at: ts(),
   }});
   return { bid_id: bid._id };
-}
-
-// ── Add Revision (submitted only) ─────────────────────────────────────────────
-async function addRevision(id, data) {
-  const M = getModels();
-  const bid = await loadBid(id);
-  if (bid.stage !== 'submitted') throw new Error(`Revisions only apply to submitted bids (stage is '${bid.stage}')`);
-  require_(data, ['amount', 'date']);
-  const rev = {
-    rev_num: (bid.revisions || []).length + 1,
-    amount: Number(data.amount), date: data.date, notes: data.notes || null,
-  };
-  await M.Bid.updateOne({ _id: bid._id }, {
-    $push: { revisions: rev },
-    $set: { estimate_amount: rev.amount, updated_at: ts() },
-  });
-  return { bid_id: bid._id, rev_num: rev.rev_num };
 }
 
 // ── Follow-up logging (bid or change_order; no_decision restarts the timer) ───
@@ -592,8 +663,8 @@ async function reopenCO(id) {
 
 module.exports = {
   getProjects, getProjectDetail, getMeta, nextId,
-  createOpportunity, createDirectBid, startBid, submitBid, adminUpdate, awardBid, notAwardBid, closeBid,
-  addRevision, logFollowupV2,
+  createOpportunity, createDirectBid, startBid, submitBid, addSubmission, adminUpdate, awardBid, notAwardBid, closeBid,
+  logFollowupV2,
   createLegacyJob, updateJob,
   createChangeOrder, submitCO, approveCO, notApproveCO, voidCO, reopenCO,
 };
