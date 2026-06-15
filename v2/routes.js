@@ -37,6 +37,7 @@ const t = (fn) => async (req, res) => {
 };
 
 router.post('/api/v2/opportunities',          t(req => v2db.createOpportunity({ ...req.body, created_by: req.session.userId })));
+router.post('/api/v2/bids',                   t(req => v2db.createDirectBid({ ...req.body, created_by: req.session.userId })));
 router.post('/api/v2/bids/:id/start',         t(req => v2db.startBid(req.params.id, req.body)));
 router.post('/api/v2/bids/:id/submit',        t(req => v2db.submitBid(req.params.id, req.body)));
 router.post('/api/v2/bids/:id/award',         t(req => v2db.awardBid(req.params.id, req.body)));

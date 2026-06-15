@@ -115,6 +115,7 @@
         <div class="page-subtitle">Project → Bids → Job → Change Orders · fake dataset for review</div>
       </div>
       <div style="display:flex;gap:8px">
+        <button class="v2-btn green" style="padding:8px 14px;font-size:12px" onclick="actNewBid()">+ New Bid</button>
         <button class="v2-btn blue" style="padding:8px 14px;font-size:12px" onclick="actNewOpportunity()">+ New Opportunity</button>
         <button class="v2-btn outline" style="padding:8px 14px;font-size:12px" onclick="actNewLegacyJob()">+ Legacy Job</button>
       </div>
@@ -143,6 +144,7 @@ const stageBadge = s => `<span class="badge badge-stage" style="color:${STAGE_CO
 const ini = m => m ? `<span class="initials-pill" style="transform:scale(.85);transform-origin:center" title="${esc(m.name || '')}">${esc(m.initials)}</span>` : '';
 
 let META = { companies: [], team: [] };
+let ALL_PROJECTS = [];            // [{id, name}] for the "existing project" picker
 let OPEN_PROJECT = null;          // project id whose hierarchy is expanded
 let DETAIL_CACHE = {};            // project id → detail payload (for award winner picker)
 
@@ -164,6 +166,7 @@ async function load() {
     const r = await fetch('/api/v2/projects');
     if (r.status === 401) { main.innerHTML = '<div class="err-card">Not logged in. <a href="/">Log in on the main app</a> first, then come back to /v2.</div>'; return; }
     projects = await r.json();
+    ALL_PROJECTS = projects.map(p => ({ id: p.id, name: p.name }));
     if (!META.companies.length) META = await api('GET', '/api/v2/meta');
   } catch (e) { main.innerHTML = `<div class="err-card">${esc(e.message)}</div>`; return; }
 
@@ -225,7 +228,10 @@ async function refresh() {
 }
 
 function renderHierarchy(d) {
-  let html = '';
+  let html = `<div class="v2-actions" style="margin:0 0 4px">
+    <button class="v2-btn green" onclick="actAddBidToProject(${d.id})">+ Add Bid to this Project</button>
+    <span style="font-size:11px;color:var(--text-muted);align-self:center">new B26-#### for another drawing stage / re-bid</span>
+  </div>`;
   const jobByWinningBid = {};
   d.jobs.forEach(j => { if (j.winning_bid_id) jobByWinningBid[j.winning_bid_id] = j; });
   for (const b of d.bids) {
@@ -434,6 +440,61 @@ const teamOpts = (roleFilter) => META.team
   .filter(t => !roleFilter || roleFilter.includes(t.role))
   .map(t => ({ value: t.id, label: `${t.name} (${t.initials})` }));
 const companyOpts = () => META.companies.map(c => ({ value: c.id, label: c.name }));
+const projectOpts = () => ALL_PROJECTS.map(p => ({ value: p.id, label: p.name }));
+
+// Shared Start-Bid field set (used by direct-bid creation)
+const startBidFields = () => ([
+  { id: 'company_ids', label: 'Customer(s) — who are we bidding to?', type: 'multicheck', required: true, options: companyOpts() },
+  { id: 'estimator_id', label: 'Estimator', type: 'select', required: true, options: teamOpts(['estimator']) },
+  { id: 'salesperson_id', label: 'Salesperson', type: 'select', required: true, options: teamOpts(['sales']) },
+  { id: 'date_received', label: 'Date Received', type: 'date', required: true, value: today },
+  { id: 'due_date', label: 'Due Date', type: 'date', required: true },
+  { id: 'start_date', label: 'Start Date', type: 'date' },
+  { id: 'drawing_stage', label: 'Drawing Stage', type: 'text', placeholder: '50% budget, 70% budget, 100% CD…' },
+]);
+
+// + New Bid → choose new vs existing project, then go straight to active_bid
+function actNewBid() {
+  document.getElementById('v2-form-overlay')?.remove();
+  const ov = document.createElement('div');
+  ov.className = 'v2-overlay'; ov.id = 'v2-form-overlay';
+  ov.onclick = e => { if (e.target === ov) ov.remove(); };
+  ov.innerHTML = `
+    <div class="v2-modal" style="max-width:380px">
+      <div class="v2-modal-hd">+ New Bid<button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">✕</button></div>
+      <div class="v2-modal-bd">
+        <p style="font-size:13px;color:var(--text-muted);margin:0">Is this bid for a new project or an existing one?</p>
+        <button class="v2-btn green" style="padding:11px" onclick="newBidForm({ newProject: true })">🆕 Start a New Project</button>
+        <button class="v2-btn blue" style="padding:11px" onclick="newBidForm({ existingProject: true })">📁 Existing Project</button>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+}
+
+// "+ Add Bid to this Project" inside a project's hierarchy (re-bid / new stage)
+function actAddBidToProject(projectId) {
+  const name = (ALL_PROJECTS.find(p => p.id === projectId) || {}).name || '';
+  newBidForm({ projectId, projectName: name });
+}
+
+// Direct bid creation. opts: { projectId, projectName } (locked project) |
+// { newProject:true } | { existingProject:true }
+function newBidForm({ projectId, projectName, newProject, existingProject } = {}) {
+  const fields = [];
+  let title = '+ New Bid';
+  if (projectId) {
+    title = `+ Add Bid — ${esc(projectName)}`;
+  } else if (newProject) {
+    fields.push({ id: 'project_name', label: 'New Project Name', type: 'text', required: true, placeholder: 'e.g. Einstein ED Renovation' });
+  } else { // existingProject
+    fields.push({ id: 'project_id', label: 'Project', type: 'select', required: true, options: projectOpts() });
+  }
+  fields.push(...startBidFields());
+  showForm(title, fields, data => {
+    if (projectId) data.project_id = projectId;
+    return api('POST', '/api/v2/bids', data);
+  }, 'Create Bid', 'green');
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ACTIONS — one per state-machine transition
@@ -456,15 +517,7 @@ function actNewLegacyJob() {
 }
 
 function actStartBid(bidId) {
-  showForm('→ Start Bid', [
-    { id: 'company_ids', label: 'Customer(s) — who are we bidding to?', type: 'multicheck', required: true, options: companyOpts() },
-    { id: 'estimator_id', label: 'Estimator', type: 'select', required: true, options: teamOpts(['estimator']) },
-    { id: 'salesperson_id', label: 'Salesperson', type: 'select', required: true, options: teamOpts(['sales']) },
-    { id: 'date_received', label: 'Date Received', type: 'date', required: true, value: today },
-    { id: 'due_date', label: 'Due Date', type: 'date', required: true },
-    { id: 'start_date', label: 'Start Date', type: 'date' },
-    { id: 'drawing_stage', label: 'Drawing Stage', type: 'text', placeholder: '50% budget, 80% budget, 100% CD…' },
-  ], data => api('POST', `/api/v2/bids/${bidId}/start`, data), 'Start Bid');
+  showForm('→ Start Bid', startBidFields(), data => api('POST', `/api/v2/bids/${bidId}/start`, data), 'Start Bid');
 }
 
 function actSubmitBid(bidId) {

@@ -293,6 +293,21 @@ async function startBid(id, data) {
   return { bid_id: bid._id, bid_number };
 }
 
+// ── Create a bid directly at active_bid (bypasses the opportunity stage) ──────
+// Used by the "+ New Bid" button and "+ Add Bid to Project" (e.g. a new drawing
+// stage — 50% budget, then 70%, etc., each its own B26 # under the same project).
+// Attaches to an existing project (project_id) or creates a new one
+// (project_name), then runs the same validated Start Bid logic.
+async function createDirectBid(data) {
+  const { project_id, bid_id } = await createOpportunity({
+    project_id: data.project_id,
+    project_name: data.project_name,
+    created_by: data.created_by,
+  });
+  const started = await startBid(bid_id, data);
+  return { project_id, bid_id, bid_number: started.bid_number };
+}
+
 // ── active_bid → submitted ("Submit Bid") ─────────────────────────────────────
 async function submitBid(id, data) {
   const M = getModels();
@@ -531,7 +546,7 @@ async function reopenCO(id) {
 
 module.exports = {
   getProjects, getProjectDetail, getMeta, nextId,
-  createOpportunity, startBid, submitBid, awardBid, notAwardBid, closeBid,
+  createOpportunity, createDirectBid, startBid, submitBid, awardBid, notAwardBid, closeBid,
   addRevision, logFollowupV2,
   createLegacyJob, updateJob,
   createChangeOrder, submitCO, approveCO, notApproveCO, voidCO, reopenCO,
