@@ -184,7 +184,8 @@ erDiagram
 
 ```mermaid
 stateDiagram-v2
-    [*] --> opportunity : create (project picked/created first)
+    [*] --> opportunity : Create Opportunity (project picked/created first)
+    [*] --> active_bid : New Bid / Add Bid (skips opportunity)
     opportunity --> active_bid : "Start Bid" button
     opportunity --> closed : "Close" button
     active_bid --> submitted : "Submit Bid" button
@@ -197,9 +198,12 @@ stateDiagram-v2
     closed --> [*]
 ```
 
+**Two ways a Bid is born:** (a) as an `opportunity` first, then promoted via Start Bid; or (b) **created directly at `active_bid`**, skipping the opportunity stage — for when we already know we're bidding. Both paths require the same Start Bid inputs and both assign the bid #. Direct creation is used for a brand-new project, an existing project (a re-bid at a new drawing stage), or any time the internal-discussion opportunity step isn't needed.
+
 | Transition | Button | Required inputs | System actions |
 |---|---|---|---|
 | → `opportunity` | Create Opportunity | Project (pick existing or create new) | Bid created with FK to project. Most opportunities immediately advance, but some stay here for internal discussion and never become bids. |
+| → `active_bid` (direct) | **+ New Bid** (choose new vs existing project) or **+ Add Bid to Project** | Project (new or existing) + all Start Bid inputs below | Creates the bid straight at `active_bid` with a bid # — bypasses the opportunity stage. The "+ Add Bid to Project" button on a project is how each drawing-stage re-bid (50% budget → 70% → 100% CD) gets its own B#### under the same project. |
 | `opportunity` → `active_bid` | Start Bid | Customer company(ies), customer contact(s), estimator, salesperson, date received, due date. Optional: sub-estimators with scope (data, fire alarm, lighting, lighting controls, etc.), start date, drawing stage (free text: "50% budget", "80% budget", "100% CD"…) | Bid # assigned (B-year-sequence). **Bid #s exist only from this point — opportunities have no bid #.** |
 | `active_bid` → `submitted` | Submit Bid | Estimate amount $, IBEW local jurisdiction, date estimate sent, estimate approved by | Follow-up timer starts: `next_followup_date = date_submitted + Settings.fu_initial_days`. Salesperson notified (email + webapp). |
 | `submitted` (stays) | Add Revision | Revised amount $, revision date, notes (what the customer requested) | Appends to `revisions[]`; `estimate_amount` updates to the new value. For customer-requested changes after submission that aren't a full re-bid. Each pricing round that IS a full re-bid gets its own new Bid under the same Project. |
