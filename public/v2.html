@@ -144,6 +144,7 @@ const stageBadge = s => `<span class="badge badge-stage" style="color:${STAGE_CO
 const ini = m => m ? `<span class="initials-pill" style="transform:scale(.85);transform-origin:center" title="${esc(m.name || '')}">${esc(m.initials)}</span>` : '';
 
 let META = { companies: [], team: [] };
+let CURRENT_USER = null;          // { id, name, is_admin } — gates admin-only actions
 let ALL_PROJECTS = [];            // [{id, name}] for the "existing project" picker
 let OPEN_PROJECT = null;          // project id whose hierarchy is expanded
 let DETAIL_CACHE = {};            // project id → detail payload (for award winner picker)
@@ -167,7 +168,7 @@ async function load() {
     if (r.status === 401) { main.innerHTML = '<div class="err-card">Not logged in. <a href="/">Log in on the main app</a> first, then come back to /v2.</div>'; return; }
     projects = await r.json();
     ALL_PROJECTS = projects.map(p => ({ id: p.id, name: p.name }));
-    if (!META.companies.length) META = await api('GET', '/api/v2/meta');
+    if (!META.companies.length) { META = await api('GET', '/api/v2/meta'); CURRENT_USER = META.current_user; }
   } catch (e) { main.innerHTML = `<div class="err-card">${esc(e.message)}</div>`; return; }
 
   main.innerHTML = projects.map(p => `
@@ -287,7 +288,8 @@ function bidActions(b) {
     btns = `<button class="v2-btn blue" onclick="actLogFollowup('bid',${b.id})">📝 Log Follow-up</button>
             <button class="v2-btn amber" onclick="actAddRevision(${b.id})">Add Revision</button>
             <button class="v2-btn green" onclick="actAwardBid(${b.id})">✓ Awarded</button>
-            <button class="v2-btn red" onclick="actNotAwarded(${b.id})">✗ Not Awarded</button>`;
+            <button class="v2-btn red" onclick="actNotAwarded(${b.id})">✗ Not Awarded</button>
+            ${CURRENT_USER?.is_admin ? `<button class="v2-btn outline" onclick="actEditSubmission(${b.id})">✏️ Edit Submission</button>` : ''}`;
   }
   return btns ? `<div class="v2-actions">${btns}</div>` : '';
 }
@@ -444,6 +446,7 @@ const projectOpts = () => ALL_PROJECTS.map(p => ({ value: p.id, label: p.name })
 
 // Shared Start-Bid field set (used by direct-bid creation)
 const startBidFields = () => ([
+  { id: 'bid_number', label: 'Bid # (entered manually for now)', type: 'text', required: true, placeholder: 'B26-0198' },
   { id: 'company_ids', label: 'Customer(s) — who are we bidding to?', type: 'multicheck', required: true, options: companyOpts() },
   { id: 'estimator_id', label: 'Estimator', type: 'select', required: true, options: teamOpts(['estimator']) },
   { id: 'salesperson_id', label: 'Salesperson', type: 'select', required: true, options: teamOpts(['sales']) },
@@ -527,6 +530,17 @@ function actSubmitBid(bidId) {
     { id: 'date_submitted', label: 'Date Estimate Sent', type: 'date', required: true, value: today },
     { id: 'approved_by', label: 'Estimate Approved By', type: 'text', required: true },
   ], data => api('POST', `/api/v2/bids/${bidId}/submit`, data), 'Submit Bid', 'green');
+}
+
+// Admin-only: correct the four fields captured at submission, pre-filled with current values
+function actEditSubmission(bidId) {
+  const bid = DETAIL_CACHE[OPEN_PROJECT]?.bids.find(b => b.id === bidId) || {};
+  showForm('✏️ Edit Submission (admin)', [
+    { id: 'estimate_amount', label: 'Estimate Amount $', type: 'number', required: true, value: bid.estimate_amount },
+    { id: 'jurisdiction', label: 'IBEW Local Jurisdiction', type: 'text', required: true, value: bid.jurisdiction },
+    { id: 'date_submitted', label: 'Date Estimate Sent', type: 'date', required: true, value: bid.date_submitted },
+    { id: 'approved_by', label: 'Estimate Approved By', type: 'text', required: true, value: bid.approved_by },
+  ], data => api('PATCH', `/api/v2/bids/${bidId}/submission`, data), 'Save Changes', 'blue');
 }
 
 function actAwardBid(bidId) {

@@ -265,11 +265,12 @@ async function startBid(id, data) {
   const M = getModels();
   const bid = await loadBid(id);
   if (bid.stage !== 'opportunity') throw new Error(`Cannot start bid from stage '${bid.stage}'`);
-  require_(data, ['company_ids', 'estimator_id', 'salesperson_id', 'date_received', 'due_date']);
+  require_(data, ['bid_number', 'company_ids', 'estimator_id', 'salesperson_id', 'date_received', 'due_date']);
   if (!Array.isArray(data.company_ids) || !data.company_ids.length) throw new Error('At least one customer company is required');
 
-  const counter = await M.Counter.findByIdAndUpdate('bid_number_2026', { $inc: { seq: 1 } }, { new: true, upsert: true });
-  const bid_number = `B26-${String(counter.seq).padStart(4, '0')}`;
+  // Bid # is entered manually for now (generated outside this system).
+  // Future: auto-generate the B-year-sequence here.
+  const bid_number = String(data.bid_number).trim();
 
   await M.Bid.updateOne({ _id: bid._id }, { $set: {
     stage: 'active_bid',
@@ -325,6 +326,24 @@ async function submitBid(id, data) {
     updated_at: ts(),
   }});
   return { bid_id: bid._id, next_followup_date: addDays(data.date_submitted, s.fu_initial_days) };
+}
+
+// ── Admin: edit the fields captured at submission (submitted bids only) ───────
+// Per spec §3.1 — admins can correct estimate $, jurisdiction, date sent, and
+// approved-by after submission. Route enforces admin; this enforces stage.
+async function editSubmission(id, data) {
+  const M = getModels();
+  const bid = await loadBid(id);
+  if (bid.stage !== 'submitted') throw new Error(`Submission fields are only editable while the bid is 'submitted' (stage is '${bid.stage}')`);
+  require_(data, ['estimate_amount', 'jurisdiction', 'date_submitted', 'approved_by']);
+  await M.Bid.updateOne({ _id: bid._id }, { $set: {
+    estimate_amount: Number(data.estimate_amount),
+    jurisdiction: String(data.jurisdiction),
+    date_submitted: data.date_submitted,
+    approved_by: data.approved_by,
+    updated_at: ts(),
+  }});
+  return { bid_id: bid._id };
 }
 
 // ── submitted → awarded ("Awarded") — creates the Job ─────────────────────────
@@ -546,7 +565,7 @@ async function reopenCO(id) {
 
 module.exports = {
   getProjects, getProjectDetail, getMeta, nextId,
-  createOpportunity, createDirectBid, startBid, submitBid, awardBid, notAwardBid, closeBid,
+  createOpportunity, createDirectBid, startBid, submitBid, editSubmission, awardBid, notAwardBid, closeBid,
   addRevision, logFollowupV2,
   createLegacyJob, updateJob,
   createChangeOrder, submitCO, approveCO, notApproveCO, voidCO, reopenCO,

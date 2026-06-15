@@ -203,8 +203,8 @@ stateDiagram-v2
 | Transition | Button | Required inputs | System actions |
 |---|---|---|---|
 | → `opportunity` | Create Opportunity | Project (pick existing or create new) | Bid created with FK to project. Most opportunities immediately advance, but some stay here for internal discussion and never become bids. |
-| → `active_bid` (direct) | **+ New Bid** (choose new vs existing project) or **+ Add Bid to Project** | Project (new or existing) + all Start Bid inputs below | Creates the bid straight at `active_bid` with a bid # — bypasses the opportunity stage. The "+ Add Bid to Project" button on a project is how each drawing-stage re-bid (50% budget → 70% → 100% CD) gets its own B#### under the same project. |
-| `opportunity` → `active_bid` | Start Bid | Customer company(ies), customer contact(s), estimator, salesperson, date received, due date. Optional: sub-estimators with scope (data, fire alarm, lighting, lighting controls, etc.), start date, drawing stage (free text: "50% budget", "80% budget", "100% CD"…) | Bid # assigned (B-year-sequence). **Bid #s exist only from this point — opportunities have no bid #.** |
+| → `active_bid` (direct) | **+ New Bid** (choose new vs existing project) or **+ Add Bid to Project** | Project (new or existing) + all Start Bid inputs below (including the manually-entered bid #) | Creates the bid straight at `active_bid` with the entered bid # — bypasses the opportunity stage. The "+ Add Bid to Project" button on a project is how each drawing-stage re-bid (50% budget → 70% → 100% CD) gets its own B#### under the same project. |
+| `opportunity` → `active_bid` | Start Bid | **Bid # (entered manually)**, customer company(ies), customer contact(s), estimator, salesperson, date received, due date. Optional: sub-estimators with scope (data, fire alarm, lighting, lighting controls, etc.), start date, drawing stage (free text: "50% budget", "80% budget", "100% CD"…) | **Bid # is typed in for now** (generated outside this system); auto-generation is a future goal. **Bid #s exist only from this point — opportunities have no bid #.** |
 | `active_bid` → `submitted` | Submit Bid | Estimate amount $, IBEW local jurisdiction, date estimate sent, estimate approved by | Follow-up timer starts: `next_followup_date = date_submitted + Settings.fu_initial_days`. Salesperson notified (email + webapp). |
 | `submitted` (stays) | Add Revision | Revised amount $, revision date, notes (what the customer requested) | Appends to `revisions[]`; `estimate_amount` updates to the new value. For customer-requested changes after submission that aren't a full re-bid. Each pricing round that IS a full re-bid gets its own new Bid under the same Project. |
 | `submitted` → `submitted` | Log Follow-up (outcome: no decision) | Who was contacted, contact method (phone/email/in person), notes | Timer restarts: `next_followup_date = today + Settings.fu_recurring_days`. |
@@ -215,7 +215,7 @@ stateDiagram-v2
 **Fields that DO NOT EXIST on the bid form during `opportunity`/`active_bid`:** job #, estimate $, jurisdiction, date estimate sent, estimate approved by, next follow-up date, bid result, award date, awarded contractor. They are collected by the transition modals, never by the edit form.
 
 **Post-submission price changes — two distinct paths:**
-1. **Data-entry error fix:** `estimate_amount` is directly editable after submission by **admins only**.
+1. **Data-entry error fix (admin-only):** admins can directly edit **all four fields captured at submission** — estimate amount $, IBEW jurisdiction, date estimate sent, and estimate approved by — via an "Edit Submission" action available only while the bid is `submitted`. (The endpoint enforces admin via the logged-in user's `is_admin` flag.)
 2. **Customer-requested revision** (not a full re-bid): the "Add Revision" action logs the revision (amount, date, notes) to `revisions[]` and updates the current amount — any user involved with the bid can do this. Full re-prices at a new drawing stage are a **new Bid** under the same Project.
 
 ### 2.2 Job Lifecycle
@@ -270,7 +270,7 @@ stateDiagram-v2
 | Field | opportunity | active_bid | submitted | awarded | not_awarded | closed |
 |---|---|---|---|---|---|---|
 | project_id | ●R | ●R | ● | ● | ● | ● |
-| bid_number | — | ●R auto | ● | ● | ● | ● |
+| bid_number | — | ●R manual | ● | ● | ● | ● |
 | customers (companies) | ○ | ●R | ● | ● | ● | ● |
 | customer contacts | ○ | ●R | ● | ● | ● | ● |
 | estimator_id | ○ | ●R | ● | ● | ● | ● |
@@ -281,11 +281,11 @@ stateDiagram-v2
 | start_date | — | ○ | ○ | ○ | ○ | ○ |
 | drawing_stage | — | ○ | ○ | ○ | ○ | ○ |
 | notes | ○ | ○ | ○ | ○ | ○ | ○ |
-| estimate_amount | ✕ | ✕ | ●R (set at submit; admin-only direct edit after) | ● | ● | ✕ |
+| estimate_amount | ✕ | ✕ | ●R (set at submit; admin Edit Submission after) | ● | ● | ✕ |
 | revisions[] | ✕ | ✕ | ○ (Add Revision action) | ● | ● | ✕ |
-| jurisdiction | ✕ | ✕ | ●R (set at submit) | ● | ● | ✕ |
-| date_submitted | ✕ | ✕ | ●R (set at submit) | ● | ● | ✕ |
-| approved_by | ✕ | ✕ | ●R (set at submit) | ● | ● | ✕ |
+| jurisdiction | ✕ | ✕ | ●R (set at submit; admin Edit Submission after) | ● | ● | ✕ |
+| date_submitted | ✕ | ✕ | ●R (set at submit; admin Edit Submission after) | ● | ● | ✕ |
+| approved_by | ✕ | ✕ | ●R (set at submit; admin Edit Submission after) | ● | ● | ✕ |
 | next_followup_date | ✕ | ✕ | ● system-managed | ✕ | ✕ | ✕ |
 | award_date | ✕ | ✕ | ✕ | ●R (set at award) | ✕ | ✕ |
 | awarded_company_id | ✕ | ✕ | ✕ | ●R (set at award) | ✕ | ✕ |

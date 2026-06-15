@@ -7,8 +7,18 @@
  */
 const express = require('express');
 const v2db = require('./db');
+const maindb = require('../db');   // v1 db — for the logged-in user's admin flag
 
 const router = express.Router();
+
+// Admin gate — the logged-in user is a real v1 user; check their is_admin flag.
+async function requireAdmin(req, res, next) {
+  try {
+    const actor = await maindb.getMember(req.session.userId);
+    if (!actor?.is_admin) return res.status(403).json({ error: 'Admin only' });
+    next();
+  } catch (e) { res.status(500).json({ error: e.message }); }
+}
 
 router.get('/api/v2/projects', async (req, res) => {
   try { res.json(await v2db.getProjects()); }
@@ -24,8 +34,15 @@ router.get('/api/v2/projects/:id', async (req, res) => {
 });
 
 router.get('/api/v2/meta', async (req, res) => {
-  try { res.json(await v2db.getMeta()); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  try {
+    const meta = await v2db.getMeta();
+    let current_user = null;
+    try {
+      const m = await maindb.getMember(req.session.userId);
+      if (m) current_user = { id: m.id, name: m.name, is_admin: !!m.is_admin };
+    } catch { /* ignore — current_user stays null */ }
+    res.json({ ...meta, current_user });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ── State machine: bids ────────────────────────────────────────────────────────
@@ -40,6 +57,7 @@ router.post('/api/v2/opportunities',          t(req => v2db.createOpportunity({ 
 router.post('/api/v2/bids',                   t(req => v2db.createDirectBid({ ...req.body, created_by: req.session.userId })));
 router.post('/api/v2/bids/:id/start',         t(req => v2db.startBid(req.params.id, req.body)));
 router.post('/api/v2/bids/:id/submit',        t(req => v2db.submitBid(req.params.id, req.body)));
+router.patch('/api/v2/bids/:id/submission',   requireAdmin, t(req => v2db.editSubmission(req.params.id, req.body)));
 router.post('/api/v2/bids/:id/award',         t(req => v2db.awardBid(req.params.id, req.body)));
 router.post('/api/v2/bids/:id/not-awarded',   t(req => v2db.notAwardBid(req.params.id, req.body)));
 router.post('/api/v2/bids/:id/close',         t(req => v2db.closeBid(req.params.id, req.body)));
