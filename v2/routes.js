@@ -57,7 +57,9 @@ router.post('/api/v2/opportunities',          t(req => v2db.createOpportunity({ 
 router.post('/api/v2/bids',                   t(req => v2db.createDirectBid({ ...req.body, created_by: req.session.userId })));
 router.post('/api/v2/bids/:id/start',         t(req => v2db.startBid(req.params.id, req.body)));
 router.post('/api/v2/bids/:id/submit',        t(req => v2db.submitBid(req.params.id, req.body)));
-router.patch('/api/v2/bids/:id/submission',   requireAdmin, t(req => v2db.editSubmission(req.params.id, req.body)));
+
+// Admin-only generic edit for any entity: project | bid | job | change_order
+router.patch('/api/v2/admin/:entity/:id',     requireAdmin, t(req => v2db.adminUpdate(req.params.entity, req.params.id, req.body)));
 router.post('/api/v2/bids/:id/award',         t(req => v2db.awardBid(req.params.id, req.body)));
 router.post('/api/v2/bids/:id/not-awarded',   t(req => v2db.notAwardBid(req.params.id, req.body)));
 router.post('/api/v2/bids/:id/close',         t(req => v2db.closeBid(req.params.id, req.body)));

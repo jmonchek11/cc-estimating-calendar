@@ -81,6 +81,11 @@ const BidSchema = new mongoose.Schema({
   // System-managed while submitted
   next_followup_date: { type: String, default: null },
 
+  // Set when a newer bid is added to the same project (e.g. a later drawing
+  // stage). Superseded bids are inactive/historical — excluded from active
+  // counts, no workflow actions, but kept for the record.
+  superseded: { type: Number, default: 0 },
+
   created_at: { type: String, default: ts },
   updated_at: { type: String, default: ts },
 }, opts);

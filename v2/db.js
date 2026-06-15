@@ -48,7 +48,7 @@ async function getProjects() {
     const pBids = bids.filter(b => b.project_id === p._id);
     const pJobs = jobs.filter(j => j.project_id === p._id);
     const pCos  = pJobs.flatMap(j => cosByJob[j._id] || []);
-    const activeBids = pBids.filter(b => BID_ACTIVE_STAGES.includes(b.stage));
+    const activeBids = pBids.filter(b => BID_ACTIVE_STAGES.includes(b.stage) && !b.superseded);
     const activeCos  = pCos.filter(c => CO_ACTIVE_STAGES.includes(c.stage));
     const awarded    = pBids.find(b => b.stage === 'awarded');
 
@@ -107,11 +107,13 @@ async function getProjectDetail(projectId) {
     id: b._id,
     bid_number: b.bid_number,
     stage: b.stage,
+    superseded: !!b.superseded,
     drawing_stage: b.drawing_stage,
     estimator: tm[b.estimator_id] || null,
     salesperson: tm[b.salesperson_id] || null,
     sub_estimators: (b.sub_estimators || []).map(s => ({ ...(tm[s.estimator_id] || {}), scope: s.scope })),
     customers: bidCustomers.filter(bc => bc.bid_id === b._id).map(bc => companyById[bc.company_id]).filter(Boolean),
+    start_date: b.start_date,
     date_received: b.date_received,
     due_date: b.due_date,
     estimate_amount: b.estimate_amount,
@@ -146,6 +148,7 @@ async function getProjectDetail(projectId) {
     date_submitted: co.date_submitted,
     approved_by: co.approved_by,
     approval_date: co.approval_date,
+    notes: co.notes,
     void_reason: co.void_reason,
     not_approved_notes: co.not_approved_notes,
     next_followup_date: co.next_followup_date,
@@ -306,6 +309,14 @@ async function createDirectBid(data) {
     created_by: data.created_by,
   });
   const started = await startBid(bid_id, data);
+  // Adding a new bid supersedes the project's prior non-terminal bids (e.g. a
+  // later drawing stage replaces the earlier one). Terminal bids
+  // (awarded/not_awarded/closed) are historical and left untouched.
+  const M = getModels();
+  await M.Bid.updateMany(
+    { project_id, _id: { $ne: bid_id }, superseded: { $ne: 1 }, stage: { $in: ['opportunity', 'active_bid', 'submitted'] } },
+    { $set: { superseded: 1, updated_at: ts() } }
+  );
   return { project_id, bid_id, bid_number: started.bid_number };
 }
 
@@ -328,22 +339,38 @@ async function submitBid(id, data) {
   return { bid_id: bid._id, next_followup_date: addDays(data.date_submitted, s.fu_initial_days) };
 }
 
-// ── Admin: edit the fields captured at submission (submitted bids only) ───────
-// Per spec §3.1 — admins can correct estimate $, jurisdiction, date sent, and
-// approved-by after submission. Route enforces admin; this enforces stage.
-async function editSubmission(id, data) {
+// ── Admin: edit any field on any entity (admin view only) ─────────────────────
+// Per spec §3.x — admins can correct fields on Projects, Bids (opportunity /
+// active / submitted), Jobs, and Change Orders (active / submitted). The route
+// enforces admin; this whitelists editable fields per entity and never changes
+// `stage` (transitions stay in the state machine).
+const ADMIN_EDITABLE = {
+  project:      ['name'],
+  bid:          ['bid_number', 'estimator_id', 'salesperson_id', 'date_received', 'due_date', 'start_date',
+                 'drawing_stage', 'notes', 'estimate_amount', 'jurisdiction', 'date_submitted', 'approved_by', 'superseded'],
+  job:          ['job_number', 'pm_id', 'awarded_company_id', 'award_date'],
+  change_order: ['co_number', 'name', 'due_date', 'start_date', 'estimator_id', 'notes',
+                 'estimate_amount', 'date_submitted', 'approved_by'],
+};
+const NUMERIC_FK = new Set(['estimator_id', 'salesperson_id', 'pm_id', 'awarded_company_id']);
+
+async function adminUpdate(entity, id, data) {
   const M = getModels();
-  const bid = await loadBid(id);
-  if (bid.stage !== 'submitted') throw new Error(`Submission fields are only editable while the bid is 'submitted' (stage is '${bid.stage}')`);
-  require_(data, ['estimate_amount', 'jurisdiction', 'date_submitted', 'approved_by']);
-  await M.Bid.updateOne({ _id: bid._id }, { $set: {
-    estimate_amount: Number(data.estimate_amount),
-    jurisdiction: String(data.jurisdiction),
-    date_submitted: data.date_submitted,
-    approved_by: data.approved_by,
-    updated_at: ts(),
-  }});
-  return { bid_id: bid._id };
+  const Model = { project: M.Project, bid: M.Bid, job: M.Job, change_order: M.ChangeOrder }[entity];
+  if (!Model) throw new Error('Unknown entity: ' + entity);
+  const allowed = ADMIN_EDITABLE[entity];
+  const upd = { updated_at: ts() };
+  for (const f of allowed) {
+    if (!(f in data)) continue;
+    let v = data[f] === '' ? null : data[f];
+    if (NUMERIC_FK.has(f)) v = v ? Number(v) : null;
+    else if (f === 'estimate_amount') v = (v == null) ? null : Number(v);
+    else if (f === 'superseded') v = v ? 1 : 0;
+    upd[f] = v;
+  }
+  const r = await Model.updateOne({ _id: Number(id) }, { $set: upd });
+  if (!r.matchedCount) throw new Error(entity + ' not found');
+  return { entity, id: Number(id) };
 }
 
 // ── submitted → awarded ("Awarded") — creates the Job ─────────────────────────
@@ -565,7 +592,7 @@ async function reopenCO(id) {
 
 module.exports = {
   getProjects, getProjectDetail, getMeta, nextId,
-  createOpportunity, createDirectBid, startBid, submitBid, editSubmission, awardBid, notAwardBid, closeBid,
+  createOpportunity, createDirectBid, startBid, submitBid, adminUpdate, awardBid, notAwardBid, closeBid,
   addRevision, logFollowupV2,
   createLegacyJob, updateJob,
   createChangeOrder, submitCO, approveCO, notApproveCO, voidCO, reopenCO,

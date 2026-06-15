@@ -66,6 +66,7 @@ erDiagram
         date date_not_awarded "set at NOT-AWARDED only"
         string not_awarded_notes
         date next_followup_date "managed by follow-up timer"
+        bool superseded "set when a newer bid is added to the same project"
         text notes
         datetime created_at
         datetime updated_at
@@ -203,7 +204,7 @@ stateDiagram-v2
 | Transition | Button | Required inputs | System actions |
 |---|---|---|---|
 | → `opportunity` | Create Opportunity | Project (pick existing or create new) | Bid created with FK to project. Most opportunities immediately advance, but some stay here for internal discussion and never become bids. |
-| → `active_bid` (direct) | **+ New Bid** (choose new vs existing project) or **+ Add Bid to Project** | Project (new or existing) + all Start Bid inputs below (including the manually-entered bid #) | Creates the bid straight at `active_bid` with the entered bid # — bypasses the opportunity stage. The "+ Add Bid to Project" button on a project is how each drawing-stage re-bid (50% budget → 70% → 100% CD) gets its own B#### under the same project. |
+| → `active_bid` (direct) | **+ New Bid** (choose new vs existing project) or **+ Add Bid to Project** | Project (new or existing) + all Start Bid inputs below (including the manually-entered bid #) | Creates the bid straight at `active_bid` with the entered bid # — bypasses the opportunity stage. The "+ Add Bid to Project" button on a project is how each drawing-stage re-bid (50% budget → 70% → 100% CD) gets its own B#### under the same project. **Adding a bid to a project supersedes the project's prior non-terminal bids** (see Superseding below). |
 | `opportunity` → `active_bid` | Start Bid | **Bid # (entered manually)**, customer company(ies), customer contact(s), estimator, salesperson, date received, due date. Optional: sub-estimators with scope (data, fire alarm, lighting, lighting controls, etc.), start date, drawing stage (free text: "50% budget", "80% budget", "100% CD"…) | **Bid # is typed in for now** (generated outside this system); auto-generation is a future goal. **Bid #s exist only from this point — opportunities have no bid #.** |
 | `active_bid` → `submitted` | Submit Bid | Estimate amount $, IBEW local jurisdiction, date estimate sent, estimate approved by | Follow-up timer starts: `next_followup_date = date_submitted + Settings.fu_initial_days`. Salesperson notified (email + webapp). |
 | `submitted` (stays) | Add Revision | Revised amount $, revision date, notes (what the customer requested) | Appends to `revisions[]`; `estimate_amount` updates to the new value. For customer-requested changes after submission that aren't a full re-bid. Each pricing round that IS a full re-bid gets its own new Bid under the same Project. |
@@ -214,8 +215,12 @@ stateDiagram-v2
 
 **Fields that DO NOT EXIST on the bid form during `opportunity`/`active_bid`:** job #, estimate $, jurisdiction, date estimate sent, estimate approved by, next follow-up date, bid result, award date, awarded contractor. They are collected by the transition modals, never by the edit form.
 
-**Post-submission price changes — two distinct paths:**
-1. **Data-entry error fix (admin-only):** admins can directly edit **all four fields captured at submission** — estimate amount $, IBEW jurisdiction, date estimate sent, and estimate approved by — via an "Edit Submission" action available only while the bid is `submitted`. (The endpoint enforces admin via the logged-in user's `is_admin` flag.)
+**Superseding (re-bid for a later drawing stage):** when a new bid is added to a project that already has bids, the project's prior **non-terminal** bids (`opportunity`, `active_bid`, `submitted`) are marked **superseded** (`superseded = 1`). Superseded bids are inactive/historical — excluded from active counts and pipeline value, no workflow buttons — but kept on the record. Terminal bids (`awarded`/`not_awarded`/`closed`) are never auto-superseded. An admin can clear the flag via Admin Edit.
+
+**Admin editing (admin view only) — see §3.3:** admins can edit fields on any non-terminal entity (Project, opportunity/active/submitted Bid, Job, active/submitted Change Order). For a submitted bid this includes the submission fields (estimate $, jurisdiction, date sent, approved by) and the superseded flag.
+
+**Post-submission price changes — two paths:**
+1. **Data-entry error fix (admin-only):** via Admin Edit (§3.3).
 2. **Customer-requested revision** (not a full re-bid): the "Add Revision" action logs the revision (amount, date, notes) to `revisions[]` and updates the current amount — any user involved with the bid can do this. Full re-prices at a new drawing stage are a **new Bid** under the same Project.
 
 ### 2.2 Job Lifecycle
@@ -281,12 +286,13 @@ stateDiagram-v2
 | start_date | — | ○ | ○ | ○ | ○ | ○ |
 | drawing_stage | — | ○ | ○ | ○ | ○ | ○ |
 | notes | ○ | ○ | ○ | ○ | ○ | ○ |
-| estimate_amount | ✕ | ✕ | ●R (set at submit; admin Edit Submission after) | ● | ● | ✕ |
+| estimate_amount | ✕ | ✕ | ●R (set at submit; admin-editable after) | ● | ● | ✕ |
 | revisions[] | ✕ | ✕ | ○ (Add Revision action) | ● | ● | ✕ |
-| jurisdiction | ✕ | ✕ | ●R (set at submit; admin Edit Submission after) | ● | ● | ✕ |
-| date_submitted | ✕ | ✕ | ●R (set at submit; admin Edit Submission after) | ● | ● | ✕ |
-| approved_by | ✕ | ✕ | ●R (set at submit; admin Edit Submission after) | ● | ● | ✕ |
+| jurisdiction | ✕ | ✕ | ●R (set at submit; admin-editable after) | ● | ● | ✕ |
+| date_submitted | ✕ | ✕ | ●R (set at submit; admin-editable after) | ● | ● | ✕ |
+| approved_by | ✕ | ✕ | ●R (set at submit; admin-editable after) | ● | ● | ✕ |
 | next_followup_date | ✕ | ✕ | ● system-managed | ✕ | ✕ | ✕ |
+| superseded | ✕ | ● auto/admin | ● auto/admin | ✕ | ✕ | ✕ |
 | award_date | ✕ | ✕ | ✕ | ●R (set at award) | ✕ | ✕ |
 | awarded_company_id | ✕ | ✕ | ✕ | ●R (set at award) | ✕ | ✕ |
 | date_not_awarded / notes | ✕ | ✕ | ✕ | ✕ | ●R | ✕ |
@@ -309,6 +315,22 @@ Legend: **●R** required · **●** present (read-only or editable per role) ·
 | approved_by | ✕ | ●R (set at submit) | ● | ● | ✕ |
 | next_followup_date | ✕ | ● system-managed | ✕ | ✕ | ✕ |
 | approval_date | ✕ | ✕ | ●R | ✕ | ✕ |
+
+### 3.3 Admin editing (admin view only)
+
+Admins can correct fields on any **non-terminal** entity through an "Edit" action available only to admins (enforced by the logged-in user's `is_admin` flag on a single endpoint: `PATCH /api/v2/admin/:entity/:id`). Workflow buttons (transitions, follow-ups, Set Job #, Assign PM) remain available to all users — admin Edit is an additional correction/override path, not a replacement.
+
+| Entity | Where admin Edit appears | Fields admins may edit |
+|---|---|---|
+| Project | every project | name |
+| Bid — opportunity | opportunity bids | notes |
+| Bid — active_bid | active bids | bid #, estimator, salesperson, dates, drawing stage, notes |
+| Bid — submitted | submitted bids | the active-bid fields **plus** estimate $, jurisdiction, date sent, approved by, and the **superseded** flag |
+| Job | every job | job #, PM, awarded company, award date |
+| Change Order — active_co | active COs | co #, name, dates, estimator, notes |
+| Change Order — submitted_co | submitted COs | the active-co fields **plus** estimate $, date submitted, approved by |
+
+**Admin Edit never changes `stage`.** Stage transitions always go through the state machine (§2). Terminal entities (awarded/not_awarded/closed bids; approved/not_approved/voided COs) are not editable here — they are historical.
 
 ---
 

@@ -231,6 +231,7 @@ async function refresh() {
 function renderHierarchy(d) {
   let html = `<div class="v2-actions" style="margin:0 0 4px">
     <button class="v2-btn green" onclick="actAddBidToProject(${d.id})">+ Add Bid to this Project</button>
+    ${CURRENT_USER?.is_admin ? `<button class="v2-btn outline" onclick="actEditProject(${d.id})">✏️ Edit Project</button>` : ''}
     <span style="font-size:11px;color:var(--text-muted);align-self:center">new B26-#### for another drawing stage / re-bid</span>
   </div>`;
   const jobByWinningBid = {};
@@ -247,11 +248,12 @@ function renderHierarchy(d) {
 function bidNode(b) {
   const isAwarded = b.stage === 'awarded';
   return `
-    <div class="v2-bid ${isAwarded ? 'awarded' : ''}">
+    <div class="v2-bid ${isAwarded ? 'awarded' : ''}" ${b.superseded ? 'style="opacity:.6"' : ''}>
       <div style="flex:1;min-width:0">
         <div style="font-weight:${isAwarded?'800':'600'};font-size:13px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           ${isAwarded ? '✓' : ''} ${b.bid_number ? esc(b.bid_number) : '<em style="color:var(--text-muted);font-weight:400">no bid #</em>'}
           ${isAwarded ? '<span class="awarded-pill">AWARDED</span>' : stageBadge(b.stage)}
+          ${b.superseded ? '<span class="badge" style="background:#e2e8f0;color:#64748b">SUPERSEDED</span>' : ''}
           ${b.drawing_stage ? `<span class="badge" style="background:#ede9fe;color:#5b21b6">${esc(b.drawing_stage)}</span>` : ''}
           ${b.estimate_amount ? `<span class="amount">${fmt$(b.estimate_amount)}</span>` : ''}
           ${b.revisions.length ? `<span class="badge" style="background:#fef3c7;color:#92400e">Rev ${b.revisions.length}</span>` : ''}
@@ -276,22 +278,30 @@ function bidNode(b) {
     </div>`;
 }
 
+// Bid editable by admin in these (non-terminal) stages
+const BID_EDITABLE_STAGES = ['opportunity', 'active_bid', 'submitted'];
+
 function bidActions(b) {
-  let btns = '';
-  if (b.stage === 'opportunity') {
-    btns = `<button class="v2-btn blue" onclick="actStartBid(${b.id})">→ Start Bid</button>
-            <button class="v2-btn gray" onclick="actCloseBid(${b.id})">Close</button>`;
-  } else if (b.stage === 'active_bid') {
-    btns = `<button class="v2-btn green" onclick="actSubmitBid(${b.id})">Submit Bid</button>
-            <button class="v2-btn gray" onclick="actCloseBid(${b.id})">Close</button>`;
-  } else if (b.stage === 'submitted') {
-    btns = `<button class="v2-btn blue" onclick="actLogFollowup('bid',${b.id})">📝 Log Follow-up</button>
-            <button class="v2-btn amber" onclick="actAddRevision(${b.id})">Add Revision</button>
-            <button class="v2-btn green" onclick="actAwardBid(${b.id})">✓ Awarded</button>
-            <button class="v2-btn red" onclick="actNotAwarded(${b.id})">✗ Not Awarded</button>
-            ${CURRENT_USER?.is_admin ? `<button class="v2-btn outline" onclick="actEditSubmission(${b.id})">✏️ Edit Submission</button>` : ''}`;
+  // Superseded bids are inactive — no workflow buttons, but admins can still edit.
+  let workflow = '';
+  if (!b.superseded) {
+    if (b.stage === 'opportunity') {
+      workflow = `<button class="v2-btn blue" onclick="actStartBid(${b.id})">→ Start Bid</button>
+                  <button class="v2-btn gray" onclick="actCloseBid(${b.id})">Close</button>`;
+    } else if (b.stage === 'active_bid') {
+      workflow = `<button class="v2-btn green" onclick="actSubmitBid(${b.id})">Submit Bid</button>
+                  <button class="v2-btn gray" onclick="actCloseBid(${b.id})">Close</button>`;
+    } else if (b.stage === 'submitted') {
+      workflow = `<button class="v2-btn blue" onclick="actLogFollowup('bid',${b.id})">📝 Log Follow-up</button>
+                  <button class="v2-btn amber" onclick="actAddRevision(${b.id})">Add Revision</button>
+                  <button class="v2-btn green" onclick="actAwardBid(${b.id})">✓ Awarded</button>
+                  <button class="v2-btn red" onclick="actNotAwarded(${b.id})">✗ Not Awarded</button>`;
+    }
   }
-  return btns ? `<div class="v2-actions">${btns}</div>` : '';
+  const adminBtn = (CURRENT_USER?.is_admin && BID_EDITABLE_STAGES.includes(b.stage))
+    ? `<button class="v2-btn outline" onclick="actEditBid(${b.id})">✏️ Edit</button>` : '';
+  const all = [workflow, adminBtn].filter(Boolean).join('');
+  return all ? `<div class="v2-actions">${all}</div>` : '';
 }
 
 function jobNode(j, legacy = false) {
@@ -312,6 +322,7 @@ function jobNode(j, legacy = false) {
           ${!j.job_number ? `<button class="v2-btn amber" onclick="actSetJobNumber(${j.id})">Set Job #</button>` : ''}
           ${!j.pm ? `<button class="v2-btn outline" onclick="actSetPM(${j.id})">Assign PM</button>` : ''}
           <button class="v2-btn blue" onclick="actAddCO(${j.id})">+ Add Change Order</button>
+          ${CURRENT_USER?.is_admin ? `<button class="v2-btn outline" onclick="actEditJob(${j.id})">✏️ Edit</button>` : ''}
         </div>
       </div>
     </div>
@@ -344,20 +355,25 @@ function coNode(co) {
     </div>`;
 }
 
+const CO_EDITABLE_STAGES = ['active_co', 'submitted_co'];
+
 function coActions(co) {
-  let btns = '';
+  let workflow = '';
   if (co.stage === 'active_co') {
-    btns = `<button class="v2-btn green" onclick="actSubmitCO(${co.id})">Submit CO</button>
-            <button class="v2-btn gray" onclick="actVoidCO(${co.id})">Void</button>`;
+    workflow = `<button class="v2-btn green" onclick="actSubmitCO(${co.id})">Submit CO</button>
+                <button class="v2-btn gray" onclick="actVoidCO(${co.id})">Void</button>`;
   } else if (co.stage === 'submitted_co') {
-    btns = `<button class="v2-btn blue" onclick="actLogFollowup('change_order',${co.id})">📝 Log Follow-up</button>
-            <button class="v2-btn green" onclick="actApproveCO(${co.id})">✓ Approved</button>
-            <button class="v2-btn red" onclick="actNotApprovedCO(${co.id})">✗ Not Approved</button>
-            <button class="v2-btn gray" onclick="actVoidCO(${co.id})">Void</button>`;
+    workflow = `<button class="v2-btn blue" onclick="actLogFollowup('change_order',${co.id})">📝 Log Follow-up</button>
+                <button class="v2-btn green" onclick="actApproveCO(${co.id})">✓ Approved</button>
+                <button class="v2-btn red" onclick="actNotApprovedCO(${co.id})">✗ Not Approved</button>
+                <button class="v2-btn gray" onclick="actVoidCO(${co.id})">Void</button>`;
   } else if (co.stage === 'voided' || co.stage === 'not_approved') {
-    btns = `<button class="v2-btn outline" onclick="actReopenCO(${co.id})">↩ Reopen</button>`;
+    workflow = `<button class="v2-btn outline" onclick="actReopenCO(${co.id})">↩ Reopen</button>`;
   }
-  return btns ? `<div class="v2-actions">${btns}</div>` : '';
+  const adminBtn = (CURRENT_USER?.is_admin && CO_EDITABLE_STAGES.includes(co.stage))
+    ? `<button class="v2-btn outline" onclick="actEditCO(${co.id})">✏️ Edit</button>` : '';
+  const all = [workflow, adminBtn].filter(Boolean).join('');
+  return all ? `<div class="v2-actions">${all}</div>` : '';
 }
 
 function fuRow(f) {
@@ -397,7 +413,7 @@ function showForm(title, fields, onSubmit, submitLabel = 'Save', submitClass = '
     }
     if (f.type === 'textarea') {
       return `<div class="v2-field"><label>${f.label}${req}</label>
-        <textarea id="vf-${f.id}" rows="3" placeholder="${esc(f.placeholder || '')}"></textarea></div>`;
+        <textarea id="vf-${f.id}" rows="3" placeholder="${esc(f.placeholder || '')}">${esc(f.value ?? '')}</textarea></div>`;
     }
     return `<div class="v2-field"><label>${f.label}${req}</label>
       <input id="vf-${f.id}" type="${f.type || 'text'}" value="${esc(f.value ?? '')}" placeholder="${esc(f.placeholder || '')}" ${f.type === 'number' ? 'step="any"' : ''}></div>`;
@@ -532,15 +548,77 @@ function actSubmitBid(bidId) {
   ], data => api('POST', `/api/v2/bids/${bidId}/submit`, data), 'Submit Bid', 'green');
 }
 
-// Admin-only: correct the four fields captured at submission, pre-filled with current values
-function actEditSubmission(bidId) {
-  const bid = DETAIL_CACHE[OPEN_PROJECT]?.bids.find(b => b.id === bidId) || {};
-  showForm('✏️ Edit Submission (admin)', [
-    { id: 'estimate_amount', label: 'Estimate Amount $', type: 'number', required: true, value: bid.estimate_amount },
-    { id: 'jurisdiction', label: 'IBEW Local Jurisdiction', type: 'text', required: true, value: bid.jurisdiction },
-    { id: 'date_submitted', label: 'Date Estimate Sent', type: 'date', required: true, value: bid.date_submitted },
-    { id: 'approved_by', label: 'Estimate Approved By', type: 'text', required: true, value: bid.approved_by },
-  ], data => api('PATCH', `/api/v2/bids/${bidId}/submission`, data), 'Save Changes', 'blue');
+// ── Admin edit (all entities) ─────────────────────────────────────────────────
+function findCO(coId) {
+  const d = DETAIL_CACHE[OPEN_PROJECT];
+  if (!d) return null;
+  for (const j of d.jobs) { const co = j.change_orders.find(c => c.id === coId); if (co) return co; }
+  return null;
+}
+
+function actEditProject(projectId) {
+  const name = (ALL_PROJECTS.find(p => p.id === projectId) || {}).name || '';
+  showForm('✏️ Edit Project (admin)', [
+    { id: 'name', label: 'Project Name', type: 'text', required: true, value: name },
+  ], data => api('PATCH', `/api/v2/admin/project/${projectId}`, data), 'Save Changes');
+}
+
+function actEditBid(bidId) {
+  const b = DETAIL_CACHE[OPEN_PROJECT]?.bids.find(x => x.id === bidId) || {};
+  const fields = [];
+  if (b.stage !== 'opportunity') {
+    fields.push({ id: 'bid_number', label: 'Bid #', type: 'text', required: true, value: b.bid_number });
+    fields.push(
+      { id: 'estimator_id', label: 'Estimator', type: 'select', options: teamOpts(['estimator']), value: b.estimator?.id },
+      { id: 'salesperson_id', label: 'Salesperson', type: 'select', options: teamOpts(['sales']), value: b.salesperson?.id },
+      { id: 'date_received', label: 'Date Received', type: 'date', value: b.date_received },
+      { id: 'due_date', label: 'Due Date', type: 'date', value: b.due_date },
+      { id: 'start_date', label: 'Start Date', type: 'date', value: b.start_date },
+      { id: 'drawing_stage', label: 'Drawing Stage', type: 'text', value: b.drawing_stage },
+    );
+  }
+  fields.push({ id: 'notes', label: 'Notes', type: 'textarea', value: b.notes });
+  if (b.stage === 'submitted') {
+    fields.push(
+      { id: 'estimate_amount', label: 'Estimate Amount $', type: 'number', value: b.estimate_amount },
+      { id: 'jurisdiction', label: 'IBEW Local Jurisdiction', type: 'text', value: b.jurisdiction },
+      { id: 'date_submitted', label: 'Date Estimate Sent', type: 'date', value: b.date_submitted },
+      { id: 'approved_by', label: 'Estimate Approved By', type: 'text', value: b.approved_by },
+      { id: 'superseded', label: 'Inactive / Superseded?', type: 'select', value: b.superseded ? 1 : 0,
+        options: [{ value: 0, label: 'No — active' }, { value: 1, label: 'Yes — superseded/inactive' }] },
+    );
+  }
+  showForm('✏️ Edit Bid (admin)', fields, data => api('PATCH', `/api/v2/admin/bid/${bidId}`, data), 'Save Changes');
+}
+
+function actEditJob(jobId) {
+  const j = DETAIL_CACHE[OPEN_PROJECT]?.jobs.find(x => x.id === jobId) || {};
+  showForm('✏️ Edit Job (admin)', [
+    { id: 'job_number', label: 'Job #', type: 'text', value: j.job_number },
+    { id: 'pm_id', label: 'PM', type: 'select', options: teamOpts(['pm', 'sales', 'estimator']), value: j.pm?.id },
+    { id: 'awarded_company_id', label: 'Customer (awarded by)', type: 'select', options: companyOpts(), value: j.awarded_company?.id },
+    { id: 'award_date', label: 'Award Date', type: 'date', value: j.award_date },
+  ], data => api('PATCH', `/api/v2/admin/job/${jobId}`, data), 'Save Changes');
+}
+
+function actEditCO(coId) {
+  const co = findCO(coId) || {};
+  const fields = [
+    { id: 'co_number', label: 'RFC / CO #', type: 'text', required: true, value: co.co_number },
+    { id: 'name', label: 'Description of Work', type: 'text', required: true, value: co.name },
+    { id: 'due_date', label: 'Due Date', type: 'date', value: co.due_date },
+    { id: 'start_date', label: 'Start Date', type: 'date', value: co.start_date },
+    { id: 'estimator_id', label: 'Estimator', type: 'select', options: teamOpts(['estimator']), value: co.estimator?.id },
+    { id: 'notes', label: 'Notes', type: 'textarea', value: co.notes },
+  ];
+  if (co.stage === 'submitted_co') {
+    fields.push(
+      { id: 'estimate_amount', label: 'CO Estimate $', type: 'number', value: co.estimate_amount },
+      { id: 'date_submitted', label: 'Date Submitted', type: 'date', value: co.date_submitted },
+      { id: 'approved_by', label: 'Approved By', type: 'text', value: co.approved_by },
+    );
+  }
+  showForm('✏️ Edit Change Order (admin)', fields, data => api('PATCH', `/api/v2/admin/change_order/${coId}`, data), 'Save Changes');
 }
 
 function actAwardBid(bidId) {
