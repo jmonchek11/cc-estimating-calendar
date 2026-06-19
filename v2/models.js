@@ -169,6 +169,14 @@ const BidSubmissionSchema = new mongoose.Schema({
   submission_type: { type: String, enum: BID_SUBMISSION_TYPES, default: 'initial' },
   notes:           { type: String, default: null },
   is_current:      { type: Number, default: 1 },                 // latest submission to this customer
+
+  // Per-submission win/loss + follow-up (each customer is tracked independently)
+  outcome:            { type: String, enum: ['pending', 'awarded', 'not_awarded'], default: 'pending' },
+  award_date:         { type: String, default: null },
+  date_not_awarded:   { type: String, default: null },
+  not_awarded_notes:  { type: String, default: null },
+  next_followup_date: { type: String, default: null },
+
   created_at:      { type: String, default: ts },
   updated_at:      { type: String, default: ts },
 }, opts);
@@ -188,7 +196,7 @@ const ContactSchema = new mongoose.Schema({
 
 const FollowupSchema = new mongoose.Schema({
   _id:              Number,
-  parent_type:      { type: String, enum: ['bid', 'change_order'], required: true },
+  parent_type:      { type: String, enum: ['bid', 'bid_submission', 'change_order'], required: true },
   parent_id:        { type: Number, required: true },
   followup_date:    { type: String, required: true },
   contacted_by:     { type: Number, default: null },             // FK → TeamMember

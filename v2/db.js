@@ -94,12 +94,12 @@ async function getProjectDetail(projectId) {
   ]);
   const allFollowups = await M.Followup.find({
     $or: [
-      { parent_type: 'bid', parent_id: { $in: bidIds } },
+      { parent_type: 'bid_submission', parent_id: { $in: submissions.map(s => s._id) } },
       { parent_type: 'change_order', parent_id: { $in: cos.map(c => c._id) } },
     ],
   }).lean();
-  const followups   = allFollowups.filter(f => f.parent_type === 'bid');
-  const coFollowups = allFollowups.filter(f => f.parent_type === 'change_order');
+  const subFollowups = allFollowups.filter(f => f.parent_type === 'bid_submission');
+  const coFollowups  = allFollowups.filter(f => f.parent_type === 'change_order');
 
   const tm = teamMap(members);
   const companyById = {}; companies.forEach(c => { companyById[c._id] = { id: c._id, name: c.name }; });
@@ -132,6 +132,15 @@ async function getProjectDetail(projectId) {
         submission_type: sub.submission_type,
         notes: sub.notes,
         is_current: !!sub.is_current,
+        outcome: sub.outcome || 'pending',
+        award_date: sub.award_date,
+        date_not_awarded: sub.date_not_awarded,
+        not_awarded_notes: sub.not_awarded_notes,
+        next_followup_date: sub.next_followup_date,
+        followups: subFollowups
+          .filter(f => f.parent_id === sub._id)
+          .sort((a, c) => (c.followup_date || '').localeCompare(a.followup_date || ''))
+          .map(f => fmtFollowup(f, tm)),
       })),
     award_date: b.award_date,
     awarded_company: b.awarded_company_id ? companyById[b.awarded_company_id] : null,
@@ -142,10 +151,6 @@ async function getProjectDetail(projectId) {
     close_reason: b.close_reason,
     next_followup_date: b.next_followup_date,
     notes: b.notes,
-    followups: followups
-      .filter(f => f.parent_type === 'bid' && f.parent_id === b._id)
-      .sort((a, c) => (c.followup_date || '').localeCompare(a.followup_date || ''))
-      .map(f => fmtFollowup(f, tm)),
   });
 
   const fmtCo = (co) => ({
@@ -362,6 +367,15 @@ async function ensureBidCustomer(bidId, companyId) {
   if (!exists) throw new Error('That company is not a customer on this bid');
 }
 
+// The bid's follow-up date is a rollup: the earliest next_followup_date among
+// its still-pending submissions (for dashboard/digest "overdue" queries).
+async function recomputeBidFollowup(bidId) {
+  const M = getModels();
+  const next = (await M.BidSubmission.find({ bid_id: bidId, outcome: 'pending', next_followup_date: { $ne: null } })
+    .sort({ next_followup_date: 1 }).limit(1).lean())[0];
+  await M.Bid.updateOne({ _id: bidId }, { $set: { next_followup_date: next ? next.next_followup_date : null, updated_at: ts() } });
+}
+
 // ── active_bid → submitted ("Submit Bid") — creates the FIRST BidSubmission ───
 async function submitBid(id, data) {
   const M = getModels();
@@ -377,20 +391,19 @@ async function submitBid(id, data) {
     bid_id: bid._id, company_id: companyId,
     amount: Number(data.amount), date_submitted: data.date_submitted, approved_by: data.approved_by,
     submission_type: 'initial', notes: data.notes || null, is_current: 1,
+    outcome: 'pending', next_followup_date: addDays(data.date_submitted, s.fu_initial_days),
   });
   await M.Bid.updateOne({ _id: bid._id }, { $set: {
-    stage: 'submitted',
-    jurisdiction: String(data.jurisdiction),
-    next_followup_date: addDays(data.date_submitted, s.fu_initial_days),
-    updated_at: ts(),
+    stage: 'submitted', jurisdiction: String(data.jurisdiction), updated_at: ts(),
   }});
   await recomputeBidHeadline(bid._id);
-  return { bid_id: bid._id, next_followup_date: addDays(data.date_submitted, s.fu_initial_days) };
+  await recomputeBidFollowup(bid._id);
+  return { bid_id: bid._id };
 }
 
 // ── Add another submission to a submitted bid ─────────────────────────────────
 // Another customer, or a best-and-final / scope change to a customer we already
-// submitted to (no new drawings). Resets the follow-up clock.
+// submitted to (no new drawings). The new submission gets its own follow-up clock.
 async function addSubmission(id, data) {
   const M = getModels();
   const bid = await loadBid(id);
@@ -404,17 +417,16 @@ async function addSubmission(id, data) {
     { bid_id: bid._id, company_id: companyId, is_current: 1 },
     { $set: { is_current: 0, updated_at: ts() } }
   );
+  const s = await getSettings();
   await M.BidSubmission.create({
     _id: await nextId('bid_submissions'),
     bid_id: bid._id, company_id: companyId,
     amount: Number(data.amount), date_submitted: data.date_submitted, approved_by: data.approved_by,
     submission_type: data.submission_type, notes: data.notes || null, is_current: 1,
+    outcome: 'pending', next_followup_date: addDays(data.date_submitted, s.fu_initial_days),
   });
-  const s = await getSettings();
-  await M.Bid.updateOne({ _id: bid._id }, { $set: {
-    next_followup_date: addDays(data.date_submitted, s.fu_initial_days), updated_at: ts(),
-  }});
   await recomputeBidHeadline(bid._id);
+  await recomputeBidFollowup(bid._id);
   return { bid_id: bid._id };
 }
 
@@ -460,49 +472,69 @@ async function adminUpdate(entity, id, data) {
   return { entity, id: Number(id) };
 }
 
-// ── submitted → awarded ("Awarded") — creates the Job ─────────────────────────
-async function awardBid(id, data) {
+async function loadSubmission(id) {
+  const { BidSubmission } = getModels();
+  const sub = await BidSubmission.findById(Number(id)).lean();
+  if (!sub) throw new Error('Submission not found');
+  return sub;
+}
+
+// ── Submission awarded — that customer gave us the job; creates the Job ───────
+// Per-submission win. The first awarded submission wins the bid; siblings are
+// LEFT pending (resolved individually). One winner per bid.
+async function awardSubmission(submissionId, data) {
   const M = getModels();
-  const bid = await loadBid(id);
-  if (bid.stage !== 'submitted') throw new Error(`Cannot award from stage '${bid.stage}'`);
+  const sub = await loadSubmission(submissionId);
+  const bid = await loadBid(sub.bid_id);
+  if (bid.stage !== 'submitted') throw new Error(`Bid must be 'submitted' to award (stage is '${bid.stage}')`);
+  if (sub.outcome !== 'pending') throw new Error(`This submission is already '${sub.outcome}'`);
   require_(data, ['award_date']);
 
-  const customers = await M.BidCustomer.find({ bid_id: bid._id }).lean();
-  let winner = data.awarded_company_id ? Number(data.awarded_company_id) : null;
-  if (!winner) {
-    if (customers.length === 1) winner = customers[0].company_id;
-    else throw new Error('awarded_company_id required — bid went to multiple customers');
-  }
-  if (!customers.some(c => c.company_id === winner)) throw new Error('Winning company was not on this bid');
-
-  await M.Bid.updateOne({ _id: bid._id }, { $set: {
-    stage: 'awarded', award_date: data.award_date, awarded_company_id: winner,
-    next_followup_date: null, updated_at: ts(),
+  await M.BidSubmission.updateOne({ _id: sub._id }, { $set: {
+    outcome: 'awarded', award_date: data.award_date, next_followup_date: null, updated_at: ts(),
   }});
-  await recomputeBidHeadline(bid._id);   // headline now reflects the winner's submission
+  await M.Bid.updateOne({ _id: bid._id }, { $set: {
+    stage: 'awarded', award_date: data.award_date, awarded_company_id: sub.company_id, updated_at: ts(),
+  }});
+  await recomputeBidHeadline(bid._id);   // headline now reflects the winning submission
+  await recomputeBidFollowup(bid._id);   // siblings stay pending; bid f/u rolls up from them
   const jobId = await nextId('jobs');
   await M.Job.create({
     _id: jobId, project_id: bid.project_id, winning_bid_id: bid._id,
     job_number: null,                                  // accounting assigns later
-    awarded_company_id: winner,
+    awarded_company_id: sub.company_id,
     pm_id: data.pm_id ? Number(data.pm_id) : null,
     award_date: data.award_date,
   });
-  return { bid_id: bid._id, job_id: jobId };
+  return { submission_id: sub._id, bid_id: bid._id, job_id: jobId };
 }
 
-// ── submitted → not_awarded ───────────────────────────────────────────────────
-async function notAwardBid(id, data) {
+// ── Submission not awarded — this customer went elsewhere ─────────────────────
+// When ALL of a bid's submissions are not_awarded (none awarded), the bid
+// becomes not_awarded. Otherwise it stays submitted (others still pending).
+async function notAwardSubmission(submissionId, data) {
   const M = getModels();
-  const bid = await loadBid(id);
-  if (bid.stage !== 'submitted') throw new Error(`Cannot mark not-awarded from stage '${bid.stage}'`);
+  const sub = await loadSubmission(submissionId);
+  const bid = await loadBid(sub.bid_id);
+  if (sub.outcome !== 'pending') throw new Error(`This submission is already '${sub.outcome}'`);
   require_(data, ['date_not_awarded']);
-  await M.Bid.updateOne({ _id: bid._id }, { $set: {
-    stage: 'not_awarded', date_not_awarded: data.date_not_awarded,
-    not_awarded_notes: data.not_awarded_notes || null,
-    next_followup_date: null, updated_at: ts(),
+
+  await M.BidSubmission.updateOne({ _id: sub._id }, { $set: {
+    outcome: 'not_awarded', date_not_awarded: data.date_not_awarded,
+    not_awarded_notes: data.not_awarded_notes || null, next_followup_date: null, updated_at: ts(),
   }});
-  return { bid_id: bid._id };
+  await recomputeBidFollowup(bid._id);
+
+  const all = await M.BidSubmission.find({ bid_id: bid._id }).lean();
+  const anyAwarded = all.some(s => s.outcome === 'awarded');
+  const anyPending = all.some(s => s.outcome === 'pending');
+  if (!anyAwarded && !anyPending && bid.stage === 'submitted') {
+    await M.Bid.updateOne({ _id: bid._id }, { $set: {
+      stage: 'not_awarded', date_not_awarded: data.date_not_awarded,
+      not_awarded_notes: 'All customers declined.', next_followup_date: null, updated_at: ts(),
+    }});
+  }
+  return { submission_id: sub._id, bid_id: bid._id };
 }
 
 // ── opportunity / active_bid → closed ─────────────────────────────────────────
@@ -538,8 +570,14 @@ async function logFollowupV2(data) {
   });
 
   if (outcome === 'no_decision') {
-    const Model = data.parent_type === 'bid' ? M.Bid : M.ChangeOrder;
-    await Model.updateOne({ _id: Number(data.parent_id) }, { $set: { next_followup_date: next, updated_at: ts() } });
+    if (data.parent_type === 'bid_submission') {
+      await M.BidSubmission.updateOne({ _id: Number(data.parent_id) }, { $set: { next_followup_date: next, updated_at: ts() } });
+      const sub = await M.BidSubmission.findById(Number(data.parent_id)).lean();
+      if (sub) await recomputeBidFollowup(sub.bid_id);   // roll the bid's f/u date up from its submissions
+    } else {
+      const Model = data.parent_type === 'bid' ? M.Bid : M.ChangeOrder;
+      await Model.updateOne({ _id: Number(data.parent_id) }, { $set: { next_followup_date: next, updated_at: ts() } });
+    }
   }
   return { followup_id: fu._id, next_followup_date: next };
 }
@@ -663,8 +701,8 @@ async function reopenCO(id) {
 
 module.exports = {
   getProjects, getProjectDetail, getMeta, nextId,
-  createOpportunity, createDirectBid, startBid, submitBid, addSubmission, adminUpdate, awardBid, notAwardBid, closeBid,
-  logFollowupV2,
+  createOpportunity, createDirectBid, startBid, submitBid, addSubmission, adminUpdate,
+  awardSubmission, notAwardSubmission, closeBid, logFollowupV2,
   createLegacyJob, updateJob,
   createChangeOrder, submitCO, approveCO, notApproveCO, voidCO, reopenCO,
 };

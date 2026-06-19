@@ -89,10 +89,14 @@ async function main() {
   const reminders = [];
   let bidNum = 100;
   let subId = 0;
-  // helper: one submission row. The bid's denormalized estimate_amount/date_submitted
-  // already reflect the headline (latest/awarded), matching what recomputeBidHeadline would set.
-  const sub = (bid_id, company_id, amount, date, by, type = 'initial', is_current = 1, notes = null) =>
-    submissions.push({ _id: ++subId, bid_id, company_id, amount, date_submitted: date, approved_by: by, submission_type: type, is_current, notes });
+  // helper: one submission row. opts can carry { outcome, award_date,
+  // date_not_awarded, not_awarded_notes, next_followup_date }. The bid's
+  // denormalized estimate_amount already reflects the headline (latest/awarded).
+  const sub = (bid_id, company_id, amount, date, by, type = 'initial', is_current = 1, notes = null, opts = {}) =>
+    submissions.push({ _id: ++subId, bid_id, company_id, amount, date_submitted: date, approved_by: by, submission_type: type, is_current, notes,
+      outcome: opts.outcome || 'pending', award_date: opts.award_date || null,
+      date_not_awarded: opts.date_not_awarded || null, not_awarded_notes: opts.not_awarded_notes || null,
+      next_followup_date: opts.next_followup_date || null });
   const nextBidNumber = () => `B26-${String(bidNum++).padStart(4, '0')}`;
 
   // ── Scenario 1: opportunity never advanced (internal discussion only) ───────
@@ -132,11 +136,11 @@ async function main() {
   });
   bidCustomers.push({ _id: 2, bid_id: 4, company_id: 1, contact_ids: [1, 2] });
   followups.push(
-    { _id: 1, parent_type: 'bid', parent_id: 4, followup_date: day(-25), contacted_by: 7, contact_method: 'phone',
+    { _id: 1, parent_type: 'bid_submission', parent_id: 1, followup_date: day(-25), contacted_by: 7, contact_method: 'phone',
       customer_contact: 'Sarah Klein', notes: 'Bids still being leveled. Decision expected in 2 weeks.', outcome: 'no_decision', next_followup_date: day(-18) },
-    { _id: 2, parent_type: 'bid', parent_id: 4, followup_date: day(-18), contacted_by: 7, contact_method: 'email',
+    { _id: 2, parent_type: 'bid_submission', parent_id: 1, followup_date: day(-18), contacted_by: 7, contact_method: 'email',
       customer_contact: 'Sarah Klein', notes: 'Owner pushed decision to next month. We remain in the running.', outcome: 'no_decision', next_followup_date: day(-11) },
-    { _id: 3, parent_type: 'bid', parent_id: 4, followup_date: day(-5), contacted_by: 7, contact_method: 'in_person',
+    { _id: 3, parent_type: 'bid_submission', parent_id: 1, followup_date: day(-5), contacted_by: 7, contact_method: 'in_person',
       customer_contact: 'Dave Morrison', notes: 'Met at site walk. Down to us and one other EC. Pricing very close.', outcome: 'no_decision', next_followup_date: day(2) },
   );
 
@@ -156,7 +160,7 @@ async function main() {
     { _id: 5, bid_id: 5, company_id: 4, contact_ids: [5] },
   );
   followups.push(
-    { _id: 4, parent_type: 'bid', parent_id: 5, followup_date: day(-6), contacted_by: 1, contact_method: 'phone',
+    { _id: 4, parent_type: 'bid_submission', parent_id: 3, followup_date: day(-6), contacted_by: 1, contact_method: 'phone',
       customer_contact: 'Lauren Choi', notes: 'INTECH confirmed award! Contract to follow.', outcome: 'awarded' },
   );
   jobs.push({
@@ -243,7 +247,7 @@ async function main() {
   });
   bidCustomers.push({ _id: 9, bid_id: 9, company_id: 2, contact_ids: [3] });
   followups.push(
-    { _id: 7, parent_type: 'bid', parent_id: 9, followup_date: day(-14), contacted_by: 1, contact_method: 'phone',
+    { _id: 7, parent_type: 'bid_submission', parent_id: 9, followup_date: day(-14), contacted_by: 1, contact_method: 'phone',
       customer_contact: 'Marc Bellino', notes: 'Lost on price. Incumbent took it. Keep us on list for phase 2.', outcome: 'not_awarded' },
   );
 
@@ -266,19 +270,19 @@ async function main() {
     { _id: 1, parent_type: 'bid', parent_id: 10, note: 'Check with JO before next follow-up — pricing may need alternate breakout', remind_on: day(1), created_by: 1 },
   );
 
-  // ── Bid submissions (one row per submission event) ──────────────────────────
-  sub(4, 1, 1840000, day(-28), 'Joe Monchek');                                  // submitted, single customer
-  // Scenario 5/11: bid to 3 customers under one bid #; awarded to company 3
-  sub(5, 1, 925000, day(-58), 'Joe Monchek');
-  sub(5, 3, 925000, day(-58), 'Joe Monchek');                                   // winner
-  sub(5, 4, 925000, day(-58), 'Joe Monchek');
-  sub(6, 6, 3150000, day(-168), 'Joe Monchek');
-  sub(7, 4, 2400000, day(-268), 'Joe Monchek');                                 // not awarded (50% budget)
-  // Scenario 9: best-and-final to same customer (no new drawings) — initial superseded
-  sub(8, 4, 2700000, day(-90), 'Joe Monchek', 'initial', 0);
-  sub(8, 4, 2780000, day(-75), 'Joe Monchek', 'best_and_final', 1, 'Added alternate #2 (lighting controls) per customer');
-  sub(9, 2, 410000, day(-49), 'Joe Monchek');
-  sub(10, 1, 1210000, day(-10), 'Joe Monchek');
+  // ── Bid submissions (one row per submission event; outcome per submission) ──
+  sub(4, 1, 1840000, day(-28), 'Joe Monchek', 'initial', 1, null, { next_followup_date: day(2) });   // #1 pending — has follow-ups
+  // Scenario 5/11: bid to 3 customers under one bid #; awarded via company 3, SIBLINGS LEFT PENDING
+  sub(5, 1, 925000, day(-58), 'Joe Monchek');                                                          // #2 pending sibling
+  sub(5, 3, 925000, day(-58), 'Joe Monchek', 'initial', 1, null, { outcome: 'awarded', award_date: day(-6) });  // #3 winner
+  sub(5, 4, 925000, day(-58), 'Joe Monchek');                                                          // #4 pending sibling
+  sub(6, 6, 3150000, day(-168), 'Joe Monchek', 'initial', 1, null, { outcome: 'awarded', award_date: day(-150) });  // #5
+  sub(7, 4, 2400000, day(-268), 'Joe Monchek', 'initial', 1, null, { outcome: 'not_awarded', date_not_awarded: day(-240), not_awarded_notes: 'Budget round only — project re-priced at CDs.' });  // #6
+  // Scenario 9: best-and-final to same customer (no new drawings) — initial superseded, BAFO awarded
+  sub(8, 4, 2700000, day(-90), 'Joe Monchek', 'initial', 0);                                           // #7 superseded
+  sub(8, 4, 2780000, day(-75), 'Joe Monchek', 'best_and_final', 1, 'Added alternate #2 (lighting controls) per customer', { outcome: 'awarded', award_date: day(-40) });  // #8 winner
+  sub(9, 2, 410000, day(-49), 'Joe Monchek', 'initial', 1, null, { outcome: 'not_awarded', date_not_awarded: day(-14), not_awarded_notes: 'Price ~8% high; went with incumbent.' });  // #9
+  sub(10, 1, 1210000, day(-10), 'Joe Monchek', 'initial', 1, null, { next_followup_date: day(-3) });  // #10 pending — OVERDUE
 
   // ── Insert everything ────────────────────────────────────────────────────────
   await M.Project.insertMany(projects);
@@ -306,7 +310,7 @@ async function main() {
     ['1. Opportunity never advanced',        await M.Bid.countDocuments({ stage: 'opportunity', bid_number: null }) >= 1],
     ['2. Opportunity closed without bidding', await M.Bid.countDocuments({ stage: 'closed', bid_number: null }) >= 1],
     ['3. Active bid closed mid-estimate',     await M.Bid.countDocuments({ stage: 'closed', bid_number: { $ne: null } }) >= 1],
-    ['4. Submitted w/ multiple no-decision FUs', (await M.Followup.countDocuments({ parent_id: 4, outcome: 'no_decision' })) >= 2],
+    ['4. Submitted w/ multiple no-decision FUs', (await M.Followup.countDocuments({ parent_type: 'bid_submission', parent_id: 1, outcome: 'no_decision' })) >= 2],
     ['5. Multi-customer bid awarded to one',  (await M.BidCustomer.countDocuments({ bid_id: 5 })) === 3 && !!(await M.Bid.findById(5).lean()).awarded_company_id],
     ['6. Job with NO job # (pending)',        await M.Job.countDocuments({ job_number: null }) >= 1],
     ['7. Job w/ approved+not_approved+voided COs', (await M.ChangeOrder.distinct('stage', { job_id: 2 })).length >= 3],
@@ -315,6 +319,8 @@ async function main() {
     ['10. Not awarded w/ feedback',           await M.Bid.countDocuments({ stage: 'not_awarded', not_awarded_notes: { $ne: null } }) >= 1],
     ['11. Contact on two bids',               (await M.BidCustomer.countDocuments({ contact_ids: 2 })) >= 2],
     ['12. Overdue bid + CO follow-ups',       (await M.Bid.countDocuments({ next_followup_date: { $lt: day(0) } })) >= 1 && (await M.ChangeOrder.countDocuments({ next_followup_date: { $lt: day(0) } })) >= 1],
+    ['13. Awarded bid w/ siblings left pending', (await M.BidSubmission.countDocuments({ bid_id: 5, outcome: 'awarded' })) === 1 && (await M.BidSubmission.countDocuments({ bid_id: 5, outcome: 'pending' })) === 2],
+    ['14. Per-submission follow-ups',         (await M.Followup.countDocuments({ parent_type: 'bid_submission' })) >= 4],
   ];
   let pass = 0;
   for (const [label, ok] of checks) {

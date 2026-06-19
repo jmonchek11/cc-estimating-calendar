@@ -131,6 +131,11 @@ erDiagram
         string submission_type "initial | best_and_final | scope_add | scope_remove | revised"
         string notes
         bool is_current "latest submission to this customer"
+        string outcome "pending | awarded | not_awarded (PER SUBMISSION)"
+        date award_date
+        date date_not_awarded
+        string not_awarded_notes
+        date next_followup_date "this submission's own follow-up clock"
         datetime created_at
     }
 
@@ -147,7 +152,7 @@ erDiagram
 
     FOLLOWUP {
         int id PK
-        string parent_type "bid | change_order"
+        string parent_type "bid_submission | change_order"
         int parent_id "FK to bid or change_order"
         date followup_date
         int contacted_by FK "team member who made contact"
@@ -205,13 +210,15 @@ stateDiagram-v2
     opportunity --> closed : "Close" button
     active_bid --> submitted : "Submit Bid" button
     active_bid --> closed : "Close" button
-    submitted --> submitted : follow-up logged, outcome = no decision (timer restarts)
-    submitted --> awarded : "Awarded" button → creates JOB
-    submitted --> not_awarded : "Not Awarded" button
+    submitted --> submitted : a submission followed-up / not-awarded (others still pending)
+    submitted --> awarded : a submission Awarded → creates JOB (siblings stay pending)
+    submitted --> not_awarded : ALL submissions not-awarded
     awarded --> [*]
     not_awarded --> [*]
     closed --> [*]
 ```
+
+> **Win/loss and follow-ups are tracked PER SUBMISSION**, not per bid (see §2.1a). The bid's stage is a rollup of its submissions' outcomes.
 
 **Two ways a Bid is born:** (a) as an `opportunity` first, then promoted via Start Bid; or (b) **created directly at `active_bid`**, skipping the opportunity stage — for when we already know we're bidding. Both paths require the same Start Bid inputs and both assign the bid #. Direct creation is used for a brand-new project, an existing project (a re-bid at a new drawing stage), or any time the internal-discussion opportunity step isn't needed.
 
@@ -222,16 +229,24 @@ stateDiagram-v2
 | `opportunity` → `active_bid` | Start Bid | **Bid # (entered manually)**, customer company(ies), customer contact(s), estimator, salesperson, date received, due date. Optional: sub-estimators with scope (data, fire alarm, lighting, lighting controls, etc.), start date, drawing stage (free text: "50% budget", "80% budget", "100% CD"…) | **Bid # is typed in for now** (generated outside this system); auto-generation is a future goal. **Bid #s exist only from this point — opportunities have no bid #.** |
 | `active_bid` → `submitted` | Submit Bid | **Customer** (one of the bid's customers), amount $, IBEW jurisdiction, date estimate sent, approved by | Creates the **first BidSubmission** (`submission_type = initial`). Follow-up timer starts: `next_followup_date = date_submitted + Settings.fu_initial_days`. Salesperson notified. |
 | `submitted` (stays) | + Add Submission | Customer, type (`best_and_final`/`scope_add`/`scope_remove`/`initial` to another customer/`revised`), amount $, date, approved by, notes | Creates another **BidSubmission**. Prior current submission to the *same customer* flips `is_current = 0`. Follow-up timer resets. Covers (a) submitting to additional customers under one bid #, and (b) best-and-final / add-or-remove with no new drawings. |
-| `submitted` → `submitted` | Log Follow-up (outcome: no decision) | Who was contacted, contact method (phone/email/in person), notes | Timer restarts: `next_followup_date = today + Settings.fu_recurring_days`. |
-| `submitted` → `awarded` | Awarded | Winning customer (picker shown ONLY if bid went to multiple companies; auto-selected if one), award date (autofilled today, editable) | **Job record created** (`project_id`, `winning_bid_id`, `awarded_company_id`, `award_date`, `job_number = null`). All-user award email sent. |
-| `submitted` → `not_awarded` | Not Awarded | Date notified (autofilled today, editable), customer feedback notes (optional) | Final state. |
+| `submitted` → `submitted` | Log Follow-up **(on a submission)** | Who was contacted, method, notes | Restarts **that submission's** timer (`+ fu_recurring_days`). Bid's follow-up date = earliest pending submission's. |
+| `submitted` → `awarded` | Awarded **(on a submission)** | Award date | The submission's `outcome = awarded`; **bid → awarded**, `awarded_company_id` = that submission's company. **Job created**. **Sibling submissions stay `pending`** (resolved individually). One winner per bid. Award button only offered while bid is `submitted`. |
+| (submission) → not awarded | Not Awarded **(on a submission)** | Date notified, feedback notes | That submission's `outcome = not_awarded`. If **all** submissions are now not_awarded (none awarded/pending), **bid → not_awarded**; otherwise the bid stays `submitted`. Works on a pending sibling even after the bid is awarded. |
 | `opportunity`/`active_bid` → `closed` | Close | Closure date, approved by, reason | Final state. For opportunities we decided not to bid, or bids we stopped mid-estimate. |
 
 **Fields that DO NOT EXIST on the bid form during `opportunity`/`active_bid`:** job #, estimate $, jurisdiction, date estimate sent, estimate approved by, next follow-up date, bid result, award date, awarded contractor. They are collected by the transition modals, never by the edit form.
 
 **Superseding (re-bid for a later drawing stage):** when a new bid is added to a project that already has bids, the project's prior **non-terminal** bids (`opportunity`, `active_bid`, `submitted`) are marked **superseded** (`superseded = 1`). Superseded bids are inactive/historical — excluded from active counts and pipeline value, no workflow buttons — but kept on the record. Terminal bids (`awarded`/`not_awarded`/`closed`) are never auto-superseded. An admin can clear the flag via Admin Edit.
 
-**Admin editing (admin view only) — see §3.3:** admins can edit fields on any non-terminal entity (Project, opportunity/active/submitted Bid, Job, active/submitted Change Order). For a submitted bid this includes the submission fields (estimate $, jurisdiction, date sent, approved by) and the superseded flag.
+**Admin editing (admin view only) — see §3.3:** admins can edit fields on any non-terminal entity (Project, opportunity/active/submitted Bid, Job, active/submitted Change Order) **and on individual submissions** (✏️ per submission row). A submitted bid's editable fields are jurisdiction + the superseded flag; the per-customer $/date/approver/outcome live on each submission.
+
+### 2.1a Submission outcome lifecycle (per customer)
+
+Each `BidSubmission` carries its own `outcome` (`pending` → `awarded` | `not_awarded`) and its own `next_followup_date`. A bid with three customers has three independent submissions, each followed up and resolved separately.
+
+- **Award a submission** → that customer gave us the job. The bid becomes `awarded` to that company and a Job is created. **The other submissions are left `pending`** — we don't assume the others declined (per team decision). Only one submission can be awarded per bid (the Award action disappears once the bid is awarded).
+- **Not-award a submission** → that customer went elsewhere. The bid only flips to `not_awarded` when **every** submission is not_awarded. A pending sibling can still be marked not-awarded after the bid has been awarded (cleanup).
+- **Follow-ups** attach to the submission (`parent_type = 'bid_submission'`). The bid's `next_followup_date` is a rollup = the earliest `next_followup_date` among still-pending submissions, so dashboard/digest "overdue" queries keep working at the bid level.
 
 **Submissions vs. re-bids — the dividing line:**
 - **Same drawings, customer wants a different/added/removed number, or best-and-final** → a **new BidSubmission** on the same bid (via + Add Submission). The prior submission to that customer becomes non-current but stays on the record.

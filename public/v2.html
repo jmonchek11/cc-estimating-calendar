@@ -272,8 +272,7 @@ function bidNode(b) {
           ${b.not_awarded_notes ? `<br><span style="color:#dc2626">Not awarded ${fmtD(b.date_not_awarded)}:</span> ${esc(b.not_awarded_notes)}` : ''}
           ${b.notes ? `<br>📝 ${esc(b.notes)}` : ''}
         </div>
-        ${(b.submissions || []).length ? `<div class="v2-fu"><div style="font-weight:600;color:var(--text);margin-bottom:3px">Submissions</div>${b.submissions.map(submissionRow).join('')}</div>` : ''}
-        ${b.followups.length ? `<div class="v2-fu">${b.followups.map(fuRow).join('')}</div>` : ''}
+        ${(b.submissions || []).length ? `<div class="v2-fu"><div style="font-weight:600;color:var(--text);margin-bottom:3px">Submissions</div>${b.submissions.map(s => submissionRow(s, b)).join('')}</div>` : ''}
         ${bidActions(b)}
       </div>
     </div>`;
@@ -293,10 +292,8 @@ function bidActions(b) {
       workflow = `<button class="v2-btn green" onclick="actSubmitBid(${b.id})">Submit Bid</button>
                   <button class="v2-btn gray" onclick="actCloseBid(${b.id})">Close</button>`;
     } else if (b.stage === 'submitted') {
-      workflow = `<button class="v2-btn amber" onclick="actAddSubmission(${b.id})">+ Add Submission</button>
-                  <button class="v2-btn blue" onclick="actLogFollowup('bid',${b.id})">📝 Log Follow-up</button>
-                  <button class="v2-btn green" onclick="actAwardBid(${b.id})">✓ Awarded</button>
-                  <button class="v2-btn red" onclick="actNotAwarded(${b.id})">✗ Not Awarded</button>`;
+      // Follow-up / award / not-awarded are now per submission (on each submission row).
+      workflow = `<button class="v2-btn amber" onclick="actAddSubmission(${b.id})">+ Add Submission</button>`;
     }
   }
   const adminBtn = (CURRENT_USER?.is_admin && BID_EDITABLE_STAGES.includes(b.stage))
@@ -378,14 +375,42 @@ function coActions(co) {
 }
 
 const SUB_TYPE = { initial: 'initial', best_and_final: 'best & final', scope_add: 'scope add', scope_remove: 'scope remove', revised: 'revised' };
-function submissionRow(s) {
-  return `<div class="v2-fu-row" ${s.is_current ? '' : 'style="opacity:.5"'}>
-    <strong>${esc(s.company?.name || '—')}</strong> — <span class="amount">${fmt$(s.amount)}</span>
-    · ${SUB_TYPE[s.submission_type] || esc(s.submission_type)}
-    · ${fmtD(s.date_submitted)}${s.approved_by ? ` (appr: ${esc(s.approved_by)})` : ''}
-    ${s.is_current ? '<span class="badge" style="background:#dcfce7;color:#166534">current</span>' : '<span style="font-size:10px">(superseded)</span>'}
-    ${s.notes ? ` · ${esc(s.notes)}` : ''}
-    ${CURRENT_USER?.is_admin ? `<a href="#" onclick="event.preventDefault();actEditSubmission(${s.id})" style="font-size:11px;margin-left:4px">✏️</a>` : ''}
+
+// One submission block: header line, per-customer outcome, its follow-ups, and
+// its own action buttons (log follow-up / awarded / not awarded) while pending.
+function submissionRow(s, bid) {
+  const overdue = s.next_followup_date && s.next_followup_date < today && s.outcome === 'pending';
+  let outcomeBadge = '';
+  if (s.outcome === 'awarded') outcomeBadge = `<span class="awarded-pill">✓ AWARDED ${fmtD(s.award_date)}</span>`;
+  else if (s.outcome === 'not_awarded') outcomeBadge = `<span class="badge" style="background:#fee2e2;color:#991b1b">✗ NOT AWARDED ${fmtD(s.date_not_awarded)}</span>`;
+
+  // A pending submission can always be followed up or marked not-awarded —
+  // even after a sibling won (the other GC can still decline). Award is only
+  // offered while the bid is still 'submitted' (one winner per bid).
+  let actions = '';
+  if (s.outcome === 'pending' && bid && ['submitted', 'awarded'].includes(bid.stage)) {
+    const awardBtn = bid.stage === 'submitted' ? `<button class="v2-btn green" onclick="actAwardSubmission(${s.id})">✓ Awarded</button>` : '';
+    actions = `<div class="v2-actions" style="margin-top:4px">
+      <button class="v2-btn blue" onclick="actLogFollowup('bid_submission',${s.id})">📝 Log Follow-up</button>
+      ${awardBtn}
+      <button class="v2-btn red" onclick="actNotAwardSubmission(${s.id})">✗ Not Awarded</button>
+    </div>`;
+  }
+
+  return `<div style="padding:6px 0;border-top:1px solid var(--border)" ${s.is_current ? '' : 'class="" style="opacity:.5;padding:6px 0;border-top:1px solid var(--border)"'}>
+    <div style="font-size:12px">
+      <strong>${esc(s.company?.name || '—')}</strong> — <span class="amount">${fmt$(s.amount)}</span>
+      · ${SUB_TYPE[s.submission_type] || esc(s.submission_type)}
+      · ${fmtD(s.date_submitted)}${s.approved_by ? ` (appr: ${esc(s.approved_by)})` : ''}
+      ${s.is_current ? '' : '<span style="font-size:10px">(superseded)</span>'}
+      ${outcomeBadge}
+      ${s.outcome === 'pending' && s.next_followup_date ? ` · F/U: <span class="${overdue ? 'overdue-txt' : ''}">${fmtD(s.next_followup_date)}${overdue ? ' — OVERDUE' : ''}</span>` : ''}
+      ${s.notes ? ` · ${esc(s.notes)}` : ''}
+      ${s.not_awarded_notes ? ` · <span style="color:#991b1b">${esc(s.not_awarded_notes)}</span>` : ''}
+      ${CURRENT_USER?.is_admin ? `<a href="#" onclick="event.preventDefault();actEditSubmission(${s.id})" style="font-size:11px;margin-left:4px">✏️</a>` : ''}
+    </div>
+    ${(s.followups || []).length ? `<div style="margin-left:12px;margin-top:2px">${s.followups.map(fuRow).join('')}</div>` : ''}
+    ${actions}
   </div>`;
 }
 
@@ -683,25 +708,22 @@ function actEditCO(coId) {
   showForm('✏️ Edit Change Order (admin)', fields, data => api('PATCH', `/api/v2/admin/change_order/${coId}`, data), 'Save Changes');
 }
 
-function actAwardBid(bidId) {
-  const detail = DETAIL_CACHE[OPEN_PROJECT];
-  const bid = detail?.bids.find(b => b.id === bidId);
-  const customers = bid?.customers || [];
-  const fields = [];
-  if (customers.length > 1) {
-    fields.push({ id: 'awarded_company_id', label: 'Which customer awarded us?', type: 'select', required: true,
-                  options: customers.map(c => ({ value: c.id, label: c.name })) });
-  }
-  fields.push({ id: 'award_date', label: 'Award Date', type: 'date', required: true, value: today });
-  fields.push({ id: 'pm_id', label: 'Assign PM (can be set later)', type: 'select', options: teamOpts(['pm', 'sales', 'estimator']) });
-  showForm('🎉 Mark Awarded', fields, data => api('POST', `/api/v2/bids/${bidId}/award`, data), 'Confirm Awarded', 'green');
+// Award / not-award are PER SUBMISSION (the customer that responded). The
+// company is implied by the submission, so no customer picker is needed.
+function actAwardSubmission(submissionId) {
+  const s = findSubmission(submissionId);
+  showForm(`🎉 Awarded — ${esc(s?.company?.name || 'customer')}`, [
+    { id: 'award_date', label: 'Award Date', type: 'date', required: true, value: today },
+    { id: 'pm_id', label: 'Assign PM (can be set later)', type: 'select', options: teamOpts(['pm', 'sales', 'estimator']) },
+  ], data => api('POST', `/api/v2/submissions/${submissionId}/award`, data), 'Confirm Awarded', 'green');
 }
 
-function actNotAwarded(bidId) {
-  showForm('✗ Not Awarded', [
+function actNotAwardSubmission(submissionId) {
+  const s = findSubmission(submissionId);
+  showForm(`✗ Not Awarded — ${esc(s?.company?.name || 'customer')}`, [
     { id: 'date_not_awarded', label: 'Date Notified', type: 'date', required: true, value: today },
     { id: 'not_awarded_notes', label: 'Customer Feedback', type: 'textarea', placeholder: 'Price too high, went with incumbent…' },
-  ], data => api('POST', `/api/v2/bids/${bidId}/not-awarded`, data), 'Confirm Not Awarded', 'red');
+  ], data => api('POST', `/api/v2/submissions/${submissionId}/not-awarded`, data), 'Confirm Not Awarded', 'red');
 }
 
 function actCloseBid(bidId) {
