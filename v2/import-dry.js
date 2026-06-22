@@ -46,9 +46,11 @@ function excelYear(v) {
 }
 function normName(v) {
   return String(v || '').toLowerCase()
-    .replace(/[.,'"&\/()-]/g, ' ')
+    .replace(/[.']/g, '')                       // A.T. → AT, O'Driscoll → ODriscoll
+    .replace(/[,"&\/()-]/g, ' ')
     .replace(/\b(inc|llc|llp|lp|corp|co|company|group|construction|builders|contracting|contractors)\b/g, ' ')
-    .replace(/\s+/g, ' ').trim();
+    .replace(/\s+/g, ' ').trim()
+    .replace(/\b([a-z]) (?=[a-z]\b)/g, '$1');   // collapse spaced initials: "a t" → "at"
 }
 function lev(a, b) {
   const m = a.length, n = b.length; if (!m) return n; if (!n) return m;
