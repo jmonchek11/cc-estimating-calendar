@@ -769,8 +769,49 @@ async function getDataHealth() {
   };
 }
 
+// ── Merge duplicate projects: repoint bids + jobs to the survivor, delete the rest ──
+async function mergeProjects(survivorId, mergeIds) {
+  const M = getModels();
+  const sid = Number(survivorId);
+  const ids = (mergeIds || []).map(Number).filter(x => x && x !== sid);
+  if (!ids.length) throw new Error('Nothing to merge');
+  if (!(await M.Project.findById(sid))) throw new Error('Survivor project not found');
+  await M.Bid.updateMany({ project_id: { $in: ids } }, { $set: { project_id: sid, updated_at: ts() } });
+  await M.Job.updateMany({ project_id: { $in: ids } }, { $set: { project_id: sid, updated_at: ts() } });
+  await M.Project.deleteMany({ _id: { $in: ids } });
+  return { survivor: sid, merged: ids.length };
+}
+
+// ── Merge duplicate companies: repoint every FK to the survivor, dedupe, delete ──
+async function mergeCompanies(survivorId, mergeIds) {
+  const M = getModels();
+  const sid = Number(survivorId);
+  const ids = (mergeIds || []).map(Number).filter(x => x && x !== sid);
+  if (!ids.length) throw new Error('Nothing to merge');
+  if (!(await M.Company.findById(sid))) throw new Error('Survivor company not found');
+  await M.Bid.updateMany({ awarded_company_id: { $in: ids } }, { $set: { awarded_company_id: sid, updated_at: ts() } });
+  await M.Job.updateMany({ awarded_company_id: { $in: ids } }, { $set: { awarded_company_id: sid, updated_at: ts() } });
+  await M.BidSubmission.updateMany({ company_id: { $in: ids } }, { $set: { company_id: sid, updated_at: ts() } });
+  await M.Contact.updateMany({ company_id: { $in: ids } }, { $set: { company_id: sid, updated_at: ts() } });
+  await M.BidCustomer.updateMany({ company_id: { $in: ids } }, { $set: { company_id: sid } });
+  // a bid may now list the survivor twice — merge those into one row
+  const dups = await M.BidCustomer.aggregate([
+    { $match: { company_id: sid } },
+    { $group: { _id: '$bid_id', rows: { $push: '$$ROOT' }, n: { $sum: 1 } } },
+    { $match: { n: { $gt: 1 } } },
+  ]);
+  for (const d of dups) {
+    const [keep, ...extra] = d.rows;
+    const contacts = [...new Set(d.rows.flatMap(r => r.contact_ids || []))];
+    await M.BidCustomer.updateOne({ _id: keep._id }, { $set: { contact_ids: contacts } });
+    await M.BidCustomer.deleteMany({ _id: { $in: extra.map(r => r._id) } });
+  }
+  await M.Company.deleteMany({ _id: { $in: ids } });
+  return { survivor: sid, merged: ids.length };
+}
+
 module.exports = {
-  getProjects, getProjectDetail, getMeta, getDataHealth, nextId,
+  getProjects, getProjectDetail, getMeta, getDataHealth, mergeProjects, mergeCompanies, nextId,
   createOpportunity, createDirectBid, startBid, submitBid, addSubmission, adminUpdate,
   awardSubmission, notAwardSubmission, closeBid, logFollowupV2,
   createLegacyJob, updateJob,

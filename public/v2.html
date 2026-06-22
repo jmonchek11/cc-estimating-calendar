@@ -804,12 +804,14 @@ async function actReopenCO(coId) {
 // ═══════════════════════════════════════════════════════════════════════════
 // DATA HEALTH — categorized punch-list of dataset quality issues
 // ═══════════════════════════════════════════════════════════════════════════
+let HEALTH = null;
 async function showHealth() {
   const main = document.getElementById('main');
   main.innerHTML = '<div style="padding:30px;text-align:center;color:var(--text-muted)">Analyzing dataset…</div>';
   let h;
   try { h = await api('GET', '/api/v2/health'); }
   catch (e) { main.innerHTML = `<div class="err-card">${esc(e.message)}</div>`; return; }
+  HEALTH = h;
 
   const dupProjIssues = h.dupProjects.length;
   const dupCoIssues = h.dupCompanies.length;
@@ -822,10 +824,22 @@ async function showHealth() {
       <div style="padding:10px 16px;max-height:340px;overflow-y:auto">${body}</div>
     </div>`;
 
-  const clusterList = (groups, withCounts) => groups.slice(0, 40).map(g => `
-    <div style="padding:6px 0;border-bottom:1px solid #f1f5f9">
-      ${g.map(it => `<div style="font-size:13px">• ${esc(it.name)}${withCounts ? ` <span style="color:var(--text-muted);font-size:11px">(${it.bids}b ${it.cos}co)</span>` : ''}</div>`).join('')}
-    </div>`).join('') + (groups.length > 40 ? `<div style="color:var(--text-muted);font-size:12px;padding-top:6px">…and ${groups.length - 40} more groups</div>` : '');
+  // Each duplicate group: survivor picker + Merge button (admins), then the names.
+  function mergeGroupBlock(group, gid, kind) {
+    const sorted = [...group].sort(kind === 'project' ? (a, b) => (b.bids + b.cos) - (a.bids + a.cos) : (a, b) => b.name.length - a.name.length);
+    const items = sorted.map(it => `<div style="font-size:13px">• ${esc(it.name)}${kind === 'project' ? ` <span style="color:var(--text-muted);font-size:11px">(${it.bids}b ${it.cos}co)</span>` : ''}</div>`).join('');
+    const control = CURRENT_USER?.is_admin ? `
+      <div style="display:flex;gap:6px;align-items:center;margin-top:5px;flex-wrap:wrap">
+        <span style="font-size:11px;color:var(--text-muted)">keep:</span>
+        <select id="${kind}-surv-${gid}" style="font-size:12px;padding:3px 6px;border:1px solid var(--border);border-radius:5px;max-width:280px">
+          ${sorted.map(it => `<option value="${it.id}">${esc(it.name)}</option>`).join('')}
+        </select>
+        <button class="v2-btn ${kind === 'project' ? 'blue' : 'amber'}" onclick="doMerge('${kind}',${gid})">Merge ${group.length}→1</button>
+      </div>` : '';
+    return `<div style="padding:8px 0;border-bottom:1px solid #f1f5f9">${items}${control}</div>`;
+  }
+  const clusterList = (groups, kind) => groups.slice(0, 40).map((g, i) => mergeGroupBlock(g, i, kind)).join('')
+    + (groups.length > 40 ? `<div style="color:var(--text-muted);font-size:12px;padding-top:6px">…and ${groups.length - 40} more groups (showing first 40)</div>` : '');
 
   const flatList = (arr, fmt) => arr.slice(0, 50).map(x => `<div style="font-size:13px;padding:2px 0">• ${fmt(x)}</div>`).join('') + (arr.length > 50 ? `<div style="color:var(--text-muted);font-size:12px;padding-top:6px">…and ${arr.length - 50} more</div>` : '');
 
@@ -837,11 +851,11 @@ async function showHealth() {
       </div>
     </div>
 
-    ${card('Likely duplicate projects', dupProjIssues, 'groups of projects that look like the same project — merge candidates',
-      dupProjIssues ? clusterList(h.dupProjects, true) : '<div style="color:#16a34a;font-size:13px">None 🎉</div>', '#dc2626')}
+    ${card('Likely duplicate projects', dupProjIssues, 'groups that look like the same project — pick the keeper and merge (rewrites bid/job links)',
+      dupProjIssues ? clusterList(h.dupProjects, 'project') : '<div style="color:#16a34a;font-size:13px">None 🎉</div>', '#dc2626')}
 
-    ${card('Likely duplicate companies', dupCoIssues, 'name variants of the same company — add to company-aliases.json and re-import',
-      dupCoIssues ? clusterList(h.dupCompanies, false) : '<div style="color:#16a34a;font-size:13px">None 🎉</div>', '#d97706')}
+    ${card('Likely duplicate companies', dupCoIssues, 'name variants of one company — pick the keeper and merge (repoints all customer/contact links)',
+      dupCoIssues ? clusterList(h.dupCompanies, 'company') : '<div style="color:#16a34a;font-size:13px">None 🎉</div>', '#d97706')}
 
     ${card('Projects with no bids', h.noBidProjects.length, 'legacy jobs (COs only) or orphans — confirm they should exist',
       h.noBidProjects.length ? flatList(h.noBidProjects, p => `${esc(p.name)} <span style="color:var(--text-muted);font-size:11px">(${p.cos} COs)</span>`) : '<div style="color:#16a34a;font-size:13px">None</div>', '#0891b2')}
@@ -858,6 +872,20 @@ async function showHealth() {
     ${card('Active bids with no bid #', h.missing.no_bid_number.length, 'hard to identify/dedupe — many are follow-up/opportunity rows',
       h.missing.no_bid_number.length ? flatList(h.missing.no_bid_number, b => esc(b.label)) : '<div style="color:#16a34a;font-size:13px">None</div>', '#64748b')}
   `;
+}
+
+// Merge a duplicate group into the chosen survivor (real FK rewrite, admin only)
+async function doMerge(kind, gid) {
+  const group = (kind === 'project' ? HEALTH.dupProjects : HEALTH.dupCompanies)[gid];
+  if (!group) return;
+  const survivor = Number(document.getElementById(`${kind}-surv-${gid}`).value);
+  const mergeIds = group.map(it => it.id).filter(id => id !== survivor);
+  const keepName = group.find(it => it.id === survivor)?.name;
+  if (!confirm(`Merge ${mergeIds.length} ${kind}(s) into "${keepName}"?\n\nThis rewrites the underlying records and cannot be undone (re-run the import to reset).`)) return;
+  try {
+    await api('POST', `/api/v2/admin/merge-${kind === 'project' ? 'projects' : 'companies'}`, { survivor_id: survivor, merge_ids: mergeIds });
+    await showHealth();   // refresh the punch-list
+  } catch (e) { alert('Merge failed: ' + e.message); }
 }
 
 load();
