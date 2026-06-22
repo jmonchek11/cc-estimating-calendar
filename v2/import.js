@@ -66,10 +66,22 @@ function normName(v) {
     .replace(/\b([a-z]) (?=[a-z]\b)/g, '$1');   // collapse spaced initials: "a t" → "at"
 }
 const customersOf = (row) => Object.keys(row).filter(k => /^customer/i.test(k)).map(k => s(row[k])).filter(Boolean);
+// A row is a change order if RFC/COR appears in the bid#, job#, OR project name.
 function isCO(row, stage) {
   if (stage === 'active_co') return true;
-  const tag = (s(row['Bid #']) || '') + ' ' + (s(row['Job #']) || '');
+  const tag = [s(row['Bid #']), s(row['Job #']), s(row['Project Name'])].filter(Boolean).join(' ');
   return /\b(rfc|cor)\b|rfc-?\d|cor-?\d/i.test(tag);
+}
+// Base job # = the job-number cell with any trailing "RFC-91 …" tag stripped off.
+function baseJob(v) { const t = s(v); if (!t) return null; const b = t.replace(/\b(RFC|COR|CO)[\s-]?\d+.*$/i, '').trim(); return b || null; }
+// Base project name = the name with any trailing "RFC-06 …" portion stripped off.
+function baseName(v) { const t = s(v); if (!t) return null; return t.replace(/\s*\b(RFC|COR|CO)[\s-]?\d+.*$/i, '').trim() || t; }
+// CO description = full name minus the project prefix and the RFC token.
+function coDesc(fullName, projName) {
+  let t = s(fullName) || 'Change Order';
+  if (projName && t.toLowerCase().startsWith(projName.toLowerCase())) t = t.slice(projName.length).trim();
+  t = t.replace(/^\b(RFC|COR|CO)[\s-]?\d+\s*/i, '').trim();
+  return t || (s(fullName) || 'Change Order');
 }
 function coNumber(row) {
   const hay = [s(row['Bid #']), s(row['Job #']), s(row['Project Name'])].filter(Boolean).join(' ');
@@ -154,120 +166,137 @@ async function main() {
   let ctid = 0; const contactDocs = [];
   for (const c of tabContacts) { const coId = companyIdOf(c.company); if (!coId) continue; const [first, ...rest] = c.name.split(/\s+/); contactDocs.push({ _id: ++ctid, company_id: coId, first_name: first || null, last_name: rest.join(' ') || null, phone: c.phone || null, active: 1, created_at: ts(), updated_at: ts() }); }
 
-  // ── projects (group bids by normalized name) ──
-  let pid = 0; const projectIdByKey = {}; const projectDocs = [];
-  const projectIdFor = (rawName) => {
-    const key = normName(rawName); if (!key) return null;
-    if (!projectIdByKey[key]) { const id = ++pid; projectIdByKey[key] = id; projectDocs.push({ _id: id, name: s(rawName), created_by: 1, created_at: ts(), updated_at: ts() }); }
-    return projectIdByKey[key];
-  };
+  // ════════════════════════════════════════════════════════════════════════════
+  // PROJECTS & JOBS — the JOB # is the primary grouping key.
+  // Every row sharing a base job # belongs to ONE Project + ONE Job; RFC rows are
+  // change orders on it. Rows without a job # fall back to grouping by name (and
+  // join a job's project if their name matches it).
+  // ════════════════════════════════════════════════════════════════════════════
+  let pid = 0, job_id = 0;
+  const projectDocs = [], jobDocs = [];
+  const projByJob = {};    // baseJob → projectId
+  const jobByNum = {};     // baseJob → jobId
+  const projByName = {};   // normalized base name → projectId (no-job# rows)
+  const nameToJob = {};    // normalized base name → baseJob (so name-only rows join the job's project)
 
-  // ── bids + submissions + bid_customers + jobs ──
-  let bid_id = 0, sub_id = 0, bc_id = 0, job_id = 0, fu_id = 0;
-  const bidDocs = [], subDocs = [], bcDocs = [], jobDocs = [], coDocs = [], fuDocs = [];
-  const jobIdByNum = {};   // job_number(lower) → job_id
-  const ex = { subNoCompany: 0, coOrphan: [], coNoJob: 0, noProject: 0 };
+  const allRows = [...bidRows, ...coRows];
+
+  // PASS A — one Project + one Job per distinct base job #. Project name prefers a
+  // real bid row's base name over a CO row's.
+  const jobInfo = {};
+  for (const r of allRows) {
+    const bj = baseJob(r['Job #']); if (!bj) continue;
+    const fromBid = !isCO(r, r.__stage);
+    if (!jobInfo[bj] || (fromBid && !jobInfo[bj].fromBid)) jobInfo[bj] = { name: baseName(r['Project Name']), fromBid };
+  }
+  for (const [bj, info] of Object.entries(jobInfo)) {
+    const projectId = ++pid; projectDocs.push({ _id: projectId, name: info.name || `Job ${bj}`, created_by: 1, created_at: ts(), updated_at: ts() });
+    projByJob[bj] = projectId;
+    const jid = ++job_id; jobDocs.push({ _id: jid, project_id: projectId, winning_bid_id: null, job_number: bj, awarded_company_id: null, pm_id: null, award_date: null, created_at: ts(), updated_at: ts() });
+    jobByNum[bj] = jid;
+    const nk = normName(info.name); if (nk && !nameToJob[nk]) nameToJob[nk] = bj;
+  }
+
+  function nameProjectId(rawName) {
+    const nb = baseName(rawName); const nk = normName(nb); if (!nk) return null;
+    if (nameToJob[nk]) return projByJob[nameToJob[nk]];          // join an existing job's project
+    if (!projByName[nk]) { const id = ++pid; projByName[nk] = id; projectDocs.push({ _id: id, name: nb, created_by: 1, created_at: ts(), updated_at: ts() }); }
+    return projByName[nk];
+  }
+  function projectFor(r) { const bj = baseJob(r['Job #']); return (bj && projByJob[bj]) ? projByJob[bj] : nameProjectId(r['Project Name']); }
+
+  // ── bids + submissions + bid_customers ──
+  let bid_id = 0, sub_id = 0, bc_id = 0, fu_id = 0;
+  const bidDocs = [], subDocs = [], bcDocs = [], coDocs = [];
+  const ex = { subNoCompany: 0, coNoJob: 0, noProject: 0 };
 
   for (const r of bidRows) {
     const projName = s(r['Project Name']); if (!projName) { ex.noProject++; continue; }
     const v1 = r.__stage; const stage = V1_TO_V2[v1] || 'opportunity';
-    const projectId = projectIdFor(projName);
+    const projectId = projectFor(r);
     const id = ++bid_id;
     const custs = customersOf(r);
-    const award = s(r['Awarded Contractor']);
-    const winnerCompanyId = award ? companyIdOf(award) : null;
+    const winnerCompanyId = s(r['Awarded Contractor']) ? companyIdOf(s(r['Awarded Contractor'])) : null;
     const amount = amt(r['Estimate Amount']);
     const dateSent = xdate(r['Date Estimate Sent']);
     const approvedBy = s(r['Estimate Approved By']);
 
-    // submission outcome
     let subOutcome = null;
     if (v1 === 'awarded') subOutcome = 'awarded';
     else if (v1 === 'follow_up') subOutcome = 'pending';
     else if (v1 === 'closed' && amount && dateSent) subOutcome = 'not_awarded';
-
     const awardedCompanyId = (stage === 'awarded') ? (winnerCompanyId || companyIdOf(custs[0]) || null) : null;
 
     bidDocs.push({
       _id: id, project_id: projectId,
-      bid_number: s(r['Bid #']) || s(r['Bid # or Job #']) || null,
-      stage,
-      estimator_id: lkp(r['Estimator']), salesperson_id: lkp(r['Salesperson']),
-      sub_estimators: [],
+      bid_number: s(r['Bid #']) || s(r['Bid # or Job #']) || null, stage,
+      estimator_id: lkp(r['Estimator']), salesperson_id: lkp(r['Salesperson']), sub_estimators: [],
       date_received: xdate(r['Date Received']), due_date: xdate(r['Estimate Due Date']), start_date: xdate(r['Estimate Start Date']),
       drawing_stage: null, jurisdiction: null,
       estimate_amount: amount, date_submitted: dateSent, approved_by: approvedBy,
-      award_date: stage === 'awarded' ? xdate(r['Award Date']) : null,
-      awarded_company_id: awardedCompanyId,
-      next_followup_date: null, superseded: 0, notes: s(r['Notes']),
-      created_at: ts(), updated_at: ts(),
+      award_date: stage === 'awarded' ? xdate(r['Award Date']) : null, awarded_company_id: awardedCompanyId,
+      next_followup_date: null, superseded: 0, notes: s(r['Notes']), created_at: ts(), updated_at: ts(),
     });
 
-    // bid_customers
     for (const c of custs) { const coId = companyIdOf(c); if (coId) bcDocs.push({ _id: ++bc_id, bid_id: id, company_id: coId, contact_ids: [] }); }
 
-    // submission (one per submitted+ bid)
     if (subOutcome) {
       const subCompany = subOutcome === 'awarded' ? awardedCompanyId : companyIdOf(custs[0]);
-      if (subCompany) {
-        subDocs.push({
-          _id: ++sub_id, bid_id: id, company_id: subCompany,
-          amount, date_submitted: dateSent, approved_by: approvedBy,
-          submission_type: 'initial', notes: null, is_current: 1,
-          outcome: subOutcome, award_date: subOutcome === 'awarded' ? xdate(r['Award Date']) : null,
-          date_not_awarded: subOutcome === 'not_awarded' ? xdate(r['Award Date']) : null,
-          not_awarded_notes: null, next_followup_date: null,
-          created_at: ts(), updated_at: ts(),
-        });
-      } else ex.subNoCompany++;
+      if (subCompany) subDocs.push({
+        _id: ++sub_id, bid_id: id, company_id: subCompany, amount, date_submitted: dateSent, approved_by: approvedBy,
+        submission_type: 'initial', notes: null, is_current: 1, outcome: subOutcome,
+        award_date: subOutcome === 'awarded' ? xdate(r['Award Date']) : null,
+        date_not_awarded: subOutcome === 'not_awarded' ? xdate(r['Award Date']) : null,
+        not_awarded_notes: null, next_followup_date: null, created_at: ts(), updated_at: ts(),
+      });
+      else ex.subNoCompany++;
     }
 
-    // job (awarded bids)
+    // Awarded bid → fill in its Job's winner (or create a Job if it has no job # yet)
     if (stage === 'awarded') {
-      const jn = s(r['Job #']);
-      const jid = ++job_id;
-      jobDocs.push({ _id: jid, project_id: projectId, winning_bid_id: id, job_number: jn || null, awarded_company_id: awardedCompanyId, pm_id: null, award_date: xdate(r['Award Date']), created_at: ts(), updated_at: ts() });
-      if (jn) jobIdByNum[jn.toLowerCase()] = jid;
+      const bj = baseJob(r['Job #']);
+      if (bj && jobByNum[bj]) {
+        const jdoc = jobDocs.find(j => j._id === jobByNum[bj]);
+        if (jdoc && !jdoc.winning_bid_id) { jdoc.winning_bid_id = id; jdoc.awarded_company_id = awardedCompanyId; jdoc.award_date = xdate(r['Award Date']); }
+      } else {
+        const jid = ++job_id; jobDocs.push({ _id: jid, project_id: projectId, winning_bid_id: id, job_number: bj || null, awarded_company_id: awardedCompanyId, pm_id: null, award_date: xdate(r['Award Date']), created_at: ts(), updated_at: ts() });
+        if (bj) jobByNum[bj] = jid;
+      }
     }
   }
 
-  // ── change orders (attach to jobs by job #; create legacy jobs as needed) ──
-  const legacyProjectByJob = {};
+  // ── change orders — attach to the Job for their base job # ──
   for (const r of coRows) {
-    const jn = s(r['Job #']);
-    let jid = jn ? jobIdByNum[jn.toLowerCase()] : null;
-    if (!jid) {
-      if (!jn) { ex.coNoJob++; continue; }                 // can't link without a job #
-      // legacy job: create a placeholder project + job once per job #
-      if (!legacyProjectByJob[jn.toLowerCase()]) {
-        const lp = ++pid; projectDocs.push({ _id: lp, name: `Legacy Job ${jn}`, created_by: 1, created_at: ts(), updated_at: ts() });
-        jid = ++job_id; jobDocs.push({ _id: jid, project_id: lp, winning_bid_id: null, job_number: jn, awarded_company_id: null, pm_id: null, award_date: null, created_at: ts(), updated_at: ts() });
-        jobIdByNum[jn.toLowerCase()] = jid; legacyProjectByJob[jn.toLowerCase()] = jid;
-        ex.coOrphan.push(jn);
-      } else jid = legacyProjectByJob[jn.toLowerCase()];
-    }
-    const amount = amt(r['Estimate Amount']); const dateSent = xdate(r['Date Estimate Sent']);
+    const bj = baseJob(r['Job #']);
+    const jid = bj ? jobByNum[bj] : null;
+    if (!jid) { ex.coNoJob++; continue; }            // no job # → can't link (rare)
+    const projName = jobInfo[bj] ? jobInfo[bj].name : null;
+    const amount = amt(r['Estimate Amount']); const dateSent = xdate(r['Date Estimate Sent']); const awardDate = xdate(r['Award Date']);
+    let coStage = 'active_co', approval = null;
+    if (awardDate) { coStage = 'approved'; approval = awardDate; }
+    else if (dateSent) coStage = 'submitted_co';
     coDocs.push({
-      _id: coDocs.length + 1, job_id: jid, co_number: coNumber(r), name: s(r['Project Name']) || 'Change Order',
-      stage: dateSent ? 'submitted_co' : 'active_co', was_submitted: dateSent ? 1 : 0,
+      _id: coDocs.length + 1, job_id: jid, co_number: coNumber(r), name: coDesc(r['Project Name'], projName),
+      stage: coStage, was_submitted: (dateSent || awardDate) ? 1 : 0,
       estimator_id: lkp(r['Estimator']), due_date: xdate(r['Estimate Due Date']), start_date: xdate(r['Estimate Start Date']),
       estimate_amount: amount, date_submitted: dateSent, approved_by: s(r['Estimate Approved By']),
-      notes: s(r['Notes']), next_followup_date: null, created_at: ts(), updated_at: ts(),
+      approval_date: approval, notes: s(r['Notes']), next_followup_date: null, created_at: ts(), updated_at: ts(),
     });
   }
 
   // ── report ──
+  const legacyJobs = jobDocs.filter(j => !j.winning_bid_id).length;
   console.log('═══ WOULD CREATE ═══');
   console.log(`  Companies:      ${companyDocs.length}`);
   console.log(`  Contacts:       ${contactDocs.length}`);
-  console.log(`  Projects:       ${projectDocs.length}   (incl. ${Object.keys(legacyProjectByJob).length} legacy)`);
+  console.log(`  Projects:       ${projectDocs.length}   (grouped by job # where present)`);
   console.log(`  Bids:           ${bidDocs.length}`);
   console.log(`  BidCustomers:   ${bcDocs.length}`);
   console.log(`  Submissions:    ${subDocs.length}  (awarded ${subDocs.filter(s=>s.outcome==='awarded').length}, pending ${subDocs.filter(s=>s.outcome==='pending').length}, not-awarded ${subDocs.filter(s=>s.outcome==='not_awarded').length})`);
-  console.log(`  Jobs:           ${jobDocs.length}`);
+  console.log(`  Jobs:           ${jobDocs.length}   (${legacyJobs} legacy — no bid in file)`);
   console.log(`  Change Orders:  ${coDocs.length}`);
   if (SCOPE_2026) console.log(`  (out of 2026 scope, skipped: ${outOfScope})`);
-  console.log(`\n  Notes: ${ex.coOrphan.length} legacy job(s) auto-created for orphan COs; ${ex.coNoJob} CO(s) dropped (no job #); ${ex.subNoCompany} submission(s) skipped (no customer).`);
+  console.log(`\n  Notes: ${ex.coNoJob} CO(s) dropped (no job #); ${ex.subNoCompany} submission(s) skipped (no customer).`);
 
   if (DRY) { console.log('\n[DRY] nothing written. Re-run without --dry to load into estimating_v2_test.\n'); process.exit(0); }
 
