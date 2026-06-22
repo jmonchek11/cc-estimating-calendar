@@ -439,6 +439,7 @@ async function addSubmission(id, data) {
 // bid_submission entity, not the bid — the bid's headline is derived from them.
 const ADMIN_EDITABLE = {
   project:        ['name'],
+  company:        ['name', 'city', 'state'],
   bid:            ['bid_number', 'estimator_id', 'salesperson_id', 'date_received', 'due_date', 'start_date',
                    'drawing_stage', 'notes', 'jurisdiction', 'superseded'],
   job:            ['job_number', 'pm_id', 'awarded_company_id', 'award_date'],
@@ -450,7 +451,7 @@ const NUMERIC_FK = new Set(['estimator_id', 'salesperson_id', 'pm_id', 'awarded_
 
 async function adminUpdate(entity, id, data) {
   const M = getModels();
-  const Model = { project: M.Project, bid: M.Bid, job: M.Job, change_order: M.ChangeOrder, bid_submission: M.BidSubmission }[entity];
+  const Model = { project: M.Project, company: M.Company, bid: M.Bid, job: M.Job, change_order: M.ChangeOrder, bid_submission: M.BidSubmission }[entity];
   if (!Model) throw new Error('Unknown entity: ' + entity);
   const allowed = ADMIN_EDITABLE[entity];
   const upd = { updated_at: ts() };
@@ -714,7 +715,8 @@ function _lev(a, b) {
   return prev[n];
 }
 // Cluster items ({id,name,key,...}) that are the same/typo/prefix of each other.
-function _clusterSimilar(items) {
+// `ignore` is a Set of "minId:maxId" pairs that must never be clustered together.
+function _clusterSimilar(items, ignore) {
   const parent = items.map((_, i) => i);
   const find = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
   const union = (a, b) => { parent[find(a)] = find(b); };
@@ -723,7 +725,9 @@ function _clusterSimilar(items) {
     const same = a === b;
     const prefix = a.length >= 10 && b.length >= 10 && (a.startsWith(b) || b.startsWith(a));
     const typo = a.length >= 8 && b.length >= 8 && Math.abs(a.length - b.length) <= 2 && _lev(a, b) <= 1;
-    if (same || prefix || typo) union(i, j);
+    if (!(same || prefix || typo)) continue;
+    if (ignore && ignore.has(Math.min(items[i].id, items[j].id) + ':' + Math.max(items[i].id, items[j].id))) continue;
+    union(i, j);
   }
   const groups = {};
   items.forEach((it, i) => { const r = find(i); (groups[r] = groups[r] || []).push(it); });
@@ -736,6 +740,9 @@ async function getDataHealth() {
     M.Project.find().lean(), M.Bid.find().lean(), M.Job.find().lean(),
     M.ChangeOrder.find().lean(), M.Company.find().lean(), M.BidCustomer.find().lean(),
   ]);
+  const ignoredPairs = await M.IgnoredPair.find().lean();
+  const ignoreSet = (kind) => new Set(ignoredPairs.filter(x => x.kind === kind).map(x => Math.min(x.a, x.b) + ':' + Math.max(x.a, x.b)));
+
   const bidsByProj = {}, jobsByProj = {}, cosByJob = {}, custByBid = {};
   bids.forEach(b => (bidsByProj[b.project_id] = bidsByProj[b.project_id] || []).push(b));
   jobs.forEach(j => (jobsByProj[j.project_id] = jobsByProj[j.project_id] || []).push(j));
@@ -743,24 +750,27 @@ async function getDataHealth() {
   bidCustomers.forEach(bc => (custByBid[bc.bid_id] = custByBid[bc.bid_id] || []).push(bc));
   const projCo = (p) => (jobsByProj[p._id] || []).reduce((s, j) => s + (cosByJob[j._id] || []).length, 0);
 
-  // near-duplicate projects (merge candidates)
-  const dupProjects = _clusterSimilar(projects.map(p => ({ id: p._id, name: p.name, key: _norm(p.name), bids: (bidsByProj[p._id] || []).length, cos: projCo(p) })));
-  // near-duplicate companies (alias candidates)
-  const dupCompanies = _clusterSimilar(companies.map(c => ({ id: c._id, name: c.name, key: _norm(c.name) })));
-  // projects with no bids (legacy / CO-only / orphan)
-  const noBidProjects = projects.filter(p => !(bidsByProj[p._id])).map(p => ({ id: p._id, name: p.name, cos: projCo(p) })).sort((a, b) => b.cos - a.cos);
+  // near-duplicate projects / companies (merge candidates; honors "not a duplicate")
+  const dupProjects = _clusterSimilar(projects.map(p => ({ id: p._id, name: p.name, key: _norm(p.name), bids: (bidsByProj[p._id] || []).length, cos: projCo(p) })), ignoreSet('project'));
+  const dupCompanies = _clusterSimilar(companies.map(c => ({ id: c._id, name: c.name, key: _norm(c.name) })), ignoreSet('company'));
+  // projects with no bids — classify: legacy (has job/COs) vs empty (truly removable)
+  const noBidProjects = projects.filter(p => !(bidsByProj[p._id])).map(p => {
+    const jobN = (jobsByProj[p._id] || []).length, coN = projCo(p);
+    return { id: p._id, name: p.name, jobs: jobN, cos: coN, empty: jobN === 0 && coN === 0 };
+  }).sort((a, b) => (a.empty === b.empty ? b.cos - a.cos : a.empty ? -1 : 1));
   // jobs with no job # (awaiting accounting)
   const jobsNoNumber = jobs.filter(j => !j.job_number).length;
 
-  // bids missing key data (active/submitted, not superseded)
-  const active = bids.filter(b => BID_ACTIVE_STAGES.includes(b.stage) && !b.superseded);
+  // Bids missing data the stage REQUIRES. Opportunities require none of these
+  // (bid #, customer, estimator are collected at Start Bid), so they're excluded.
+  const needsData = bids.filter(b => ['active_bid', 'submitted'].includes(b.stage) && !b.superseded);
   const pById = {}; projects.forEach(p => pById[p._id] = p.name);
   const tag = (b) => ({ id: b._id, label: `${b.bid_number || '(no #)'} — ${pById[b.project_id] || '?'}` });
   const missing = {
-    no_customer: active.filter(b => !(custByBid[b._id])).map(tag),
-    no_estimator: active.filter(b => !b.estimator_id).map(tag),
-    no_bid_number: active.filter(b => !b.bid_number).map(tag),
-    submitted_no_amount: active.filter(b => b.stage === 'submitted' && !b.estimate_amount).map(tag),
+    no_customer: needsData.filter(b => !(custByBid[b._id])).map(tag),
+    no_estimator: needsData.filter(b => !b.estimator_id).map(tag),
+    no_bid_number: needsData.filter(b => !b.bid_number).map(tag),
+    submitted_no_amount: bids.filter(b => b.stage === 'submitted' && !b.superseded && !b.estimate_amount).map(tag),
   };
 
   return {
@@ -810,8 +820,34 @@ async function mergeCompanies(survivorId, mergeIds) {
   return { survivor: sid, merged: ids.length };
 }
 
+// ── "Not a duplicate": record every pair in the group so it never re-clusters ──
+async function dismissDuplicates(kind, ids) {
+  const M = getModels();
+  const list = (ids || []).map(Number).filter(Boolean);
+  if (list.length < 2) throw new Error('Need at least two ids');
+  let added = 0;
+  for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+    const a = Math.min(list[i], list[j]), b = Math.max(list[i], list[j]);
+    if (!(await M.IgnoredPair.findOne({ kind, a, b }))) { await M.IgnoredPair.create({ _id: await nextId('ignored_pairs'), kind, a, b }); added++; }
+  }
+  return { dismissed: list.length, pairs_added: added };
+}
+
+// ── Delete a truly-empty project (no bids, no jobs, no COs) ──
+async function deleteEmptyProject(id) {
+  const M = getModels();
+  const pid = Number(id);
+  if (await M.Bid.countDocuments({ project_id: pid })) throw new Error('Project still has bids');
+  const jobs = await M.Job.find({ project_id: pid }).lean();
+  for (const j of jobs) if (await M.ChangeOrder.countDocuments({ job_id: j._id })) throw new Error('Project still has change orders');
+  await M.Job.deleteMany({ project_id: pid });
+  await M.Project.deleteOne({ _id: pid });
+  return { deleted: pid };
+}
+
 module.exports = {
-  getProjects, getProjectDetail, getMeta, getDataHealth, mergeProjects, mergeCompanies, nextId,
+  getProjects, getProjectDetail, getMeta, getDataHealth, mergeProjects, mergeCompanies,
+  dismissDuplicates, deleteEmptyProject, nextId,
   createOpportunity, createDirectBid, startBid, submitBid, addSubmission, adminUpdate,
   awardSubmission, notAwardSubmission, closeBid, logFollowupV2,
   createLegacyJob, updateJob,

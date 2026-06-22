@@ -246,6 +246,15 @@ const CounterSchema = new mongoose.Schema({
   seq: { type: Number, default: 0 },
 }, opts);
 
+// "Not a duplicate" decisions — a pair (a<b) of project or company ids that
+// Data Health should never re-cluster as a near-duplicate.
+const IgnoredPairSchema = new mongoose.Schema({
+  _id:  Number,
+  kind: { type: String, enum: ['project', 'company'], required: true },
+  a:    { type: Number, required: true },
+  b:    { type: Number, required: true },
+}, opts);
+
 // ── Export models bound to the v2 connection ──────────────────────────────────
 
 function getModels() {
@@ -264,6 +273,7 @@ function getModels() {
     TeamMember:  c.model('TeamMember', TeamMemberSchema, 'teammembers'),
     Settings:    c.model('Settings', SettingsSchema, 'settings'),
     Counter:     c.model('Counter', CounterSchema, 'counters'),
+    IgnoredPair: c.model('IgnoredPair', IgnoredPairSchema, 'ignored_pairs'),
   };
 }
 

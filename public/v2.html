@@ -824,17 +824,19 @@ async function showHealth() {
       <div style="padding:10px 16px;max-height:340px;overflow-y:auto">${body}</div>
     </div>`;
 
-  // Each duplicate group: survivor picker + Merge button (admins), then the names.
+  // Each duplicate group: names (each renamable) + survivor picker + Merge + Not-a-dup.
+  const admin = CURRENT_USER?.is_admin;
   function mergeGroupBlock(group, gid, kind) {
     const sorted = [...group].sort(kind === 'project' ? (a, b) => (b.bids + b.cos) - (a.bids + a.cos) : (a, b) => b.name.length - a.name.length);
-    const items = sorted.map(it => `<div style="font-size:13px">• ${esc(it.name)}${kind === 'project' ? ` <span style="color:var(--text-muted);font-size:11px">(${it.bids}b ${it.cos}co)</span>` : ''}</div>`).join('');
-    const control = CURRENT_USER?.is_admin ? `
+    const items = sorted.map(it => `<div style="font-size:13px">• ${esc(it.name)}${kind === 'project' ? ` <span style="color:var(--text-muted);font-size:11px">(${it.bids}b ${it.cos}co)</span>` : ''}${admin ? ` <a href="#" onclick="event.preventDefault();renameEntity('${kind}',${it.id})" style="font-size:11px">✏️</a>` : ''}</div>`).join('');
+    const control = admin ? `
       <div style="display:flex;gap:6px;align-items:center;margin-top:5px;flex-wrap:wrap">
         <span style="font-size:11px;color:var(--text-muted)">keep:</span>
         <select id="${kind}-surv-${gid}" style="font-size:12px;padding:3px 6px;border:1px solid var(--border);border-radius:5px;max-width:280px">
           ${sorted.map(it => `<option value="${it.id}">${esc(it.name)}</option>`).join('')}
         </select>
         <button class="v2-btn ${kind === 'project' ? 'blue' : 'amber'}" onclick="doMerge('${kind}',${gid})">Merge ${group.length}→1</button>
+        <button class="v2-btn outline" onclick="doDismiss('${kind}',${gid})">Not a dup</button>
       </div>` : '';
     return `<div style="padding:8px 0;border-bottom:1px solid #f1f5f9">${items}${control}</div>`;
   }
@@ -842,6 +844,16 @@ async function showHealth() {
     + (groups.length > 40 ? `<div style="color:var(--text-muted);font-size:12px;padding-top:6px">…and ${groups.length - 40} more groups (showing first 40)</div>` : '');
 
   const flatList = (arr, fmt) => arr.slice(0, 50).map(x => `<div style="font-size:13px;padding:2px 0">• ${fmt(x)}</div>`).join('') + (arr.length > 50 ? `<div style="color:var(--text-muted);font-size:12px;padding-top:6px">…and ${arr.length - 50} more</div>` : '');
+
+  const noBidList = (arr) => arr.slice(0, 80).map(p => `
+    <div style="font-size:13px;padding:3px 0;display:flex;align-items:center;gap:8px">
+      <span style="flex:1">• ${esc(p.name)}
+        ${p.empty ? '<span style="font-size:10px;font-weight:700;color:#dc2626;background:#fee2e2;padding:1px 6px;border-radius:8px">EMPTY</span>'
+                  : `<span style="font-size:10px;font-weight:700;color:#0e7490;background:#ecfeff;padding:1px 6px;border-radius:8px">LEGACY · ${p.cos} CO${p.cos!==1?'s':''}</span>`}
+      </span>
+      ${admin ? `<a href="#" onclick="event.preventDefault();renameEntity('project',${p.id})" style="font-size:11px">✏️ rename</a>` : ''}
+      ${admin && p.empty ? `<a href="#" onclick="event.preventDefault();deleteEmptyProject(${p.id})" style="font-size:11px;color:#dc2626">🗑 delete</a>` : ''}
+    </div>`).join('') + (arr.length > 80 ? `<div style="color:var(--text-muted);font-size:12px;padding-top:6px">…and ${arr.length - 80} more</div>` : '');
 
   main.innerHTML = `
     <div style="padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px">
@@ -857,8 +869,8 @@ async function showHealth() {
     ${card('Likely duplicate companies', dupCoIssues, 'name variants of one company — pick the keeper and merge (repoints all customer/contact links)',
       dupCoIssues ? clusterList(h.dupCompanies, 'company') : '<div style="color:#16a34a;font-size:13px">None 🎉</div>', '#d97706')}
 
-    ${card('Projects with no bids', h.noBidProjects.length, 'legacy jobs (COs only) or orphans — confirm they should exist',
-      h.noBidProjects.length ? flatList(h.noBidProjects, p => `${esc(p.name)} <span style="color:var(--text-muted);font-size:11px">(${p.cos} COs)</span>`) : '<div style="color:#16a34a;font-size:13px">None</div>', '#0891b2')}
+    ${card('Projects with no bids', h.noBidProjects.length, 'LEGACY = job + COs, no base bid (expected — just rename) · EMPTY = nothing attached (safe to delete)',
+      h.noBidProjects.length ? noBidList(h.noBidProjects) : '<div style="color:#16a34a;font-size:13px">None</div>', '#0891b2')}
 
     ${card('Active bids missing a customer', h.missing.no_customer.length, 'submitted/active bids with no linked customer',
       h.missing.no_customer.length ? flatList(h.missing.no_customer, b => esc(b.label)) : '<div style="color:#16a34a;font-size:13px">None</div>', '#9333ea')}
@@ -886,6 +898,35 @@ async function doMerge(kind, gid) {
     await api('POST', `/api/v2/admin/merge-${kind === 'project' ? 'projects' : 'companies'}`, { survivor_id: survivor, merge_ids: mergeIds });
     await showHealth();   // refresh the punch-list
   } catch (e) { alert('Merge failed: ' + e.message); }
+}
+
+// Mark a group as "not a duplicate" so it never re-clusters
+async function doDismiss(kind, gid) {
+  const group = (kind === 'project' ? HEALTH.dupProjects : HEALTH.dupCompanies)[gid];
+  if (!group) return;
+  try {
+    await api('POST', '/api/v2/admin/dismiss-duplicate', { kind, ids: group.map(it => it.id) });
+    await showHealth();
+  } catch (e) { alert(e.message); }
+}
+
+// Inline rename (project or company) via the admin edit route
+async function renameEntity(kind, id) {
+  const next = prompt(`New ${kind} name:`);
+  if (next == null || !next.trim()) return;
+  try {
+    await api('PATCH', `/api/v2/admin/${kind}/${id}`, { name: next.trim() });
+    if (typeof HEALTH === 'object') await showHealth();
+  } catch (e) { alert('Rename failed: ' + e.message); }
+}
+
+// Delete a truly-empty project (no bids, no jobs, no COs)
+async function deleteEmptyProject(id) {
+  if (!confirm('Delete this empty project? (Only allowed when nothing is attached.)')) return;
+  try {
+    await api('DELETE', `/api/v2/admin/project/${id}`);
+    await showHealth();
+  } catch (e) { alert('Delete failed: ' + e.message); }
 }
 
 load();
