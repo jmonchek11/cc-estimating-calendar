@@ -18,6 +18,7 @@ const XLSX = require('xlsx');
 const fs = require('fs');
 const path = require('path');
 const { getConnection, getModels } = require('./models');
+const db = require('./db');
 
 const FILE = process.argv.find(a => a.endsWith('.xlsx')) || '../Estimating Calendar.xlsx';
 const SCOPE_2026 = process.argv.includes('--2026');
@@ -115,10 +116,18 @@ async function main() {
   console.log(`\n📂 Importing: ${path.basename(abs)}${SCOPE_2026 ? '  (2026 scope)' : '  (ALL rows)'}${DRY ? '  [DRY — no writes]' : ''}\n`);
   const lkp = buildLookup();
 
-  // optional alias map: { "raw or normalized name": "Canonical Company Name" }
+  // Connect up front so we can read persisted cleanup overrides (company aliases
+  // are applied during the build; the rest are replayed after writing).
+  const conn = getConnection(); await conn.asPromise();
+  const M = getModels();
+
+  // company aliases: optional JSON file + persisted company_alias overrides (DB)
   let aliases = {};
   const aliasFile = path.join(__dirname, 'company-aliases.json');
-  if (fs.existsSync(aliasFile)) { aliases = JSON.parse(fs.readFileSync(aliasFile, 'utf8')); console.log(`(loaded ${Object.keys(aliases).length} company aliases)\n`); }
+  if (fs.existsSync(aliasFile)) aliases = JSON.parse(fs.readFileSync(aliasFile, 'utf8'));
+  const aliasOverrides = await M.CleanupOverride.find({ type: 'company_alias' }).lean();
+  aliasOverrides.forEach(o => { aliases[o.from] = o.to; });
+  console.log(`(company aliases — file: ${Object.keys(aliases).length - aliasOverrides.length}, saved overrides: ${aliasOverrides.length})\n`);
 
   // ── collect rows ──
   const bidRows = [], coRows = [];
@@ -190,7 +199,7 @@ async function main() {
     if (!jobInfo[bj] || (fromBid && !jobInfo[bj].fromBid)) jobInfo[bj] = { name: baseName(r['Project Name']), fromBid };
   }
   for (const [bj, info] of Object.entries(jobInfo)) {
-    const projectId = ++pid; projectDocs.push({ _id: projectId, name: info.name || `Job ${bj}`, created_by: 1, created_at: ts(), updated_at: ts() });
+    const projectId = ++pid; projectDocs.push({ _id: projectId, name: info.name || `Job ${bj}`, source_key: `job:${bj}`, created_by: 1, created_at: ts(), updated_at: ts() });
     projByJob[bj] = projectId;
     const jid = ++job_id; jobDocs.push({ _id: jid, project_id: projectId, winning_bid_id: null, job_number: bj, awarded_company_id: null, pm_id: null, award_date: null, created_at: ts(), updated_at: ts() });
     jobByNum[bj] = jid;
@@ -200,7 +209,7 @@ async function main() {
   function nameProjectId(rawName) {
     const nb = baseName(rawName); const nk = normName(nb); if (!nk) return null;
     if (nameToJob[nk]) return projByJob[nameToJob[nk]];          // join an existing job's project
-    if (!projByName[nk]) { const id = ++pid; projByName[nk] = id; projectDocs.push({ _id: id, name: nb, created_by: 1, created_at: ts(), updated_at: ts() }); }
+    if (!projByName[nk]) { const id = ++pid; projByName[nk] = id; projectDocs.push({ _id: id, name: nb, source_key: `name:${nk}`, created_by: 1, created_at: ts(), updated_at: ts() }); }
     return projByName[nk];
   }
   function projectFor(r) { const bj = baseJob(r['Job #']); return (bj && projByJob[bj]) ? projByJob[bj] : nameProjectId(r['Project Name']); }
@@ -298,13 +307,11 @@ async function main() {
   if (SCOPE_2026) console.log(`  (out of 2026 scope, skipped: ${outOfScope})`);
   console.log(`\n  Notes: ${ex.coNoJob} CO(s) dropped (no job #); ${ex.subNoCompany} submission(s) skipped (no customer).`);
 
-  if (DRY) { console.log('\n[DRY] nothing written. Re-run without --dry to load into estimating_v2_test.\n'); process.exit(0); }
+  if (DRY) { console.log('\n[DRY] nothing written. Re-run without --dry to load into estimating_v2_test.\n'); await conn.close(); process.exit(0); }
 
-  // ── write ──
-  const conn = getConnection(); await conn.asPromise();
-  const M = getModels();
-  console.log('\nWiping estimating_v2_test and writing…');
-  for (const model of Object.values(M)) await model.deleteMany({});
+  // ── write — wipe everything EXCEPT cleanup_overrides (persisted cleanup) ──
+  console.log('\nWriting to estimating_v2_test (preserving saved cleanup)…');
+  for (const [name, model] of Object.entries(M)) { if (name === 'CleanupOverride') continue; await model.deleteMany({}); }
   await M.TeamMember.insertMany(TEAM.map(t => ({ ...t, active: 1, created_at: ts() })));
   await M.Settings.create({ _id: 'company', fu_initial_days: 3, fu_recurring_days: 7 });
   if (companyDocs.length) await M.Company.insertMany(companyDocs);
@@ -315,16 +322,23 @@ async function main() {
   if (subDocs.length) await M.BidSubmission.insertMany(subDocs);
   if (jobDocs.length) await M.Job.insertMany(jobDocs);
   if (coDocs.length) await M.ChangeOrder.insertMany(coDocs);
+  const maxOv = await M.CleanupOverride.findOne().sort({ _id: -1 }).lean();
   await M.Counter.insertMany([
     { _id: 'projects', seq: pid }, { _id: 'bids', seq: bid_id }, { _id: 'jobs', seq: job_id },
     { _id: 'change_orders', seq: coDocs.length }, { _id: 'companies', seq: cid }, { _id: 'contacts', seq: ctid },
-    { _id: 'bid_customers', seq: bc_id }, { _id: 'bid_submissions', seq: sub_id }, { _id: 'followups', seq: fu_id }, { _id: 'reminders', seq: 0 },
+    { _id: 'bid_customers', seq: bc_id }, { _id: 'bid_submissions', seq: sub_id }, { _id: 'followups', seq: fu_id },
+    { _id: 'reminders', seq: 0 }, { _id: 'ignored_pairs', seq: 0 }, { _id: 'cleanup_overrides', seq: maxOv ? maxOv._id : 0 },
   ]);
 
   // verify FK integrity
   const orphanBids = await M.Bid.countDocuments({ project_id: { $nin: projectDocs.map(p => p._id) } });
   const orphanCos = await M.ChangeOrder.countDocuments({ job_id: { $nin: jobDocs.map(j => j._id) } });
-  console.log(`\n✅ Imported. FK check — bids with bad project_id: ${orphanBids}, COs with bad job_id: ${orphanCos}`);
+  console.log(`✅ Imported. FK check — bids with bad project_id: ${orphanBids}, COs with bad job_id: ${orphanCos}`);
+
+  // ── replay saved cleanup (merges, renames, deletes, not-a-dup) ──
+  const applied = await db.applyCleanupOverrides();
+  const savedAliases = await M.CleanupOverride.countDocuments({ type: 'company_alias' });
+  console.log(`🔁 Replayed cleanup: ${applied.merges} project-merge, ${applied.renames} rename, ${applied.deletes} delete, ${applied.not_dup} not-a-dup, ${savedAliases} company-alias (applied during build).`);
   console.log('Open /v2 to walk the real data.  Restore fake scenarios anytime with: node v2/seed.js\n');
   await conn.close();
 }

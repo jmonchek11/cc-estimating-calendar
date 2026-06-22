@@ -453,6 +453,8 @@ async function adminUpdate(entity, id, data) {
   const M = getModels();
   const Model = { project: M.Project, company: M.Company, bid: M.Bid, job: M.Job, change_order: M.ChangeOrder, bid_submission: M.BidSubmission }[entity];
   if (!Model) throw new Error('Unknown entity: ' + entity);
+  // capture the pre-edit doc for project/company so renames can be recorded for replay
+  const before = (entity === 'project' || entity === 'company') ? await Model.findById(Number(id)).lean() : null;
   const allowed = ADMIN_EDITABLE[entity];
   const upd = { updated_at: ts() };
   for (const f of allowed) {
@@ -469,6 +471,11 @@ async function adminUpdate(entity, id, data) {
   if (entity === 'bid_submission') {
     const sub = await M.BidSubmission.findById(Number(id)).lean();
     if (sub) await recomputeBidHeadline(sub.bid_id);
+  }
+  // Record renames as overrides so they survive a re-import.
+  if (before && 'name' in upd && upd.name && upd.name !== before.name) {
+    if (entity === 'project') await _recordOverride({ type: 'project_name', key: before.source_key || ('name:' + _norm(before.name)), name: upd.name });
+    else if (entity === 'company') await _recordOverride({ type: 'company_alias', from: _norm(before.name), to: upd.name });
   }
   return { entity, id: Number(id) };
 }
@@ -779,37 +786,23 @@ async function getDataHealth() {
   };
 }
 
-// ── Merge duplicate projects: repoint bids + jobs to the survivor, delete the rest ──
-async function mergeProjects(survivorId, mergeIds) {
-  const M = getModels();
-  const sid = Number(survivorId);
-  const ids = (mergeIds || []).map(Number).filter(x => x && x !== sid);
-  if (!ids.length) throw new Error('Nothing to merge');
-  if (!(await M.Project.findById(sid))) throw new Error('Survivor project not found');
+// Stable key for a project (survives re-import): its import source_key, else its name.
+async function _projKey(M, id) { const p = await M.Project.findById(Number(id)).lean(); return p ? (p.source_key || ('name:' + _norm(p.name))) : null; }
+async function _recordOverride(doc) { const M = getModels(); await M.CleanupOverride.create({ _id: await nextId('cleanup_overrides'), ...doc }); }
+
+// ── core merges (no override recording — used by both UI actions and replay) ──
+async function _mergeProjectsCore(M, sid, ids) {
   await M.Bid.updateMany({ project_id: { $in: ids } }, { $set: { project_id: sid, updated_at: ts() } });
   await M.Job.updateMany({ project_id: { $in: ids } }, { $set: { project_id: sid, updated_at: ts() } });
   await M.Project.deleteMany({ _id: { $in: ids } });
-  return { survivor: sid, merged: ids.length };
 }
-
-// ── Merge duplicate companies: repoint every FK to the survivor, dedupe, delete ──
-async function mergeCompanies(survivorId, mergeIds) {
-  const M = getModels();
-  const sid = Number(survivorId);
-  const ids = (mergeIds || []).map(Number).filter(x => x && x !== sid);
-  if (!ids.length) throw new Error('Nothing to merge');
-  if (!(await M.Company.findById(sid))) throw new Error('Survivor company not found');
+async function _mergeCompaniesCore(M, sid, ids) {
   await M.Bid.updateMany({ awarded_company_id: { $in: ids } }, { $set: { awarded_company_id: sid, updated_at: ts() } });
   await M.Job.updateMany({ awarded_company_id: { $in: ids } }, { $set: { awarded_company_id: sid, updated_at: ts() } });
   await M.BidSubmission.updateMany({ company_id: { $in: ids } }, { $set: { company_id: sid, updated_at: ts() } });
   await M.Contact.updateMany({ company_id: { $in: ids } }, { $set: { company_id: sid, updated_at: ts() } });
   await M.BidCustomer.updateMany({ company_id: { $in: ids } }, { $set: { company_id: sid } });
-  // a bid may now list the survivor twice — merge those into one row
-  const dups = await M.BidCustomer.aggregate([
-    { $match: { company_id: sid } },
-    { $group: { _id: '$bid_id', rows: { $push: '$$ROOT' }, n: { $sum: 1 } } },
-    { $match: { n: { $gt: 1 } } },
-  ]);
+  const dups = await M.BidCustomer.aggregate([{ $match: { company_id: sid } }, { $group: { _id: '$bid_id', rows: { $push: '$$ROOT' }, n: { $sum: 1 } } }, { $match: { n: { $gt: 1 } } }]);
   for (const d of dups) {
     const [keep, ...extra] = d.rows;
     const contacts = [...new Set(d.rows.flatMap(r => r.contact_ids || []))];
@@ -817,37 +810,124 @@ async function mergeCompanies(survivorId, mergeIds) {
     await M.BidCustomer.deleteMany({ _id: { $in: extra.map(r => r._id) } });
   }
   await M.Company.deleteMany({ _id: { $in: ids } });
+}
+
+// ── Merge duplicate projects (UI) — also records a project_merge override ──
+async function mergeProjects(survivorId, mergeIds) {
+  const M = getModels();
+  const sid = Number(survivorId);
+  const ids = (mergeIds || []).map(Number).filter(x => x && x !== sid);
+  if (!ids.length) throw new Error('Nothing to merge');
+  const survivor = await M.Project.findById(sid).lean();
+  if (!survivor) throw new Error('Survivor project not found');
+  const keys = [survivor.source_key || ('name:' + _norm(survivor.name))];
+  for (const id of ids) { const k = await _projKey(M, id); if (k) keys.push(k); }
+  await _mergeProjectsCore(M, sid, ids);
+  await _recordOverride({ type: 'project_merge', keys: [...new Set(keys)], name: survivor.name });
   return { survivor: sid, merged: ids.length };
 }
 
-// ── "Not a duplicate": record every pair in the group so it never re-clusters ──
+// ── Merge duplicate companies (UI) — records company_alias overrides ──
+async function mergeCompanies(survivorId, mergeIds) {
+  const M = getModels();
+  const sid = Number(survivorId);
+  const ids = (mergeIds || []).map(Number).filter(x => x && x !== sid);
+  if (!ids.length) throw new Error('Nothing to merge');
+  const survivor = await M.Company.findById(sid).lean();
+  if (!survivor) throw new Error('Survivor company not found');
+  const merged = await M.Company.find({ _id: { $in: ids } }).lean();
+  await _mergeCompaniesCore(M, sid, ids);
+  for (const c of merged) await _recordOverride({ type: 'company_alias', from: _norm(c.name), to: survivor.name });
+  return { survivor: sid, merged: ids.length };
+}
+
+// ── "Not a duplicate": live ignored_pairs + a not_dup override (stable keys) ──
 async function dismissDuplicates(kind, ids) {
   const M = getModels();
   const list = (ids || []).map(Number).filter(Boolean);
   if (list.length < 2) throw new Error('Need at least two ids');
-  let added = 0;
   for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
     const a = Math.min(list[i], list[j]), b = Math.max(list[i], list[j]);
-    if (!(await M.IgnoredPair.findOne({ kind, a, b }))) { await M.IgnoredPair.create({ _id: await nextId('ignored_pairs'), kind, a, b }); added++; }
+    if (!(await M.IgnoredPair.findOne({ kind, a, b }))) await M.IgnoredPair.create({ _id: await nextId('ignored_pairs'), kind, a, b });
   }
-  return { dismissed: list.length, pairs_added: added };
+  // stable keys for replay
+  let keys;
+  if (kind === 'project') { keys = []; for (const id of list) { const k = await _projKey(M, id); if (k) keys.push(k); } }
+  else { const cs = await M.Company.find({ _id: { $in: list } }).lean(); keys = cs.map(c => _norm(c.name)); }
+  await _recordOverride({ type: 'not_dup', kind, keys: [...new Set(keys)] });
+  return { dismissed: list.length };
 }
 
-// ── Delete a truly-empty project (no bids, no jobs, no COs) ──
+// ── Delete a truly-empty project (UI) — records a project_delete override ──
 async function deleteEmptyProject(id) {
   const M = getModels();
   const pid = Number(id);
   if (await M.Bid.countDocuments({ project_id: pid })) throw new Error('Project still has bids');
   const jobs = await M.Job.find({ project_id: pid }).lean();
   for (const j of jobs) if (await M.ChangeOrder.countDocuments({ job_id: j._id })) throw new Error('Project still has change orders');
+  const key = await _projKey(M, pid);
   await M.Job.deleteMany({ project_id: pid });
   await M.Project.deleteOne({ _id: pid });
+  if (key) await _recordOverride({ type: 'project_delete', key });
   return { deleted: pid };
+}
+
+// ── Replay cleanup overrides onto freshly-imported data (called by import.js) ──
+// company_alias is applied during the import build; this handles the rest.
+async function applyCleanupOverrides() {
+  const M = getModels();
+  const overrides = await M.CleanupOverride.find().lean();
+  const applied = { renames: 0, merges: 0, deletes: 0, not_dup: 0 };
+  const findByKey = async (key) => {
+    if (key.startsWith('job:')) return M.Project.findOne({ source_key: key }).lean();
+    return (await M.Project.findOne({ source_key: key }).lean()) || M.Project.findOne({ name: new RegExp('^' + key.replace(/^name:/, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') }).lean();
+  };
+
+  // 1. project merges (do before renames so the survivor exists)
+  for (const o of overrides.filter(o => o.type === 'project_merge')) {
+    const projs = [];
+    for (const k of o.keys) { const p = await findByKey(k); if (p) projs.push(p); }
+    if (projs.length < 2) continue;
+    const survivor = projs.find(p => p.name === o.name) || projs[0];
+    const others = projs.filter(p => p._id !== survivor._id).map(p => p._id);
+    await _mergeProjectsCore(M, survivor._id, others);
+    if (o.name) await M.Project.updateOne({ _id: survivor._id }, { $set: { name: o.name } });
+    applied.merges++;
+  }
+  // 2. project renames
+  for (const o of overrides.filter(o => o.type === 'project_name')) {
+    const r = await M.Project.updateOne({ source_key: o.key }, { $set: { name: o.name } });
+    if (r.matchedCount) applied.renames++;
+  }
+  // 3. empty project deletes
+  for (const o of overrides.filter(o => o.type === 'project_delete')) {
+    const p = await findByKey(o.key); if (!p) continue;
+    if (await M.Bid.countDocuments({ project_id: p._id })) continue;
+    const jobs = await M.Job.find({ project_id: p._id }).lean();
+    let hasCo = false; for (const j of jobs) if (await M.ChangeOrder.countDocuments({ job_id: j._id })) hasCo = true;
+    if (hasCo) continue;
+    await M.Job.deleteMany({ project_id: p._id }); await M.Project.deleteOne({ _id: p._id }); applied.deletes++;
+  }
+  // 4. not-a-duplicate pairs → rebuild ignored_pairs from stable keys
+  const allCompanies = await M.Company.find().lean();
+  for (const o of overrides.filter(o => o.type === 'not_dup')) {
+    const ids = [];
+    for (const k of o.keys) {
+      if (o.kind === 'project') { const p = await findByKey(k); if (p) ids.push(p._id); }
+      else { const c = allCompanies.find(x => _norm(x.name) === k); if (c) ids.push(c._id); }
+    }
+    for (let i = 0; i < ids.length; i++) for (let j = i + 1; j < ids.length; j++) {
+      const a = Math.min(ids[i], ids[j]), b = Math.max(ids[i], ids[j]);
+      if (!(await M.IgnoredPair.findOne({ kind: o.kind, a, b }))) await M.IgnoredPair.create({ _id: await nextId('ignored_pairs'), kind: o.kind, a, b });
+    }
+    applied.not_dup++;
+  }
+  return applied;
 }
 
 module.exports = {
   getProjects, getProjectDetail, getMeta, getDataHealth, mergeProjects, mergeCompanies,
-  dismissDuplicates, deleteEmptyProject, nextId,
+  dismissDuplicates, deleteEmptyProject, applyCleanupOverrides, nextId,
   createOpportunity, createDirectBid, startBid, submitBid, addSubmission, adminUpdate,
   awardSubmission, notAwardSubmission, closeBid, logFollowupV2,
   createLegacyJob, updateJob,

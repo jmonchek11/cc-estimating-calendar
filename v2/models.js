@@ -33,6 +33,7 @@ const ts = () => new Date().toISOString().replace('T', ' ').substring(0, 19);
 const ProjectSchema = new mongoose.Schema({
   _id:        Number,                       // internal only — never shown in UI
   name:       { type: String, required: true },
+  source_key: { type: String, default: null },   // stable import key: "job:<#>" or "name:<norm>" — survives re-import
   created_by: { type: Number, default: null },
   created_at: { type: String, default: ts },
   updated_at: { type: String, default: ts },
@@ -255,6 +256,23 @@ const IgnoredPairSchema = new mongoose.Schema({
   b:    { type: Number, required: true },
 }, opts);
 
+// Cleanup decisions keyed by STABLE identifiers (not record ids) so they
+// survive a full re-import. The importer preserves this collection and
+// replays it after rebuilding from Excel. Types:
+//   company_alias  { from:<normalized name>, to:<canonical name> }
+//   project_name   { key:<source_key>, name:<canonical name> }   (rename)
+//   project_merge  { keys:[<source_key>...], name:<canonical> }  (one project)
+//   project_delete { key:<source_key> }
+//   not_dup        { kind:'project'|'company', keys:[<key>,<key>] }
+const CleanupOverrideSchema = new mongoose.Schema({
+  _id:  Number,
+  type: { type: String, required: true },
+  from: { type: String, default: null }, to: { type: String, default: null },
+  key:  { type: String, default: null }, name: { type: String, default: null },
+  keys: { type: [String], default: [] }, kind: { type: String, default: null },
+  created_at: { type: String, default: ts },
+}, opts);
+
 // ── Export models bound to the v2 connection ──────────────────────────────────
 
 function getModels() {
@@ -274,6 +292,7 @@ function getModels() {
     Settings:    c.model('Settings', SettingsSchema, 'settings'),
     Counter:     c.model('Counter', CounterSchema, 'counters'),
     IgnoredPair: c.model('IgnoredPair', IgnoredPairSchema, 'ignored_pairs'),
+    CleanupOverride: c.model('CleanupOverride', CleanupOverrideSchema, 'cleanup_overrides'),
   };
 }
 
