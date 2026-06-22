@@ -872,6 +872,32 @@ async function mergeCompanies(survivorId, mergeIds) {
   return { survivor: sid, merged: ids.length };
 }
 
+// ── Merge duplicate jobs: move change orders to the survivor, carry over any
+// fields it's missing (winning bid / company / PM / award date), delete the rest.
+// Live-only fix for old-import artifacts (the job#-grouped importer prevents new
+// duplicates, so no replay override is needed).
+async function mergeJobs(survivorId, mergeIds) {
+  const M = getModels();
+  const sid = Number(survivorId);
+  const ids = (mergeIds || []).map(Number).filter(x => x && x !== sid);
+  if (!ids.length) throw new Error('Nothing to merge');
+  const survivor = await M.Job.findById(sid).lean();
+  if (!survivor) throw new Error('Survivor job not found');
+  const merged = await M.Job.find({ _id: { $in: ids } }).lean();
+  await M.ChangeOrder.updateMany({ job_id: { $in: ids } }, { $set: { job_id: sid, updated_at: ts() } });
+  const fill = {};
+  for (const j of merged) {
+    if (!survivor.winning_bid_id && j.winning_bid_id) fill.winning_bid_id = j.winning_bid_id;
+    if (!survivor.job_number && j.job_number) fill.job_number = j.job_number;
+    if (!survivor.awarded_company_id && j.awarded_company_id) fill.awarded_company_id = j.awarded_company_id;
+    if (!survivor.pm_id && j.pm_id) fill.pm_id = j.pm_id;
+    if (!survivor.award_date && j.award_date) fill.award_date = j.award_date;
+  }
+  if (Object.keys(fill).length) await M.Job.updateOne({ _id: sid }, { $set: { ...fill, updated_at: ts() } });
+  await M.Job.deleteMany({ _id: { $in: ids } });
+  return { survivor: sid, merged: ids.length };
+}
+
 // ── "Not a duplicate": live ignored_pairs + a not_dup override (stable keys) ──
 async function dismissDuplicates(kind, ids) {
   const M = getModels();
@@ -957,7 +983,7 @@ async function applyCleanupOverrides() {
 }
 
 module.exports = {
-  getProjects, getProjectDetail, getMeta, getDataHealth, mergeProjects, mergeCompanies,
+  getProjects, getProjectDetail, getMeta, getDataHealth, mergeProjects, mergeCompanies, mergeJobs,
   dismissDuplicates, deleteEmptyProject, applyCleanupOverrides, removeOverride, nextId,
   createOpportunity, createDirectBid, startBid, submitBid, addSubmission, adminUpdate,
   awardSubmission, notAwardSubmission, closeBid, logFollowupV2,

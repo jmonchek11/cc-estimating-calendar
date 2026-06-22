@@ -235,6 +235,19 @@ function renderHierarchy(d) {
     ${CURRENT_USER?.is_admin ? `<button class="v2-btn outline" onclick="actEditProject(${d.id})">✏️ Edit Project</button>` : ''}
     <span style="font-size:11px;color:var(--text-muted);align-self:center">new B26-#### for another drawing stage / re-bid</span>
   </div>`;
+
+  // Duplicate-jobs warning: same job # on more than one job here (legacy + bid-backed
+  // artifact from an older import). One click merges the COs onto the real job.
+  const byNum = {};
+  d.jobs.forEach(j => { if (j.job_number) (byNum[j.job_number] = byNum[j.job_number] || []).push(j); });
+  const dupJobGroups = Object.values(byNum).filter(g => g.length > 1);
+  if (dupJobGroups.length && CURRENT_USER?.is_admin) {
+    html += `<div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:9px 12px;margin:4px 0;font-size:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <span style="flex:1">⚠️ Job #${esc(dupJobGroups.map(g=>g[0].job_number).join(', '))} is split across ${dupJobGroups.reduce((s,g)=>s+g.length,0)} jobs (legacy + bid-backed). They're the same job.</span>
+      <button class="v2-btn amber" onclick="actMergeDupeJobs(${d.id})">Merge into one job</button>
+    </div>`;
+  }
+
   const jobByWinningBid = {};
   d.jobs.forEach(j => { if (j.winning_bid_id) jobByWinningBid[j.winning_bid_id] = j; });
   for (const b of d.bids) {
@@ -527,6 +540,27 @@ function actNewBid() {
       </div>
     </div>`;
   document.body.appendChild(ov);
+}
+
+// Merge duplicate jobs (same job #) within a project — COs move to the bid-backed
+// job (the real one); the legacy duplicate is deleted. Live, no re-import needed.
+async function actMergeDupeJobs(projectId) {
+  const d = DETAIL_CACHE[projectId]; if (!d) return;
+  const byNum = {};
+  d.jobs.forEach(j => { if (j.job_number) (byNum[j.job_number] = byNum[j.job_number] || []).push(j); });
+  const groups = Object.values(byNum).filter(g => g.length > 1);
+  if (!groups.length) return;
+  const total = groups.reduce((s, g) => s + g.length, 0);
+  if (!confirm(`Merge ${total} duplicate jobs into ${groups.length}? Change orders move onto the bid-backed job; the duplicates are deleted.`)) return;
+  try {
+    for (const g of groups) {
+      // survivor = the job tied to an awarded bid; else the one with the most COs
+      const survivor = g.find(j => j.winning_bid_id) || [...g].sort((a, b) => b.change_orders.length - a.change_orders.length)[0];
+      const mergeIds = g.filter(j => j.id !== survivor.id).map(j => j.id);
+      await api('POST', '/api/v2/admin/merge-jobs', { survivor_id: survivor.id, merge_ids: mergeIds });
+    }
+    await refresh();
+  } catch (e) { alert('Merge failed: ' + e.message); }
 }
 
 // "+ Add Bid to this Project" inside a project's hierarchy (re-bid / new stage)
