@@ -749,6 +749,7 @@ async function getDataHealth() {
   ]);
   const ignoredPairs = await M.IgnoredPair.find().lean();
   const ignoreSet = (kind) => new Set(ignoredPairs.filter(x => x.kind === kind).map(x => Math.min(x.a, x.b) + ':' + Math.max(x.a, x.b)));
+  const overrides = (await M.CleanupOverride.find().sort({ _id: -1 }).lean()).map(o => ({ id: o._id, type: o.type, desc: _describeOverride(o) }));
 
   const bidsByProj = {}, jobsByProj = {}, cosByJob = {}, custByBid = {};
   bids.forEach(b => (bidsByProj[b.project_id] = bidsByProj[b.project_id] || []).push(b));
@@ -782,8 +783,38 @@ async function getDataHealth() {
 
   return {
     counts: { projects: projects.length, bids: bids.length, jobs: jobs.length, change_orders: cos.length, companies: companies.length },
-    dupProjects, dupCompanies, noBidProjects, jobsNoNumber, missing,
+    dupProjects, dupCompanies, noBidProjects, jobsNoNumber, missing, overrides,
   };
+}
+
+function _describeOverride(o) {
+  const k = (s) => (s || '').replace(/^job:/, 'Job ').replace(/^name:/, '');
+  switch (o.type) {
+    case 'company_alias':  return `Company alias — "${o.from}" → "${o.to}"`;
+    case 'project_name':   return `Project rename — ${k(o.key)} → "${o.name}"`;
+    case 'project_merge':  return `Project merge → "${o.name}" (${(o.keys || []).map(k).join(', ')})`;
+    case 'project_delete': return `Deleted empty project — ${k(o.key)}`;
+    case 'not_dup':        return `Not a duplicate (${o.kind}) — ${(o.keys || []).map(k).join(' · ')}`;
+    default:               return o.type;
+  }
+}
+
+// Remove a saved cleanup override. For not_dup, also clears the live ignored_pairs
+// so the group reappears immediately; other types fully revert on next re-import.
+async function removeOverride(id) {
+  const M = getModels();
+  const o = await M.CleanupOverride.findById(Number(id)).lean();
+  if (!o) throw new Error('Override not found');
+  if (o.type === 'not_dup') {
+    const ids = [];
+    if (o.kind === 'company') { const cs = await M.Company.find().lean(); (o.keys || []).forEach(key => { const c = cs.find(x => _norm(x.name) === key); if (c) ids.push(c._id); }); }
+    else { for (const key of (o.keys || [])) { const p = await M.Project.findOne({ source_key: key }).lean(); if (p) ids.push(p._id); } }
+    for (let i = 0; i < ids.length; i++) for (let j = i + 1; j < ids.length; j++) {
+      await M.IgnoredPair.deleteOne({ kind: o.kind, a: Math.min(ids[i], ids[j]), b: Math.max(ids[i], ids[j]) });
+    }
+  }
+  await M.CleanupOverride.deleteOne({ _id: o._id });
+  return { removed: o._id, live_reverted: o.type === 'not_dup' };
 }
 
 // Stable key for a project (survives re-import): its import source_key, else its name.
@@ -927,7 +958,7 @@ async function applyCleanupOverrides() {
 
 module.exports = {
   getProjects, getProjectDetail, getMeta, getDataHealth, mergeProjects, mergeCompanies,
-  dismissDuplicates, deleteEmptyProject, applyCleanupOverrides, nextId,
+  dismissDuplicates, deleteEmptyProject, applyCleanupOverrides, removeOverride, nextId,
   createOpportunity, createDirectBid, startBid, submitBid, addSubmission, adminUpdate,
   awardSubmission, notAwardSubmission, closeBid, logFollowupV2,
   createLegacyJob, updateJob,

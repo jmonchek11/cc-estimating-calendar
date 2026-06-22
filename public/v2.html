@@ -863,6 +863,13 @@ async function showHealth() {
       </div>
     </div>
 
+    ${(h.overrides && h.overrides.length) ? card('Saved cleanup (survives re-import)', h.overrides.length, 'these replay automatically on every import — undo one to stop it (re-import to fully revert merges/renames)',
+      h.overrides.slice(0, 100).map(o => `
+        <div style="font-size:13px;padding:3px 0;display:flex;align-items:center;gap:8px">
+          <span style="flex:1">• ${esc(o.desc)}</span>
+          ${admin ? `<a href="#" onclick="event.preventDefault();undoOverride(${o.id})" style="font-size:11px;color:#dc2626">↩ undo</a>` : ''}
+        </div>`).join(''), '#16a34a') : ''}
+
     ${card('Likely duplicate projects', dupProjIssues, 'groups that look like the same project — pick the keeper and merge (rewrites bid/job links)',
       dupProjIssues ? clusterList(h.dupProjects, 'project') : '<div style="color:#16a34a;font-size:13px">None 🎉</div>', '#dc2626')}
 
@@ -918,6 +925,16 @@ async function renameEntity(kind, id) {
     await api('PATCH', `/api/v2/admin/${kind}/${id}`, { name: next.trim() });
     if (typeof HEALTH === 'object') await showHealth();
   } catch (e) { alert('Rename failed: ' + e.message); }
+}
+
+// Undo a saved cleanup override (stops it replaying; re-import to fully revert)
+async function undoOverride(id) {
+  if (!confirm('Undo this saved cleanup? It will no longer replay on import.\n\n(For merges/renames, re-run the import to fully revert the live data; "not a duplicate" reverts immediately.)')) return;
+  try {
+    const r = await api('DELETE', `/api/v2/admin/override/${id}`);
+    await showHealth();
+    if (!r.live_reverted) alert('Removed. Re-run the import to fully revert the affected records.');
+  } catch (e) { alert(e.message); }
 }
 
 // Delete a truly-empty project (no bids, no jobs, no COs)
