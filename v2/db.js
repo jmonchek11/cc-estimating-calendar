@@ -699,8 +699,78 @@ async function reopenCO(id) {
   return { co_id: co._id, stage: target };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// DATA HEALTH — buckets the dataset's quality issues so cleanup is a punch-list
+// ═══════════════════════════════════════════════════════════════════════════
+function _norm(v) {
+  return String(v || '').toLowerCase().replace(/[.']/g, '').replace(/[,"&\/()-]/g, ' ')
+    .replace(/\b(inc|llc|llp|lp|corp|co|company|group|construction|builders|contracting|contractors)\b/g, ' ')
+    .replace(/\s+/g, ' ').trim().replace(/\b([a-z]) (?=[a-z]\b)/g, '$1');
+}
+function _lev(a, b) {
+  const m = a.length, n = b.length; if (!m) return n; if (!n) return m;
+  const prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) { let diag = prev[0]; prev[0] = i; for (let j = 1; j <= n; j++) { const t = prev[j]; prev[j] = Math.min(prev[j] + 1, prev[j - 1] + 1, diag + (a[i - 1] === b[j - 1] ? 0 : 1)); diag = t; } }
+  return prev[n];
+}
+// Cluster items ({id,name,key,...}) that are the same/typo/prefix of each other.
+function _clusterSimilar(items) {
+  const parent = items.map((_, i) => i);
+  const find = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+  const union = (a, b) => { parent[find(a)] = find(b); };
+  for (let i = 0; i < items.length; i++) for (let j = i + 1; j < items.length; j++) {
+    const a = items[i].key, b = items[j].key; if (!a || !b) continue;
+    const same = a === b;
+    const prefix = a.length >= 10 && b.length >= 10 && (a.startsWith(b) || b.startsWith(a));
+    const typo = a.length >= 8 && b.length >= 8 && Math.abs(a.length - b.length) <= 2 && _lev(a, b) <= 1;
+    if (same || prefix || typo) union(i, j);
+  }
+  const groups = {};
+  items.forEach((it, i) => { const r = find(i); (groups[r] = groups[r] || []).push(it); });
+  return Object.values(groups).filter(g => g.length > 1).sort((a, b) => b.length - a.length);
+}
+
+async function getDataHealth() {
+  const M = getModels();
+  const [projects, bids, jobs, cos, companies, bidCustomers] = await Promise.all([
+    M.Project.find().lean(), M.Bid.find().lean(), M.Job.find().lean(),
+    M.ChangeOrder.find().lean(), M.Company.find().lean(), M.BidCustomer.find().lean(),
+  ]);
+  const bidsByProj = {}, jobsByProj = {}, cosByJob = {}, custByBid = {};
+  bids.forEach(b => (bidsByProj[b.project_id] = bidsByProj[b.project_id] || []).push(b));
+  jobs.forEach(j => (jobsByProj[j.project_id] = jobsByProj[j.project_id] || []).push(j));
+  cos.forEach(c => (cosByJob[c.job_id] = cosByJob[c.job_id] || []).push(c));
+  bidCustomers.forEach(bc => (custByBid[bc.bid_id] = custByBid[bc.bid_id] || []).push(bc));
+  const projCo = (p) => (jobsByProj[p._id] || []).reduce((s, j) => s + (cosByJob[j._id] || []).length, 0);
+
+  // near-duplicate projects (merge candidates)
+  const dupProjects = _clusterSimilar(projects.map(p => ({ id: p._id, name: p.name, key: _norm(p.name), bids: (bidsByProj[p._id] || []).length, cos: projCo(p) })));
+  // near-duplicate companies (alias candidates)
+  const dupCompanies = _clusterSimilar(companies.map(c => ({ id: c._id, name: c.name, key: _norm(c.name) })));
+  // projects with no bids (legacy / CO-only / orphan)
+  const noBidProjects = projects.filter(p => !(bidsByProj[p._id])).map(p => ({ id: p._id, name: p.name, cos: projCo(p) })).sort((a, b) => b.cos - a.cos);
+  // jobs with no job # (awaiting accounting)
+  const jobsNoNumber = jobs.filter(j => !j.job_number).length;
+
+  // bids missing key data (active/submitted, not superseded)
+  const active = bids.filter(b => BID_ACTIVE_STAGES.includes(b.stage) && !b.superseded);
+  const pById = {}; projects.forEach(p => pById[p._id] = p.name);
+  const tag = (b) => ({ id: b._id, label: `${b.bid_number || '(no #)'} — ${pById[b.project_id] || '?'}` });
+  const missing = {
+    no_customer: active.filter(b => !(custByBid[b._id])).map(tag),
+    no_estimator: active.filter(b => !b.estimator_id).map(tag),
+    no_bid_number: active.filter(b => !b.bid_number).map(tag),
+    submitted_no_amount: active.filter(b => b.stage === 'submitted' && !b.estimate_amount).map(tag),
+  };
+
+  return {
+    counts: { projects: projects.length, bids: bids.length, jobs: jobs.length, change_orders: cos.length, companies: companies.length },
+    dupProjects, dupCompanies, noBidProjects, jobsNoNumber, missing,
+  };
+}
+
 module.exports = {
-  getProjects, getProjectDetail, getMeta, nextId,
+  getProjects, getProjectDetail, getMeta, getDataHealth, nextId,
   createOpportunity, createDirectBid, startBid, submitBid, addSubmission, adminUpdate,
   awardSubmission, notAwardSubmission, closeBid, logFollowupV2,
   createLegacyJob, updateJob,

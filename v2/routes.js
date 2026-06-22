@@ -33,6 +33,11 @@ router.get('/api/v2/projects/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+router.get('/api/v2/health', async (req, res) => {
+  try { res.json(await v2db.getDataHealth()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.get('/api/v2/meta', async (req, res) => {
   try {
     const meta = await v2db.getMeta();
