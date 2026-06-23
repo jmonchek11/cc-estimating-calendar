@@ -202,6 +202,7 @@ function navigate(page) {
 async function rerenderView() {
   switch (VIEW.name) {
     case 'projects':  return load();
+    case 'project':   return renderProjectPage(VIEW.arg);
     case 'bidlist':   return renderBidList(VIEW.arg);
     case 'colist':    return renderCoList(VIEW.arg);
     case 'dashboard': return renderDashboard();
@@ -307,29 +308,26 @@ async function load() {
       </div>
     </div>
     <div class="card" style="padding:0">${projects.map(p => `
-      <div>
-        <div class="proj-row" onclick="toggle(${p.id})">
-          <div style="flex:1;min-width:0">
-            <div class="proj-name">${esc(p.name)}</div>
-            <div class="proj-meta">
-              ${p.bid_count} bid${p.bid_count!==1?'s':''}
-              <span class="proj-meta-sep">·</span> ${p.job_count} job${p.job_count!==1?'s':''}
-              <span class="proj-meta-sep">·</span> ${p.co_count} CO${p.co_count!==1?'s':''}
-              ${p.pipeline_value ? `<span class="proj-meta-sep">·</span> pipeline <span class="amount">${fmt$(p.pipeline_value)}</span>` : ''}
-              ${p.won_value ? `<span class="proj-meta-sep">·</span> won <span class="amount">${fmt$(p.won_value)}</span>` : ''}
-              ${p.customers.length ? `<span class="proj-meta-sep">·</span> <span class="proj-meta-customers">${esc(p.customers.join(', '))}</span>` : ''}
-            </div>
-          </div>
-          <div style="display:flex;gap:6px;align-items:center;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end">
-            ${p.job_numbers.map(j => `<span class="proj-active-badge">Job ${esc(j)}</span>`).join('')}
-            ${p.job_number_pending ? '<span class="pending-pill">JOB # PENDING</span>' : ''}
-            ${p.is_legacy ? '<span class="legacy-pill">LEGACY</span>' : ''}
-            ${p.active_count ? `<span class="badge badge-bid">${p.active_count} active</span>` : ''}
+      <div class="proj-row" onclick="renderProjectPage(${p.id})">
+        <div style="flex:1;min-width:0">
+          <div class="proj-name">${esc(p.name)}</div>
+          <div class="proj-meta">
+            ${p.bid_count} bid${p.bid_count!==1?'s':''}
+            <span class="proj-meta-sep">·</span> ${p.job_count} job${p.job_count!==1?'s':''}
+            <span class="proj-meta-sep">·</span> ${p.co_count} CO${p.co_count!==1?'s':''}
+            ${p.pipeline_value ? `<span class="proj-meta-sep">·</span> pipeline <span class="amount">${fmt$(p.pipeline_value)}</span>` : ''}
+            ${p.won_value ? `<span class="proj-meta-sep">·</span> won <span class="amount">${fmt$(p.won_value)}</span>` : ''}
+            ${p.customers.length ? `<span class="proj-meta-sep">·</span> <span class="proj-meta-customers">${esc(p.customers.join(', '))}</span>` : ''}
           </div>
         </div>
-        <div class="v2-hier" id="hier-${p.id}"></div>
+        <div style="display:flex;gap:6px;align-items:center;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end">
+          ${p.job_numbers.map(j => `<span class="proj-active-badge">Job ${esc(j)}</span>`).join('')}
+          ${p.job_number_pending ? '<span class="pending-pill">JOB # PENDING</span>' : ''}
+          ${p.is_legacy ? '<span class="legacy-pill">LEGACY</span>' : ''}
+          ${p.active_count ? `<span class="badge badge-bid">${p.active_count} active</span>` : ''}
+          <span style="color:var(--text-muted)">›</span>
+        </div>
       </div>`).join('')}</div>`;
-  if (OPEN_PROJECT != null && document.getElementById('hier-' + OPEN_PROJECT)) await openHier(OPEN_PROJECT);
 }
 
 // ── Dashboard page (v2 data) ──
@@ -383,20 +381,28 @@ async function renderDashboard() {
     </div>`;
 }
 
-async function openHier(id) {
-  const el = document.getElementById('hier-' + id); if (!el) return;
-  el.classList.add('open'); OPEN_PROJECT = id;
-  const d = await api('GET', '/api/v2/projects/' + id);
-  DETAIL_CACHE[id] = d; el.dataset.loaded = '1';
-  el.innerHTML = renderHierarchy(d);
-}
+// ── Dedicated project page (full hierarchy on its own page) ───────────────────
+async function renderProjectPage(projectId) {
+  VIEW = { name: 'project', arg: projectId };
+  OPEN_PROJECT = projectId;
+  setActiveNav('projects');
+  closeFlyout();
+  const main = document.getElementById('main');
+  main.innerHTML = '<div style="padding:30px;color:var(--text-muted)">Loading…</div>';
+  let d;
+  try { await ensureMeta(); d = await api('GET', '/api/v2/projects/' + projectId); DETAIL_CACHE[projectId] = d; }
+  catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
 
-async function toggle(id) {
-  const el = document.getElementById('hier-' + id);
-  if (el.classList.contains('open')) { el.classList.remove('open'); OPEN_PROJECT = null; return; }
-  document.querySelectorAll('.v2-hier.open').forEach(h => h.classList.remove('open'));
-  el.innerHTML = '<div style="padding:16px;color:var(--text-muted)">Loading…</div>';
-  await openHier(id);
+  const bidN = d.bids.length, jobN = d.jobs.length, coN = d.jobs.reduce((s, j) => s + j.change_orders.length, 0);
+  main.innerHTML = `
+    <div class="page-header">
+      <div>
+        <div class="page-title">🏗️ ${esc(d.name)}</div>
+        <div class="page-subtitle">${bidN} bid${bidN!==1?'s':''} · ${jobN} job${jobN!==1?'s':''} · ${coN} change order${coN!==1?'s':''}</div>
+      </div>
+      <button class="v2-btn outline" onclick="navigate('projects')">← All Projects</button>
+    </div>
+    ${renderHierarchy(d)}`;
 }
 
 // Re-render the current page (+ open flyout) after any action.
@@ -450,7 +456,7 @@ async function renderFlyout(fresh) {
   panel.querySelector('.fly-head').outerHTML = `
     <div class="fly-head">
       <div style="flex:1;min-width:0"><div class="fly-title">${title}</div><div class="fly-sub">${sub}</div></div>
-      <a href="#" onclick="event.preventDefault();closeFlyout();navigate('projects');setTimeout(()=>openHier(${FLYOUT.projectId}),60)">Open full project →</a>
+      <a href="#" onclick="event.preventDefault();renderProjectPage(${FLYOUT.projectId})">Open full project →</a>
       <button class="fly-close" onclick="closeFlyout()">✕</button>
     </div>`;
   panel.querySelector('.fly-body')?.remove();
