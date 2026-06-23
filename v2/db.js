@@ -371,7 +371,7 @@ async function ensureBidCustomer(bidId, companyId) {
 // its still-pending submissions (for dashboard/digest "overdue" queries).
 async function recomputeBidFollowup(bidId) {
   const M = getModels();
-  const next = (await M.BidSubmission.find({ bid_id: bidId, outcome: 'pending', next_followup_date: { $ne: null } })
+  const next = (await M.BidSubmission.find({ bid_id: bidId, is_current: 1, outcome: 'pending', next_followup_date: { $ne: null } })
     .sort({ next_followup_date: 1 }).limit(1).lean())[0];
   await M.Bid.updateOne({ _id: bidId }, { $set: { next_followup_date: next ? next.next_followup_date : null, updated_at: ts() } });
 }
@@ -412,10 +412,11 @@ async function addSubmission(id, data) {
   const companyId = Number(data.company_id);
   await ensureBidCustomer(bid._id, companyId);
 
-  // The prior current submission to this same customer is no longer current.
+  // The prior current submission to this same customer is no longer current —
+  // clear its follow-up timer so superseded versions don't keep nagging.
   await M.BidSubmission.updateMany(
     { bid_id: bid._id, company_id: companyId, is_current: 1 },
-    { $set: { is_current: 0, updated_at: ts() } }
+    { $set: { is_current: 0, next_followup_date: null, updated_at: ts() } }
   );
   const s = await getSettings();
   await M.BidSubmission.create({
@@ -802,7 +803,7 @@ async function getDashboard() {
   const activeCos = cos.filter(c => ['active_co', 'submitted_co'].includes(c.stage));
 
   const awarded = bids.filter(b => b.stage === 'awarded' && b.award_date && b.award_date >= ago(30)).sort((a, b) => (b.award_date || '').localeCompare(a.award_date || ''));
-  const overdueSubs = subs.filter(s => s.outcome === 'pending' && s.next_followup_date && s.next_followup_date < today);
+  const overdueSubs = subs.filter(s => s.is_current && s.outcome === 'pending' && s.next_followup_date && s.next_followup_date < today);
   const overdueCos = cos.filter(c => c.stage === 'submitted_co' && c.next_followup_date && c.next_followup_date < today);
   const dueSoon = bids.filter(b => ['active_bid', 'submitted'].includes(b.stage) && !b.superseded && b.due_date && b.due_date >= today && b.due_date <= ahead(14)).sort((a, b) => (a.due_date || '').localeCompare(b.due_date || ''));
 
