@@ -632,11 +632,11 @@ function submissionRow(s, bid) {
   if (s.outcome === 'awarded') outcomeBadge = `<span class="awarded-pill">✓ AWARDED ${fmtD(s.award_date)}</span>`;
   else if (s.outcome === 'not_awarded') outcomeBadge = `<span class="badge" style="background:#fee2e2;color:#991b1b">✗ NOT AWARDED ${fmtD(s.date_not_awarded)}</span>`;
 
-  // A pending submission can always be followed up or marked not-awarded —
-  // even after a sibling won (the other GC can still decline). Award is only
-  // offered while the bid is still 'submitted' (one winner per bid).
+  // Only the CURRENT submission is actionable. Superseded versions are
+  // historical record — no buttons, no follow-up timer, greyed out.
+  const live = s.is_current && s.outcome === 'pending';
   let actions = '';
-  if (s.outcome === 'pending' && bid && ['submitted', 'awarded'].includes(bid.stage)) {
+  if (live && bid && ['submitted', 'awarded'].includes(bid.stage)) {
     const awardBtn = bid.stage === 'submitted' ? `<button class="v2-btn green" onclick="actAwardSubmission(${s.id})">✓ Awarded</button>` : '';
     actions = `<div class="v2-actions" style="margin-top:4px">
       <button class="v2-btn blue" onclick="actLogFollowup('bid_submission',${s.id})">📝 Log Follow-up</button>
@@ -645,14 +645,14 @@ function submissionRow(s, bid) {
     </div>`;
   }
 
-  return `<div style="padding:6px 0;border-top:1px solid var(--border)" ${s.is_current ? '' : 'class="" style="opacity:.5;padding:6px 0;border-top:1px solid var(--border)"'}>
+  return `<div style="padding:6px 0;border-top:1px solid var(--border)${s.is_current ? '' : ';opacity:.5'}">
     <div style="font-size:12px">
       <strong>${esc(s.company?.name || '—')}</strong> — <span class="amount">${fmt$(s.amount)}</span>
       · ${SUB_TYPE[s.submission_type] || esc(s.submission_type)}
       · ${fmtD(s.date_submitted)}${s.approved_by ? ` (appr: ${esc(s.approved_by)})` : ''}
-      ${s.is_current ? '' : '<span style="font-size:10px">(superseded)</span>'}
+      ${s.is_current ? '' : '<span class="badge" style="background:#e2e8f0;color:#64748b;font-size:10px">superseded</span>'}
       ${outcomeBadge}
-      ${s.outcome === 'pending' && s.next_followup_date ? ` · F/U: <span class="${overdue ? 'overdue-txt' : ''}">${fmtD(s.next_followup_date)}${overdue ? ' — OVERDUE' : ''}</span>` : ''}
+      ${live && s.next_followup_date ? ` · F/U: <span class="${overdue ? 'overdue-txt' : ''}">${fmtD(s.next_followup_date)}${overdue ? ' — OVERDUE' : ''}</span>` : ''}
       ${s.notes ? ` · ${esc(s.notes)}` : ''}
       ${s.not_awarded_notes ? ` · <span style="color:#991b1b">${esc(s.not_awarded_notes)}</span>` : ''}
       ${CURRENT_USER?.is_admin ? `<a href="#" onclick="event.preventDefault();actEditSubmission(${s.id})" style="font-size:11px;margin-left:4px">✏️</a>` : ''}

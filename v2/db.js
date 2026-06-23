@@ -1060,7 +1060,8 @@ async function applyCleanupOverrides() {
 
 module.exports = {
   getProjects, getProjectDetail, getMeta, getDashboard, getBidList, getCoList, getDataHealth, mergeProjects, mergeCompanies, mergeJobs,
-  dismissDuplicates, deleteEmptyProject, applyCleanupOverrides, removeOverride, nextId,
+  dismissDuplicates, deleteEmptyProject, applyCleanupOverrides, removeOverride,
+  recomputeBidHeadline, recomputeBidFollowup, nextId,
   createOpportunity, createDirectBid, startBid, submitBid, addSubmission, adminUpdate,
   awardSubmission, notAwardSubmission, closeBid, logFollowupV2,
   createLegacyJob, updateJob,

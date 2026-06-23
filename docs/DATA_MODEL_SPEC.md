@@ -130,7 +130,7 @@ erDiagram
         string approved_by "who approved this number internally"
         string submission_type "initial | best_and_final | scope_add | scope_remove | revised"
         string notes
-        bool is_current "latest submission to this customer"
+        bool is_current "latest submission to this customer — exactly ONE per (bid, customer)"
         string outcome "pending | awarded | not_awarded (PER SUBMISSION)"
         date award_date
         date date_not_awarded
@@ -235,6 +235,8 @@ stateDiagram-v2
 | `opportunity`/`active_bid` → `closed` | Close | Closure date, approved by, reason | Final state. For opportunities we decided not to bid, or bids we stopped mid-estimate. |
 
 **Fields that DO NOT EXIST on the bid form during `opportunity`/`active_bid`:** job #, estimate $, jurisdiction, date estimate sent, estimate approved by, next follow-up date, bid result, award date, awarded contractor. They are collected by the transition modals, never by the edit form.
+
+**Submission invariant (one current per customer):** within a bid, each customer has **exactly one** `is_current = 1` submission — the most recent offer to that customer. Adding a new submission to a customer flips the prior one to `is_current = 0` **and clears its `next_followup_date`**. Superseded submission rows render greyed/inactive in the UI: no action buttons, no follow-up/overdue line, tagged "superseded" — they are history, not work items. (`recomputeBidFollowup` and the dashboard overdue list only consider `is_current = 1, outcome = pending` submissions.) The maintenance script `v2/heal-current.js` re-establishes this invariant if data ever drifts.
 
 **Superseding (re-bid for a later drawing stage):** when a new bid is added to a project that already has bids, the project's prior **non-terminal** bids (`opportunity`, `active_bid`, `submitted`) are marked **superseded** (`superseded = 1`). Superseded bids are inactive/historical — excluded from active counts and pipeline value, no workflow buttons — but kept on the record. Terminal bids (`awarded`/`not_awarded`/`closed`) are never auto-superseded. An admin can clear the flag via Admin Edit.
 
