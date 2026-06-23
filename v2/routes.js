@@ -38,6 +38,16 @@ router.get('/api/v2/dashboard', async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+router.get('/api/v2/bid-list', async (req, res) => {
+  try { res.json(await v2db.getBidList(req.query.stage)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/api/v2/co-list', async (req, res) => {
+  try { res.json(await v2db.getCoList()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.get('/api/v2/health', async (req, res) => {
   try { res.json(await v2db.getDataHealth()); }
   catch (e) { res.status(500).json({ error: e.message }); }

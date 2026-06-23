@@ -741,6 +741,48 @@ function _clusterSimilar(items, ignore) {
   return Object.values(groups).filter(g => g.length > 1).sort((a, b) => b.length - a.length);
 }
 
+// ── Bid list for a stage (working views) ──────────────────────────────────────
+async function getBidList(stage) {
+  const M = getModels();
+  const bids = await M.Bid.find({ stage, superseded: { $ne: 1 } }).sort({ due_date: 1, _id: 1 }).lean();
+  const ids = bids.map(b => b._id);
+  const [projects, companies, members, bidCustomers] = await Promise.all([
+    M.Project.find().lean(), M.Company.find().lean(), M.TeamMember.find().lean(), M.BidCustomer.find({ bid_id: { $in: ids } }).lean(),
+  ]);
+  const pName = {}; projects.forEach(p => pName[p._id] = p.name);
+  const coName = {}; companies.forEach(c => coName[c._id] = c.name);
+  const tm = teamMap(members);
+  const custByBid = {}; bidCustomers.forEach(bc => (custByBid[bc.bid_id] = custByBid[bc.bid_id] || []).push(coName[bc.company_id]));
+  return bids.map(b => ({
+    id: b._id, project_id: b.project_id, project: pName[b.project_id] || '—',
+    bid_number: b.bid_number, stage: b.stage, drawing_stage: b.drawing_stage,
+    estimator: tm[b.estimator_id] || null, salesperson: tm[b.salesperson_id] || null,
+    customers: [...new Set((custByBid[b._id] || []).filter(Boolean))],
+    date_received: b.date_received, due_date: b.due_date,
+    estimate_amount: b.estimate_amount, date_submitted: b.date_submitted, next_followup_date: b.next_followup_date,
+  }));
+}
+
+// ── Change order list (active + submitted) ────────────────────────────────────
+async function getCoList() {
+  const M = getModels();
+  const cos = await M.ChangeOrder.find({ stage: { $in: ['active_co', 'submitted_co'] } }).sort({ due_date: 1, _id: 1 }).lean();
+  const [jobs, projects, members] = await Promise.all([M.Job.find().lean(), M.Project.find().lean(), M.TeamMember.find().lean()]);
+  const jobById = {}; jobs.forEach(j => jobById[j._id] = j);
+  const pName = {}; projects.forEach(p => pName[p._id] = p.name);
+  const tm = teamMap(members);
+  return cos.map(c => {
+    const job = jobById[c.job_id];
+    return {
+      id: c._id, co_number: c.co_number, name: c.name, stage: c.stage,
+      project: job ? (pName[job.project_id] || '—') : '—', project_id: job ? job.project_id : null,
+      job_number: job ? job.job_number : null,
+      estimator: tm[c.estimator_id] || null, due_date: c.due_date,
+      estimate_amount: c.estimate_amount, date_submitted: c.date_submitted, next_followup_date: c.next_followup_date,
+    };
+  });
+}
+
 // ── Dashboard rollups (v2) ────────────────────────────────────────────────────
 async function getDashboard() {
   const M = getModels();
@@ -1015,7 +1057,7 @@ async function applyCleanupOverrides() {
 }
 
 module.exports = {
-  getProjects, getProjectDetail, getMeta, getDashboard, getDataHealth, mergeProjects, mergeCompanies, mergeJobs,
+  getProjects, getProjectDetail, getMeta, getDashboard, getBidList, getCoList, getDataHealth, mergeProjects, mergeCompanies, mergeJobs,
   dismissDuplicates, deleteEmptyProject, applyCleanupOverrides, removeOverride, nextId,
   createOpportunity, createDirectBid, startBid, submitBid, addSubmission, adminUpdate,
   awardSubmission, notAwardSubmission, closeBid, logFollowupV2,

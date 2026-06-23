@@ -111,6 +111,11 @@
       </div>
       <div class="nav-section-label">PIPELINE</div>
       <a class="nav-item" data-page="dashboard" href="#dashboard" onclick="navigate('dashboard');return false"><span class="nav-icon">⬛</span> Dashboard</a>
+      <a class="nav-item" data-page="opportunities" href="#opportunities" onclick="navigate('opportunities');return false"><span class="nav-icon">🔵</span> Opportunities</a>
+      <a class="nav-item" data-page="active-bids" href="#active-bids" onclick="navigate('active-bids');return false"><span class="nav-icon">🟡</span> Active Bids</a>
+      <a class="nav-item" data-page="submitted" href="#submitted" onclick="navigate('submitted');return false"><span class="nav-icon">🔵</span> Submitted</a>
+      <a class="nav-item" data-page="change-orders" href="#change-orders" onclick="navigate('change-orders');return false"><span class="nav-icon">🟠</span> Change Orders</a>
+      <div class="nav-section-label">PROJECTS</div>
       <a class="nav-item" data-page="projects" href="#projects" onclick="navigate('projects');return false"><span class="nav-icon">🏗️</span> Projects</a>
       <div class="nav-section-label">DATA</div>
       <a class="nav-item" data-page="health" href="#health" onclick="navigate('health');return false"><span class="nav-icon">🩺</span> Data Health</a>
@@ -167,7 +172,88 @@ async function ensureMeta() {
 function navigate(page) {
   if (page === 'dashboard') return renderDashboard();
   if (page === 'health') return showHealth();
+  if (page === 'opportunities') return renderBidList('opportunity');
+  if (page === 'active-bids') return renderBidList('active_bid');
+  if (page === 'submitted') return renderBidList('submitted');
+  if (page === 'change-orders') return renderCoList();
   return load();
+}
+
+// open a project from a list row: go to Projects, expand + scroll to it
+async function openProjectFromList(pid) {
+  if (!pid) return;
+  await load();
+  const el = document.getElementById('hier-' + pid);
+  if (el) { toggle(pid); el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+}
+
+const BID_LIST_META = {
+  opportunity: { page: 'opportunities', title: '🔵 Opportunities', sub: 'considering — not yet bidding' },
+  active_bid:  { page: 'active-bids',  title: '🟡 Active Bids',  sub: 'estimating in progress' },
+  submitted:   { page: 'submitted',    title: '🔵 Submitted',    sub: 'awaiting customer decision' },
+};
+
+async function renderBidList(stage) {
+  const meta = BID_LIST_META[stage];
+  setActiveNav(meta.page);
+  const main = document.getElementById('main');
+  main.innerHTML = '<div style="padding:30px;color:var(--text-muted)">Loading…</div>';
+  let rows;
+  try { await ensureMeta(); rows = await api('GET', '/api/v2/bid-list?stage=' + stage); }
+  catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
+
+  const right = (b) => {
+    if (stage === 'submitted') {
+      const overdue = b.next_followup_date && b.next_followup_date < today;
+      return `${b.estimate_amount ? `<span class="amount" style="font-size:13px">${fmt$(b.estimate_amount)}</span>` : ''}
+        ${b.next_followup_date ? `<div style="font-size:11px;${overdue ? 'color:#dc2626;font-weight:700' : 'color:var(--text-muted)'}">F/U ${fmtD(b.next_followup_date)}${overdue ? ' • OVERDUE' : ''}</div>` : ''}`;
+    }
+    return b.due_date ? `<span style="font-size:12px;font-weight:700;color:${b.due_date < today ? '#dc2626' : 'var(--text-muted)'}">Due ${fmtD(b.due_date)}</span>` : '';
+  };
+
+  main.innerHTML = `
+    <div class="page-header"><div><div class="page-title">${meta.title}</div><div class="page-subtitle">${rows.length} ${meta.sub}</div></div></div>
+    <div class="card" style="padding:0">${rows.length ? rows.map(b => `
+      <div class="proj-row" onclick="openProjectFromList(${b.project_id})">
+        <div style="flex:1;min-width:0">
+          <div class="proj-name">${esc(b.project)}${b.bid_number ? ` <span style="color:var(--text-muted);font-weight:400;font-size:12px">#${esc(b.bid_number)}</span>` : ''}
+            ${b.drawing_stage ? `<span class="badge" style="background:#ede9fe;color:#5b21b6;font-size:10px">${esc(b.drawing_stage)}</span>` : ''}</div>
+          <div class="proj-meta">
+            ${b.customers.length ? esc(b.customers.join(', ')) : '<span style="color:#dc2626">no customer</span>'}
+            ${b.estimator ? `<span class="proj-meta-sep">·</span> Est ${ini(b.estimator)}` : ''}
+            ${b.salesperson ? ` Sales ${ini(b.salesperson)}` : ''}
+          </div>
+        </div>
+        <div style="text-align:right;flex-shrink:0">${right(b)}</div>
+      </div>`).join('') : '<div style="padding:24px;text-align:center;color:var(--text-muted)">None</div>'}</div>`;
+}
+
+async function renderCoList() {
+  setActiveNav('change-orders');
+  const main = document.getElementById('main');
+  main.innerHTML = '<div style="padding:30px;color:var(--text-muted)">Loading…</div>';
+  let rows;
+  try { await ensureMeta(); rows = await api('GET', '/api/v2/co-list'); }
+  catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
+
+  main.innerHTML = `
+    <div class="page-header"><div><div class="page-title">🟠 Change Orders</div><div class="page-subtitle">${rows.length} active / submitted</div></div></div>
+    <div class="card" style="padding:0">${rows.length ? rows.map(c => {
+      const overdue = c.next_followup_date && c.next_followup_date < today;
+      return `<div class="proj-row" onclick="openProjectFromList(${c.project_id})">
+        <div style="flex:1;min-width:0">
+          <div class="proj-name"><span style="color:#d97706">${esc(c.co_number)}</span> ${esc(c.name)} ${stageBadge(c.stage)}</div>
+          <div class="proj-meta">
+            ${esc(c.project)}${c.job_number ? ` <span class="proj-meta-sep">·</span> Job ${esc(c.job_number)}` : ''}
+            ${c.estimator ? `<span class="proj-meta-sep">·</span> Est ${ini(c.estimator)}` : ''}
+            ${c.due_date ? `<span class="proj-meta-sep">·</span> Due ${fmtD(c.due_date)}` : ''}
+          </div>
+        </div>
+        <div style="text-align:right;flex-shrink:0">
+          ${c.estimate_amount ? `<span class="amount" style="font-size:13px">${fmt$(c.estimate_amount)}</span>` : ''}
+          ${c.next_followup_date ? `<div style="font-size:11px;${overdue ? 'color:#dc2626;font-weight:700' : 'color:var(--text-muted)'}">F/U ${fmtD(c.next_followup_date)}${overdue ? ' • OVERDUE' : ''}</div>` : ''}
+        </div>
+      </div>`; }).join('') : '<div style="padding:24px;text-align:center;color:var(--text-muted)">None</div>'}</div>`;
 }
 
 // ── Projects page ──
