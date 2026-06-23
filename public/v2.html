@@ -100,6 +100,24 @@
   }
   .v2-check { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 3px 0; cursor: pointer; }
   .v2-modal-err { color: #dc2626; font-size: 12px; font-weight: 600; display: none; padding: 0 20px 10px; }
+  /* searchable company combobox */
+  .v2-combo { position: relative; }
+  .v2-combo-box { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; border: 1px solid var(--border);
+    border-radius: 6px; background: #fff; padding: 4px 6px; }
+  .v2-combo-box:focus-within { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,.1); }
+  .v2-combo-input { flex: 1; min-width: 120px; border: none !important; box-shadow: none !important;
+    padding: 3px 2px !important; font-size: 13px; outline: none; }
+  .v2-chip { display: inline-flex; align-items: center; gap: 5px; background: #eff6ff; color: #1e40af;
+    border: 1px solid #bfdbfe; border-radius: 5px; padding: 2px 6px; font-size: 12px; font-weight: 600; }
+  .v2-chip button { border: none; background: none; color: #1e40af; cursor: pointer; font-size: 12px; line-height: 1; padding: 0; }
+  .v2-chip em { color: #16a34a; font-style: normal; font-weight: 700; }
+  .v2-combo-menu { display: none; position: absolute; z-index: 10; left: 0; right: 0; margin-top: 3px;
+    background: #fff; border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 6px 18px rgba(0,0,0,.12);
+    max-height: 230px; overflow-y: auto; }
+  .v2-combo-opt { padding: 7px 10px; font-size: 13px; cursor: pointer; }
+  .v2-combo-opt:hover { background: #f1f5f9; }
+  .v2-combo-new { color: #16a34a; font-weight: 600; border-top: 1px solid var(--border); }
+  .v2-combo-empty { padding: 7px 10px; font-size: 12px; color: var(--text-muted); }
 
   /* Detail flyout (slide-over) */
   .fly-overlay { position: fixed; inset: 0; background: rgba(15,23,42,.35); z-index: 90; opacity: 0; transition: opacity .15s; }
@@ -538,10 +556,12 @@ function bidActions(b) {
                   <button class="v2-btn gray" onclick="actCloseBid(${b.id})">Close</button>`;
     } else if (b.stage === 'active_bid') {
       workflow = `<button class="v2-btn green" onclick="actSubmitBid(${b.id})">Submit Bid</button>
+                  <button class="v2-btn outline" onclick="actAddCustomers(${b.id})">+ Customer</button>
                   <button class="v2-btn gray" onclick="actCloseBid(${b.id})">Close</button>`;
     } else if (b.stage === 'submitted') {
       // Follow-up / award / not-awarded are now per submission (on each submission row).
-      workflow = `<button class="v2-btn amber" onclick="actAddSubmission(${b.id})">+ Add Submission</button>`;
+      workflow = `<button class="v2-btn amber" onclick="actAddSubmission(${b.id})">+ Add Submission</button>
+                  <button class="v2-btn outline" onclick="actAddCustomers(${b.id})">+ Customer</button>`;
     }
   }
   const adminBtn = (CURRENT_USER?.is_admin && BID_EDITABLE_STAGES.includes(b.stage))
@@ -678,6 +698,59 @@ function fuRow(f) {
 // FORM MODAL FRAMEWORK
 // fields: [{ id, label, type: text|number|date|select|textarea|multicheck, required, options, value, placeholder }]
 // ═══════════════════════════════════════════════════════════════════════════
+// ── Searchable company combobox (field type 'company') ──────────────────────
+// Picks existing companies OR lets you type a brand-new name (chip tagged "new").
+// f.multi → many chips; otherwise single. Selection lives in COMBO_STATE[f.id]
+// as [{id, name}] (id null = new company to create on the server).
+let COMBO_STATE = {};   // fieldId -> [{id, name}]
+let COMBO_FIELDS = {};  // fieldId -> field def
+
+function comboRenderChips(fid) {
+  const el = document.getElementById('cc-' + fid + '-chips'); if (!el) return;
+  el.innerHTML = (COMBO_STATE[fid] || []).map((s, i) =>
+    `<span class="v2-chip">${esc(s.name)}${s.id ? '' : ' <em>new</em>'}<button type="button" onmousedown="event.preventDefault();comboRemove('${fid}',${i})">✕</button></span>`).join('');
+}
+function comboRemove(fid, i) { (COMBO_STATE[fid] || []).splice(i, 1); comboRenderChips(fid); comboRenderMenu(fid); }
+function comboRenderMenu(fid) {
+  const f = COMBO_FIELDS[fid], input = document.getElementById('vf-' + fid), menu = document.getElementById('cc-' + fid + '-menu');
+  if (!f || !input || !menu) return;
+  const q = input.value.trim().toLowerCase();
+  const chosen = new Set((COMBO_STATE[fid] || []).filter(s => s.id).map(s => s.id));
+  const opts = f.options.filter(o => !chosen.has(o.value) && (!q || o.label.toLowerCase().includes(q))).slice(0, 8);
+  let html = opts.map(o => `<div class="v2-combo-opt" onmousedown="event.preventDefault();comboPick('${fid}',${o.value})">${esc(o.label)}</div>`).join('');
+  const exact = f.options.some(o => o.label.toLowerCase() === q);
+  const alreadyNew = (COMBO_STATE[fid] || []).some(s => !s.id && s.name.toLowerCase() === q);
+  if (q && !exact && !alreadyNew && f.allowNew !== false)
+    html += `<div class="v2-combo-opt v2-combo-new" onmousedown="event.preventDefault();comboAddNew('${fid}')">➕ Add "${esc(input.value.trim())}" as a new customer</div>`;
+  menu.innerHTML = html || '<div class="v2-combo-empty">No matches — keep typing to add a new customer</div>';
+  menu.style.display = 'block';
+}
+function comboPick(fid, val) {
+  const f = COMBO_FIELDS[fid], opt = f.options.find(o => o.value == val); if (!opt) return;
+  if (!f.multi) COMBO_STATE[fid] = [];
+  COMBO_STATE[fid].push({ id: opt.value, name: opt.label });
+  const input = document.getElementById('vf-' + fid); input.value = '';
+  comboRenderChips(fid); comboRenderMenu(fid); input.focus();
+}
+function comboAddNew(fid) {
+  const f = COMBO_FIELDS[fid], input = document.getElementById('vf-' + fid), name = input.value.trim(); if (!name) return;
+  if (!f.multi) COMBO_STATE[fid] = [];
+  COMBO_STATE[fid].push({ id: null, name });
+  input.value = ''; comboRenderChips(fid); comboRenderMenu(fid); input.focus();
+}
+function initCombos(ov, fields) {
+  COMBO_STATE = {}; COMBO_FIELDS = {};
+  for (const f of fields.filter(x => x.type === 'company')) {
+    COMBO_FIELDS[f.id] = f; COMBO_STATE[f.id] = [];
+    if (f.value != null) { const o = f.options.find(o => o.value == f.value); if (o) COMBO_STATE[f.id].push({ id: o.value, name: o.label }); }
+    comboRenderChips(f.id);
+    const input = ov.querySelector('#vf-' + f.id), menu = ov.querySelector('#cc-' + f.id + '-menu');
+    input.addEventListener('input', () => comboRenderMenu(f.id));
+    input.addEventListener('focus', () => comboRenderMenu(f.id));
+    input.addEventListener('blur', () => setTimeout(() => { if (menu) menu.style.display = 'none'; }, 150));
+  }
+}
+
 function showForm(title, fields, onSubmit, submitLabel = 'Save', submitClass = 'blue') {
   document.getElementById('v2-form-overlay')?.remove();
   const ov = document.createElement('div');
@@ -696,6 +769,16 @@ function showForm(title, fields, onSubmit, submitLabel = 'Save', submitClass = '
     if (f.type === 'multicheck') {
       return `<div class="v2-field"><label>${f.label}${req}</label>
         ${f.options.map(o => `<label class="v2-check"><input type="checkbox" data-multi="${f.id}" value="${o.value}"> ${esc(o.label)}</label>`).join('')}</div>`;
+    }
+    if (f.type === 'company') {
+      return `<div class="v2-field"><label>${f.label}${req}</label>
+        <div class="v2-combo">
+          <div class="v2-combo-box">
+            <span id="cc-${f.id}-chips"></span>
+            <input id="vf-${f.id}" class="v2-combo-input" type="text" autocomplete="off" placeholder="${esc(f.placeholder || 'Type to search…')}">
+          </div>
+          <div class="v2-combo-menu" id="cc-${f.id}-menu"></div>
+        </div></div>`;
     }
     if (f.type === 'textarea') {
       return `<div class="v2-field"><label>${f.label}${req}</label>
@@ -716,6 +799,7 @@ function showForm(title, fields, onSubmit, submitLabel = 'Save', submitClass = '
       </div>
     </div>`;
   document.body.appendChild(ov);
+  initCombos(ov, fields);
 
   document.getElementById('vf-submit').onclick = async () => {
     const data = {};
@@ -724,6 +808,13 @@ function showForm(title, fields, onSubmit, submitLabel = 'Save', submitClass = '
       if (f.type === 'multicheck') {
         data[f.id] = [...ov.querySelectorAll(`input[data-multi="${f.id}"]:checked`)].map(c => Number(c.value));
         if (f.required && !data[f.id].length) missing.push(f.label);
+      } else if (f.type === 'company') {
+        const sel = COMBO_STATE[f.id] || [];
+        const ids = sel.filter(s => s.id).map(s => s.id);
+        const names = sel.filter(s => !s.id).map(s => s.name);
+        if (f.multi) { data[f.id] = ids; data[f.newKey || 'new_companies'] = names; }
+        else { data[f.id] = ids[0] ?? null; data[f.newKey || 'new_company'] = names[0] || null; }
+        if (f.required && !ids.length && !names.length) missing.push(f.label);
       } else {
         const v = document.getElementById('vf-' + f.id)?.value?.trim();
         data[f.id] = v || null;
@@ -749,7 +840,7 @@ const projectOpts = () => ALL_PROJECTS.map(p => ({ value: p.id, label: p.name })
 // Shared Start-Bid field set (used by direct-bid creation)
 const startBidFields = () => ([
   { id: 'bid_number', label: 'Bid # (entered manually for now)', type: 'text', required: true, placeholder: 'B26-0198' },
-  { id: 'company_ids', label: 'Customer(s) — who are we bidding to?', type: 'multicheck', required: true, options: companyOpts() },
+  { id: 'company_ids', label: 'Customer(s) — who are we bidding to?', type: 'company', multi: true, required: true, newKey: 'new_companies', options: companyOpts() },
   { id: 'estimator_id', label: 'Estimator', type: 'select', required: true, options: teamOpts(['estimator']) },
   { id: 'salesperson_id', label: 'Salesperson', type: 'select', required: true, options: teamOpts(['sales']) },
   { id: 'date_received', label: 'Date Received', type: 'date', required: true, value: today },
@@ -836,7 +927,7 @@ function actNewLegacyJob() {
   showForm('🏭 New Legacy Job (bid pre-dates system)', [
     { id: 'project_name', label: 'Project Name', type: 'text', required: true },
     { id: 'job_number', label: 'Job # (if known)', type: 'text', placeholder: '26-XXXX' },
-    { id: 'awarded_company_id', label: 'Customer (who awarded us)', type: 'select', options: companyOpts() },
+    { id: 'awarded_company_id', label: 'Customer (who awarded us)', type: 'company', multi: false, newKey: 'new_company', options: companyOpts() },
     { id: 'pm_id', label: 'PM', type: 'select', options: teamOpts(['pm', 'sales', 'estimator']) },
     { id: 'award_date', label: 'Award Date', type: 'date' },
   ], data => api('POST', '/api/v2/jobs', data), 'Create Job');
@@ -863,6 +954,16 @@ function actSubmitBid(bidId) {
     { id: 'approved_by', label: 'Estimate Approved By', type: 'text', required: true },
     { id: 'notes', label: 'Notes', type: 'textarea' },
   ], data => api('POST', `/api/v2/bids/${bidId}/submit`, data), 'Submit Bid', 'green');
+}
+
+// Add customer(s) to a bid's roster — no submission required. They become
+// available in the submission picker. New names are created on the server.
+function actAddCustomers(bidId) {
+  const existing = new Set(bidCustomerOpts(bidId).map(o => o.value));
+  showForm('+ Add Customer(s) to Bid', [
+    { id: 'company_ids', label: 'Customer(s) to add', type: 'company', multi: true, required: true,
+      newKey: 'new_companies', options: companyOpts().filter(o => !existing.has(o.value)) },
+  ], data => api('POST', `/api/v2/bids/${bidId}/customers`, data), 'Add Customer(s)', 'green');
 }
 
 // Additional submission while submitted: another customer, or best-and-final / scope change

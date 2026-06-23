@@ -285,8 +285,9 @@ async function startBid(id, data) {
   const M = getModels();
   const bid = await loadBid(id);
   if (bid.stage !== 'opportunity') throw new Error(`Cannot start bid from stage '${bid.stage}'`);
-  require_(data, ['bid_number', 'company_ids', 'estimator_id', 'salesperson_id', 'date_received', 'due_date']);
-  if (!Array.isArray(data.company_ids) || !data.company_ids.length) throw new Error('At least one customer company is required');
+  require_(data, ['bid_number', 'estimator_id', 'salesperson_id', 'date_received', 'due_date']);
+  const companyIds = await resolveCompanyIds(data.company_ids, data.new_companies);
+  if (!companyIds.length) throw new Error('At least one customer company is required');
 
   // Bid # is entered manually for now (generated outside this system).
   // Future: auto-generate the B-year-sequence here.
@@ -304,10 +305,10 @@ async function startBid(id, data) {
     drawing_stage: data.drawing_stage || null,
     updated_at: ts(),
   }});
-  for (const companyId of data.company_ids) {
+  for (const companyId of companyIds) {
     await M.BidCustomer.create({
       _id: await nextId('bid_customers'),
-      bid_id: bid._id, company_id: Number(companyId),
+      bid_id: bid._id, company_id: companyId,
       contact_ids: (data.contact_ids_by_company || {})[companyId] || [],
     });
   }
@@ -361,10 +362,51 @@ async function recomputeBidHeadline(bidId) {
   }});
 }
 
+// Add a company to a bid's customer roster if it isn't already on it (idempotent).
 async function ensureBidCustomer(bidId, companyId) {
   const M = getModels();
   const exists = await M.BidCustomer.findOne({ bid_id: bidId, company_id: companyId }).lean();
-  if (!exists) throw new Error('That company is not a customer on this bid');
+  if (exists) return;
+  await M.BidCustomer.create({ _id: await nextId('bid_customers'), bid_id: bidId, company_id: companyId, contact_ids: [] });
+}
+
+// Find a company by case/punctuation-insensitive name, creating it if new. Lets
+// the UI add a customer that doesn't exist in the system yet (typed in the picker).
+async function resolveCompanyByName(name) {
+  const M = getModels();
+  const clean = String(name || '').trim();
+  if (!clean) throw new Error('Company name required');
+  const norm = _norm(clean);
+  const hit = (await M.Company.find().lean()).find(c => _norm(c.name) === norm);
+  if (hit) return hit._id;
+  const id = await nextId('companies');
+  await M.Company.create({ _id: id, name: clean });
+  return id;
+}
+
+// Normalize a company picker's payload (existing ids + typed-in new names) to ids.
+async function resolveCompanyIds(company_ids, new_companies) {
+  const ids = [];
+  for (const cid of (company_ids || [])) { const n = Number(cid); if (n) ids.push(n); }
+  for (const nm of (new_companies || [])) ids.push(await resolveCompanyByName(nm));
+  return [...new Set(ids)];
+}
+
+// Add one or more customers to a bid's roster — independent of any submission.
+// Accepts existing company_ids and/or new_companies (names to find-or-create).
+async function addBidCustomers(id, data) {
+  const bid = await loadBid(id);
+  const ids = await resolveCompanyIds(data.company_ids, data.new_companies);
+  if (!ids.length) throw new Error('Pick or name at least one customer');
+  let added = 0;
+  for (const companyId of ids) {
+    const M = getModels();
+    const exists = await M.BidCustomer.findOne({ bid_id: bid._id, company_id: companyId }).lean();
+    if (exists) continue;
+    await ensureBidCustomer(bid._id, companyId);
+    added++;
+  }
+  return { bid_id: bid._id, added };
 }
 
 // The bid's follow-up date is a rollup: the earliest next_followup_date among
@@ -381,8 +423,9 @@ async function submitBid(id, data) {
   const M = getModels();
   const bid = await loadBid(id);
   if (bid.stage !== 'active_bid') throw new Error(`Cannot submit from stage '${bid.stage}'`);
-  require_(data, ['company_id', 'amount', 'jurisdiction', 'date_submitted', 'approved_by']);
-  const companyId = Number(data.company_id);
+  require_(data, ['amount', 'jurisdiction', 'date_submitted', 'approved_by']);
+  const companyId = data.company_id ? Number(data.company_id) : (data.new_company ? await resolveCompanyByName(data.new_company) : null);
+  if (!companyId) throw new Error('Customer is required');
   await ensureBidCustomer(bid._id, companyId);
 
   const s = await getSettings();
@@ -408,8 +451,9 @@ async function addSubmission(id, data) {
   const M = getModels();
   const bid = await loadBid(id);
   if (bid.stage !== 'submitted') throw new Error(`Can only add submissions to a submitted bid (stage is '${bid.stage}')`);
-  require_(data, ['company_id', 'amount', 'date_submitted', 'approved_by', 'submission_type']);
-  const companyId = Number(data.company_id);
+  require_(data, ['amount', 'date_submitted', 'approved_by', 'submission_type']);
+  const companyId = data.company_id ? Number(data.company_id) : (data.new_company ? await resolveCompanyByName(data.new_company) : null);
+  if (!companyId) throw new Error('Customer is required');
   await ensureBidCustomer(bid._id, companyId);
 
   // The prior current submission to this same customer is no longer current —
@@ -604,7 +648,8 @@ async function createLegacyJob(data) {
   await M.Job.create({
     _id: jobId, project_id: pid, winning_bid_id: null,   // legacy — no bid in system
     job_number: data.job_number || null,
-    awarded_company_id: data.awarded_company_id ? Number(data.awarded_company_id) : null,
+    awarded_company_id: data.awarded_company_id ? Number(data.awarded_company_id)
+      : (data.new_company ? await resolveCompanyByName(data.new_company) : null),
     pm_id: data.pm_id ? Number(data.pm_id) : null,
     award_date: data.award_date || null,
   });
@@ -1062,7 +1107,7 @@ module.exports = {
   getProjects, getProjectDetail, getMeta, getDashboard, getBidList, getCoList, getDataHealth, mergeProjects, mergeCompanies, mergeJobs,
   dismissDuplicates, deleteEmptyProject, applyCleanupOverrides, removeOverride,
   recomputeBidHeadline, recomputeBidFollowup, nextId,
-  createOpportunity, createDirectBid, startBid, submitBid, addSubmission, adminUpdate,
+  createOpportunity, createDirectBid, startBid, submitBid, addSubmission, addBidCustomers, adminUpdate,
   awardSubmission, notAwardSubmission, closeBid, logFollowupV2,
   createLegacyJob, updateJob,
   createChangeOrder, submitCO, approveCO, notApproveCO, voidCO, reopenCO,

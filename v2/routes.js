@@ -88,6 +88,7 @@ router.delete('/api/v2/admin/project/:id',     requireAdmin, t(req => v2db.delet
 router.delete('/api/v2/admin/override/:id',    requireAdmin, t(req => v2db.removeOverride(req.params.id)));
 router.post('/api/v2/bids/:id/close',         t(req => v2db.closeBid(req.params.id, req.body)));
 router.post('/api/v2/bids/:id/submissions',   t(req => v2db.addSubmission(req.params.id, req.body)));
+router.post('/api/v2/bids/:id/customers',     t(req => v2db.addBidCustomers(req.params.id, req.body)));
 
 // Per-submission win/loss
 router.post('/api/v2/submissions/:id/award',        t(req => v2db.awardSubmission(req.params.id, req.body)));
