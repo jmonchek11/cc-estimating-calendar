@@ -763,10 +763,11 @@ async function getBidList(stage) {
   }));
 }
 
-// ── Change order list (active + submitted) ────────────────────────────────────
-async function getCoList() {
+// ── Change order list for a stage ─────────────────────────────────────────────
+async function getCoList(stage) {
   const M = getModels();
-  const cos = await M.ChangeOrder.find({ stage: { $in: ['active_co', 'submitted_co'] } }).sort({ due_date: 1, _id: 1 }).lean();
+  const filter = stage ? { stage } : { stage: { $in: ['active_co', 'submitted_co'] } };
+  const cos = await M.ChangeOrder.find(filter).sort({ due_date: 1, _id: 1 }).lean();
   const [jobs, projects, members] = await Promise.all([M.Job.find().lean(), M.Project.find().lean(), M.TeamMember.find().lean()]);
   const jobById = {}; jobs.forEach(j => jobById[j._id] = j);
   const pName = {}; projects.forEach(p => pName[p._id] = p.name);

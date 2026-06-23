@@ -44,7 +44,7 @@ router.get('/api/v2/bid-list', async (req, res) => {
 });
 
 router.get('/api/v2/co-list', async (req, res) => {
-  try { res.json(await v2db.getCoList()); }
+  try { res.json(await v2db.getCoList(req.query.stage)); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
