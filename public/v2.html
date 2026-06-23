@@ -103,25 +103,20 @@
 </style>
 </head>
 <body>
-  <div class="v2-banner">
-    <span class="ttl">🏗️ LIS Estimating Calendar</span>
-    <span class="tag">V2 PREVIEW</span>
-    <span class="sub">Test data only · <a href="/">← back to live app</a></span>
-  </div>
-  <div class="v2-wrap">
-    <div class="page-header">
-      <div>
-        <div class="page-title">🏗️ Projects — New Data Model</div>
-        <div class="page-subtitle">Project → Bids → Job → Change Orders · fake dataset for review</div>
+  <div id="app">
+    <nav id="sidebar">
+      <div class="sidebar-header">
+        <div class="logo"><img src="logo.png" alt="Liberty Integrated Solutions" style="width:100%;max-width:160px;object-fit:contain;padding:4px 0" /></div>
+        <div style="font-size:11px;font-weight:800;color:#f59e0b;text-align:center;letter-spacing:.6px;margin-top:2px">V2 PREVIEW</div>
       </div>
-      <div style="display:flex;gap:8px">
-        <button class="v2-btn outline" style="padding:8px 14px;font-size:12px" onclick="showHealth()">🩺 Data Health</button>
-        <button class="v2-btn green" style="padding:8px 14px;font-size:12px" onclick="actNewBid()">+ New Bid</button>
-        <button class="v2-btn blue" style="padding:8px 14px;font-size:12px" onclick="actNewOpportunity()">+ New Opportunity</button>
-        <button class="v2-btn outline" style="padding:8px 14px;font-size:12px" onclick="actNewLegacyJob()">+ Legacy Job</button>
-      </div>
-    </div>
-    <div class="card" style="padding:0" id="main"><div style="padding:30px;text-align:center;color:var(--text-muted)">Loading…</div></div>
+      <div class="nav-section-label">PIPELINE</div>
+      <a class="nav-item" data-page="dashboard" href="#dashboard" onclick="navigate('dashboard');return false"><span class="nav-icon">⬛</span> Dashboard</a>
+      <a class="nav-item" data-page="projects" href="#projects" onclick="navigate('projects');return false"><span class="nav-icon">🏗️</span> Projects</a>
+      <div class="nav-section-label">DATA</div>
+      <a class="nav-item" data-page="health" href="#health" onclick="navigate('health');return false"><span class="nav-icon">🩺</span> Data Health</a>
+      <a class="nav-item" href="/" style="margin-top:auto"><span class="nav-icon">↩</span> Back to live app</a>
+    </nav>
+    <main id="main"><div style="padding:30px;color:var(--text-muted)">Loading…</div></main>
   </div>
 
 <script>
@@ -161,40 +156,117 @@ async function api(method, url, body) {
   return data;
 }
 
+function setActiveNav(page) {
+  document.querySelectorAll('#sidebar .nav-item[data-page]').forEach(a => a.classList.toggle('active', a.dataset.page === page));
+}
+
+async function ensureMeta() {
+  if (!META.companies.length) { META = await api('GET', '/api/v2/meta'); CURRENT_USER = META.current_user; }
+}
+
+function navigate(page) {
+  if (page === 'dashboard') return renderDashboard();
+  if (page === 'health') return showHealth();
+  return load();
+}
+
+// ── Projects page ──
 async function load() {
+  setActiveNav('projects');
   const main = document.getElementById('main');
+  main.innerHTML = '<div style="padding:30px;color:var(--text-muted)">Loading…</div>';
   let projects;
   try {
     const r = await fetch('/api/v2/projects');
-    if (r.status === 401) { main.innerHTML = '<div class="err-card">Not logged in. <a href="/">Log in on the main app</a> first, then come back to /v2.</div>'; return; }
+    if (r.status === 401) { main.innerHTML = '<div class="err-card" style="margin:20px">Not logged in. <a href="/">Log in on the main app</a> first, then come back to /v2.</div>'; return; }
     projects = await r.json();
     ALL_PROJECTS = projects.map(p => ({ id: p.id, name: p.name }));
-    if (!META.companies.length) { META = await api('GET', '/api/v2/meta'); CURRENT_USER = META.current_user; }
-  } catch (e) { main.innerHTML = `<div class="err-card">${esc(e.message)}</div>`; return; }
+    await ensureMeta();
+  } catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
 
-  main.innerHTML = projects.map(p => `
-    <div>
-      <div class="proj-row" onclick="toggle(${p.id})">
-        <div style="flex:1;min-width:0">
-          <div class="proj-name">${esc(p.name)}</div>
-          <div class="proj-meta">
-            ${p.bid_count} bid${p.bid_count!==1?'s':''}
-            <span class="proj-meta-sep">·</span> ${p.job_count} job${p.job_count!==1?'s':''}
-            <span class="proj-meta-sep">·</span> ${p.co_count} CO${p.co_count!==1?'s':''}
-            ${p.pipeline_value ? `<span class="proj-meta-sep">·</span> pipeline <span class="amount">${fmt$(p.pipeline_value)}</span>` : ''}
-            ${p.won_value ? `<span class="proj-meta-sep">·</span> won <span class="amount">${fmt$(p.won_value)}</span>` : ''}
-            ${p.customers.length ? `<span class="proj-meta-sep">·</span> <span class="proj-meta-customers">${esc(p.customers.join(', '))}</span>` : ''}
+  main.innerHTML = `
+    <div class="page-header">
+      <div><div class="page-title">🏗️ Projects</div><div class="page-subtitle">${projects.length} projects · Project → Bids → Job → Change Orders</div></div>
+      <div style="display:flex;gap:8px">
+        <button class="v2-btn green" style="padding:8px 14px;font-size:12px" onclick="actNewBid()">+ New Bid</button>
+        <button class="v2-btn blue" style="padding:8px 14px;font-size:12px" onclick="actNewOpportunity()">+ New Opportunity</button>
+        <button class="v2-btn outline" style="padding:8px 14px;font-size:12px" onclick="actNewLegacyJob()">+ Legacy Job</button>
+      </div>
+    </div>
+    <div class="card" style="padding:0">${projects.map(p => `
+      <div>
+        <div class="proj-row" onclick="toggle(${p.id})">
+          <div style="flex:1;min-width:0">
+            <div class="proj-name">${esc(p.name)}</div>
+            <div class="proj-meta">
+              ${p.bid_count} bid${p.bid_count!==1?'s':''}
+              <span class="proj-meta-sep">·</span> ${p.job_count} job${p.job_count!==1?'s':''}
+              <span class="proj-meta-sep">·</span> ${p.co_count} CO${p.co_count!==1?'s':''}
+              ${p.pipeline_value ? `<span class="proj-meta-sep">·</span> pipeline <span class="amount">${fmt$(p.pipeline_value)}</span>` : ''}
+              ${p.won_value ? `<span class="proj-meta-sep">·</span> won <span class="amount">${fmt$(p.won_value)}</span>` : ''}
+              ${p.customers.length ? `<span class="proj-meta-sep">·</span> <span class="proj-meta-customers">${esc(p.customers.join(', '))}</span>` : ''}
+            </div>
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end">
+            ${p.job_numbers.map(j => `<span class="proj-active-badge">Job ${esc(j)}</span>`).join('')}
+            ${p.job_number_pending ? '<span class="pending-pill">JOB # PENDING</span>' : ''}
+            ${p.is_legacy ? '<span class="legacy-pill">LEGACY</span>' : ''}
+            ${p.active_count ? `<span class="badge badge-bid">${p.active_count} active</span>` : ''}
           </div>
         </div>
-        <div style="display:flex;gap:6px;align-items:center;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end">
-          ${p.job_numbers.map(j => `<span class="proj-active-badge">Job ${esc(j)}</span>`).join('')}
-          ${p.job_number_pending ? '<span class="pending-pill">JOB # PENDING</span>' : ''}
-          ${p.is_legacy ? '<span class="legacy-pill">LEGACY</span>' : ''}
-          ${p.active_count ? `<span class="badge badge-bid">${p.active_count} active</span>` : ''}
-        </div>
+        <div class="v2-hier" id="hier-${p.id}"></div>
+      </div>`).join('')}</div>`;
+}
+
+// ── Dashboard page (v2 data) ──
+async function renderDashboard() {
+  setActiveNav('dashboard');
+  const main = document.getElementById('main');
+  main.innerHTML = '<div style="padding:30px;color:var(--text-muted)">Loading…</div>';
+  let d;
+  try { await ensureMeta(); d = await api('GET', '/api/v2/dashboard'); }
+  catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
+
+  const stat = (label, value, sub, color) => `
+    <div class="stat-card" style="${color ? `border-top:3px solid ${color}` : ''}">
+      <div class="stat-label">${label}</div>
+      <div class="stat-value"${color ? ` style="color:${color}"` : ''}>${value}</div>
+      <div class="stat-sub">${sub || ''}</div>
+    </div>`;
+  const p = {}; d.pipeline.forEach(s => p[s.stage] = s);
+
+  main.innerHTML = `
+    <div class="page-header"><div><div class="page-title">⬛ Dashboard</div><div class="page-subtitle">Live pipeline on the new data model</div></div></div>
+    <div class="stat-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px">
+      ${stat('Opportunities', p.opportunity?.count||0, fmt$(p.opportunity?.value), '#3b82f6')}
+      ${stat('Active Bids', p.active_bid?.count||0, fmt$(p.active_bid?.value), '#f59e0b')}
+      ${stat('Submitted', p.submitted?.count||0, fmt$(p.submitted?.value), '#2563eb')}
+      ${stat('Active Change Orders', d.activeCo.count, fmt$(d.activeCo.value), '#f97316')}
+      ${stat('Awarded (30d)', d.awarded30.count, fmt$(d.awarded30.value), '#16a34a')}
+      ${stat('Overdue Follow-ups', d.overdueCount, 'across submissions + COs', d.overdueCount ? '#dc2626' : '#16a34a')}
+      ${stat('Jobs awaiting Job #', d.jobsPending, 'from accounting', '#0891b2')}
+    </div>
+    <div class="dashboard-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
+      <div class="card">
+        <div class="section-title">📅 Upcoming Due Dates — next 14 days</div>
+        ${d.dueSoon.length ? d.dueSoon.map(b => {
+          const dot = b.due_date <= today ? '#dc2626' : '#16a34a';
+          return `<div class="proj-row" style="cursor:default;padding:8px 0">
+            <div style="flex:1"><strong style="font-size:13px">${esc(b.project || '—')}</strong>
+              <span style="color:var(--text-muted);font-size:12px">${b.bid_number ? '#'+esc(b.bid_number) : ''} · ${STAGE[b.stage]}</span></div>
+            <span style="font-size:12px;font-weight:700;color:${dot}">Due ${fmtD(b.due_date)}</span>
+          </div>`; }).join('') : '<div class="text-muted" style="font-size:13px;padding:6px 0">Nothing due in the next 14 days</div>'}
       </div>
-      <div class="v2-hier" id="hier-${p.id}"></div>
-    </div>`).join('');
+      <div class="card">
+        <div class="section-title" style="color:var(--success)">✅ Awarded — last 30 days</div>
+        ${d.awarded30.list.length ? d.awarded30.list.map(b => `
+          <div class="proj-row" style="cursor:default;padding:8px 0">
+            <div style="flex:1"><strong style="font-size:13px">${esc(b.project || '—')}</strong>
+              <span style="color:var(--text-muted);font-size:12px">${b.company ? '· '+esc(b.company) : ''}</span></div>
+            <span class="amount" style="font-size:12px">${fmt$(b.amount)}</span>
+          </div>`).join('') : '<div class="text-muted" style="font-size:13px;padding:6px 0">No awards in the last 30 days</div>'}
+      </div>
+    </div>`;
 }
 
 async function toggle(id) {
@@ -840,11 +912,12 @@ async function actReopenCO(coId) {
 // ═══════════════════════════════════════════════════════════════════════════
 let HEALTH = null;
 async function showHealth() {
+  setActiveNav('health');
   const main = document.getElementById('main');
   main.innerHTML = '<div style="padding:30px;text-align:center;color:var(--text-muted)">Analyzing dataset…</div>';
   let h;
-  try { h = await api('GET', '/api/v2/health'); }
-  catch (e) { main.innerHTML = `<div class="err-card">${esc(e.message)}</div>`; return; }
+  try { await ensureMeta(); h = await api('GET', '/api/v2/health'); }
+  catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
   HEALTH = h;
 
   const dupProjIssues = h.dupProjects.length;
@@ -980,7 +1053,11 @@ async function deleteEmptyProject(id) {
   } catch (e) { alert('Delete failed: ' + e.message); }
 }
 
-load();
+async function bootstrap() {
+  try { await ensureMeta(); } catch { /* not logged in — page renderers show the message */ }
+  navigate('dashboard');
+}
+bootstrap();
 </script>
 </body>
 </html>

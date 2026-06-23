@@ -741,6 +741,38 @@ function _clusterSimilar(items, ignore) {
   return Object.values(groups).filter(g => g.length > 1).sort((a, b) => b.length - a.length);
 }
 
+// ── Dashboard rollups (v2) ────────────────────────────────────────────────────
+async function getDashboard() {
+  const M = getModels();
+  const [bids, cos, jobs, subs, companies, projects] = await Promise.all([
+    M.Bid.find().lean(), M.ChangeOrder.find().lean(), M.Job.find().lean(),
+    M.BidSubmission.find().lean(), M.Company.find().lean(), M.Project.find().lean(),
+  ]);
+  const today = new Date().toISOString().split('T')[0];
+  const ago = (n) => new Date(Date.now() - n * 86400000).toISOString().split('T')[0];
+  const ahead = (n) => new Date(Date.now() + n * 86400000).toISOString().split('T')[0];
+  const pName = {}; projects.forEach(p => pName[p._id] = p.name);
+  const coName = {}; companies.forEach(c => coName[c._id] = c.name);
+
+  const stageOf = (st) => { const l = bids.filter(b => b.stage === st && !b.superseded); return { stage: st, count: l.length, value: l.reduce((s, b) => s + (b.estimate_amount || 0), 0) }; };
+  const pipeline = ['opportunity', 'active_bid', 'submitted'].map(stageOf);
+  const activeCos = cos.filter(c => ['active_co', 'submitted_co'].includes(c.stage));
+
+  const awarded = bids.filter(b => b.stage === 'awarded' && b.award_date && b.award_date >= ago(30)).sort((a, b) => (b.award_date || '').localeCompare(a.award_date || ''));
+  const overdueSubs = subs.filter(s => s.outcome === 'pending' && s.next_followup_date && s.next_followup_date < today);
+  const overdueCos = cos.filter(c => c.stage === 'submitted_co' && c.next_followup_date && c.next_followup_date < today);
+  const dueSoon = bids.filter(b => ['active_bid', 'submitted'].includes(b.stage) && !b.superseded && b.due_date && b.due_date >= today && b.due_date <= ahead(14)).sort((a, b) => (a.due_date || '').localeCompare(b.due_date || ''));
+
+  return {
+    pipeline,
+    activeCo: { count: activeCos.length, value: activeCos.reduce((s, c) => s + (c.estimate_amount || 0), 0) },
+    awarded30: { count: awarded.length, value: awarded.reduce((s, b) => s + (b.estimate_amount || 0), 0), list: awarded.slice(0, 8).map(b => ({ id: b._id, bid_number: b.bid_number, project: pName[b.project_id], amount: b.estimate_amount, award_date: b.award_date, company: b.awarded_company_id ? coName[b.awarded_company_id] : null })) },
+    overdueCount: overdueSubs.length + overdueCos.length,
+    dueSoon: dueSoon.slice(0, 15).map(b => ({ id: b._id, bid_number: b.bid_number, project: pName[b.project_id], due_date: b.due_date, stage: b.stage })),
+    jobsPending: jobs.filter(j => !j.job_number).length,
+  };
+}
+
 async function getDataHealth() {
   const M = getModels();
   const [projects, bids, jobs, cos, companies, bidCustomers] = await Promise.all([
@@ -983,7 +1015,7 @@ async function applyCleanupOverrides() {
 }
 
 module.exports = {
-  getProjects, getProjectDetail, getMeta, getDataHealth, mergeProjects, mergeCompanies, mergeJobs,
+  getProjects, getProjectDetail, getMeta, getDashboard, getDataHealth, mergeProjects, mergeCompanies, mergeJobs,
   dismissDuplicates, deleteEmptyProject, applyCleanupOverrides, removeOverride, nextId,
   createOpportunity, createDirectBid, startBid, submitBid, addSubmission, adminUpdate,
   awardSubmission, notAwardSubmission, closeBid, logFollowupV2,
