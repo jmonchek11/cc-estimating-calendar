@@ -748,9 +748,6 @@ cron.schedule('0 7 * * *', async () => {
 }, { timezone: 'America/New_York' });
 
 // Daily 7:05 AM ET — v2's reminders (polymorphic: bid or change_order)
-// recipientIds are v2's OWN TeamMember ids (a separate id space from v1's —
-// see v2/notify.js) so recipient emails must go through emailForV2Member,
-// which bridges to v1's roster by name (the only place real emails live).
 cron.schedule('5 7 * * *', async () => {
   console.log('[cron] running v2 daily reminder check');
   try {

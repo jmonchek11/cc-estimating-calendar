@@ -8,26 +8,20 @@
  * function can just call the existing, already-styled mailer.js templates
  * unchanged.
  *
- * TeamMember lives in a collection shared by v1 and v2 (same underlying
- * MongoDB, just different Mongoose connections), so user-lookup functions
- * are reused directly from v1's db.js rather than reimplemented.
+ * TeamMember is one shared collection (v2/merge-team-ids.js, July 2026 —
+ * v1 and v2 used to have independently-assigned ids for the same people,
+ * which silently broke "mine only" filtering and reminder-email recipients;
+ * see DATA_MODEL_SPEC.md), so user-lookup functions are reused directly from
+ * v1's db.js rather than reimplemented.
  */
 const mailer = require('../mailer');
 const maindb = require('../db');
-const V1TeamMember = require('../models/TeamMember');
 const { getModels } = require('./models');
 
-// v1 and v2 are SEPARATE databases with independently-assigned TeamMember
-// ids (confirmed: every id differs for the same person — e.g. Connor Winters
-// is v1 id 10 but v2 id 2). v2's own TeamMember rows have almost no emails
-// populated (only ever seeded with name/initials/role) — real emails only
-// exist in v1's roster. So any v2-id -> email lookup has to bridge by NAME.
-async function emailForV2Member(v2MemberId) {
+async function emailForV2Member(memberId) {
   const M = getModels();
-  const v2m = await M.TeamMember.findById(Number(v2MemberId)).lean();
-  if (!v2m) return null;
-  const v1m = await V1TeamMember.findOne({ name: v2m.name, active: 1 }).lean();
-  return v1m?.email ? { email: v1m.email, name: v1m.name } : null;
+  const m = await M.TeamMember.findById(Number(memberId)).lean();
+  return m?.email ? { email: m.email, name: m.name } : null;
 }
 
 async function bidEmailShape(bidId) {

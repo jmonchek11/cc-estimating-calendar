@@ -381,17 +381,13 @@ async function renderSearchResults() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// SETTINGS — Team management + follow-up timer + admin tools. TeamMember and
-// Settings are collections SHARED with v1 (same underlying MongoDB), so this
-// reuses v1's existing /api/team and /api/settings routes directly instead
-// of duplicating that CRUD in v2 — it's the same data either way.
+// SETTINGS — Team management + follow-up timer + admin tools. TeamMember is
+// one shared collection as of the July 2026 id merge (v2/merge-team-ids.js —
+// v1 and v2 used to have independently-assigned ids for the same people,
+// which silently broke "mine only" filtering and reminder recipients). A
+// team member added here (with a temp password) can log in AND be assigned
+// to bids immediately — same roster either way.
 // ═══════════════════════════════════════════════════════════════════════════
-// NOTE on scope: v1 and v2 are separate databases with independently-
-// assigned TeamMember ids (see v2/notify.js). This page manages v2's OWN
-// roster — the one that actually backs v2's estimator/salesperson dropdowns
-// and filters. It does NOT touch login (still v1's system, bridged by name).
-// A team member added here can be picked on bids immediately but can't log
-// in until the two rosters are unified — flagged in the page copy below.
 let TEAM_CACHE = [];
 async function renderSettings() {
   setActiveNav('settings');
@@ -426,7 +422,7 @@ async function renderSettings() {
     <div class="card" style="margin-bottom:14px">
       <div style="padding:12px 16px;border-bottom:1px solid var(--border)">
         <div style="font-weight:700;font-size:14px">👥 Team</div>
-        ${isAdmin ? `<div style="font-size:11.5px;color:var(--text-muted);margin-top:3px">Controls who shows up as an estimator/salesperson in v2. A brand-new person here can be assigned to bids right away but can't log in yet — that still goes through the main login system, matched by name.</div>` : ''}
+        ${isAdmin ? `<div style="font-size:11.5px;color:var(--text-muted);margin-top:3px">One roster for both login and bid assignment — add someone here with a temporary password and they can log in and be picked as an estimator/salesperson right away.</div>` : ''}
       </div>
       <div style="padding:0">${teamRows}</div>
     </div>
@@ -458,7 +454,8 @@ function actNewTeamMember() {
     { id: 'name', label: 'Name', type: 'text', required: true },
     { id: 'initials', label: 'Initials', type: 'text', required: true, placeholder: 'JD' },
     { id: 'role', label: 'Role', type: 'select', required: true, options: [{ value: 'estimator', label: 'Estimator' }, { value: 'sales', label: 'Salesperson' }] },
-    { id: 'email', label: 'Email', type: 'text' },
+    { id: 'email', label: 'Email', type: 'text', required: true, placeholder: 'Needed for login + notifications' },
+    { id: 'temp_password', label: 'Temporary Password', type: 'text', placeholder: 'They\'ll be asked to change it on first login' },
   ], data => api('POST', '/api/v2/team', data), 'Create', 'green');
 }
 function actEditTeamMember(id) {

@@ -86,16 +86,11 @@ router.get('/api/v2/meta', async (req, res) => {
     const meta = await v2db.getMeta();
     let current_user = null;
     try {
+      // TeamMember is one shared collection (v2/merge-team-ids.js, July 2026)
+      // so m.id is directly comparable to v2's bid.estimator_id/salesperson_id
+      // ("mine only" etc) — no cross-database name bridging needed anymore.
       const m = await maindb.getMember(req.session.userId);
-      if (m) {
-        // v1 and v2 are separate databases with independently-assigned
-        // TeamMember ids (confirmed: every id differs for the same person).
-        // current_user.id must be the v2 id — it's compared against v2's
-        // bid.estimator_id/salesperson_id everywhere ("mine only" etc).
-        // is_admin/name/v1_id still come from v1 since that's where login lives.
-        const v2Match = meta.team.find(t => v2db._norm(t.name) === v2db._norm(m.name));
-        current_user = { id: v2Match ? v2Match.id : null, v1_id: m.id, name: m.name, is_admin: !!m.is_admin };
-      }
+      if (m) current_user = { id: m.id, name: m.name, is_admin: !!m.is_admin };
     } catch { /* ignore — current_user stays null */ }
     res.json({ ...meta, current_user });
   } catch (e) { res.status(500).json({ error: e.message }); }

@@ -7,6 +7,7 @@
  * Joins are done in JS over .lean() queries — fine for the test dataset;
  * swap to aggregations if/when production volume needs it.
  */
+const bcrypt = require('bcrypt');
 const { getModels } = require('./models');
 
 const BID_ACTIVE_STAGES = ['opportunity', 'active_bid', 'submitted'];
@@ -286,15 +287,17 @@ async function getTeamV2() {
   const team = await M.TeamMember.find().sort({ name: 1 }).lean();
   return team.map(t => ({ id: t._id, name: t.name, initials: t.initials, role: t.role, email: t.email, active: !!t.active, is_admin: !!t.is_admin }));
 }
-async function createTeamMemberV2({ name, initials, role, email }) {
+async function createTeamMemberV2({ name, initials, role, email, temp_password }) {
   require_({ name, initials, role }, ['name', 'initials', 'role']);
   const M = getModels();
-  // Existing 14 rows were seeded with hand-assigned ids during import, not
-  // via the Counter collection — an uninitialized nextId('team_members')
-  // would start at 1 and collide. Compute the next id from what's there.
+  // TeamMember ids were hand-assigned historically, not via the Counter
+  // collection — an uninitialized nextId('team_members') would start at 1
+  // and collide. Compute the next id from what's actually there.
   const existing = await M.TeamMember.find().select('_id').lean();
   const id = Math.max(0, ...existing.map(t => t._id)) + 1;
-  await M.TeamMember.create({ _id: id, name: name.trim(), initials: initials.toUpperCase(), role, email: email ? email.toLowerCase().trim() : null, active: 1 });
+  const doc = { _id: id, name: name.trim(), initials: initials.toUpperCase(), role, email: email ? email.toLowerCase().trim() : null, active: 1 };
+  if (temp_password) { doc.password_hash = await bcrypt.hash(temp_password, 12); doc.must_change_password = true; }
+  await M.TeamMember.create(doc);
   return { id };
 }
 async function updateTeamMemberV2(id, data) {

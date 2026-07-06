@@ -229,20 +229,13 @@ const ReminderSchema = new mongoose.Schema({
   created_at:  { type: String, default: ts },
 }, opts);
 
-// Carried over from v1 unchanged
-const TeamMemberSchema = new mongoose.Schema({
-  _id:      Number,
-  name:     { type: String, required: true },
-  initials: { type: String, required: true, uppercase: true },
-  role:     { type: String, enum: ['estimator', 'sales', 'pm', 'admin'], default: 'estimator' },
-  active:   { type: Number, default: 1 },
-  email:    { type: String, lowercase: true, trim: true, default: null },
-  password_hash:        { type: String, default: null },
-  must_change_password: { type: Boolean, default: true },
-  is_admin: { type: Boolean, default: false },
-  last_seen:{ type: Date, default: null },
-  created_at: { type: String, default: ts },
-}, opts);
+// TeamMember is v1's ACTUAL model (not a v2-isolated copy). v1 and v2 used to
+// have independently-assigned TeamMember ids in two separate databases —
+// merged in July 2026 (v2/merge-team-ids.js) after that silently broke
+// "mine only" filtering and reminder-email recipients. v1's login/roster
+// page is now the single source of truth; v2's Settings/Team page reads
+// and writes it directly (see v2/routes.js).
+const V1TeamMember = require('../models/TeamMember');
 
 const SettingsSchema = new mongoose.Schema({
   _id: String,                                                   // 'company'
@@ -296,7 +289,7 @@ function getModels() {
     Contact:     c.model('Contact', ContactSchema, 'contacts'),
     Followup:    c.model('Followup', FollowupSchema, 'followups'),
     Reminder:    c.model('Reminder', ReminderSchema, 'reminders'),
-    TeamMember:  c.model('TeamMember', TeamMemberSchema, 'teammembers'),
+    TeamMember:  V1TeamMember,
     Settings:    c.model('Settings', SettingsSchema, 'settings'),
     Counter:     c.model('Counter', CounterSchema, 'counters'),
     IgnoredPair: c.model('IgnoredPair', IgnoredPairSchema, 'ignored_pairs'),
