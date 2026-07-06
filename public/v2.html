@@ -2386,7 +2386,9 @@ function renderJISReview(p) {
 
 async function actLogout() {
   try { await fetch('/api/auth/logout', { method: 'POST' }); } catch {}
-  window.location.href = '/legacy';
+  // Login itself still lives on /legacy, but bring them straight back to v2
+  // once they've signed in — same returnTo mechanism ensureMeta() uses.
+  window.location.href = '/legacy?returnTo=' + encodeURIComponent('/');
 }
 
 async function bootstrap() {
