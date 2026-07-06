@@ -163,6 +163,7 @@
       <div class="nav-section-label">PIPELINE</div>
       <a class="nav-item" data-page="dashboard" href="#dashboard" onclick="navigate('dashboard');return false"><span class="nav-icon">⬛</span> Dashboard</a>
       <a class="nav-item" data-page="digest" href="#digest" onclick="navigate('digest');return false"><span class="nav-icon">📊</span> Weekly Digest</a>
+      <a class="nav-item" data-page="calendar" href="#calendar" onclick="navigate('calendar');return false"><span class="nav-icon">🗓️</span> Calendar</a>
       <div class="nav-section-label">BIDS</div>
       <a class="nav-item" data-page="opportunities" href="#opportunities" onclick="navigate('opportunities');return false"><span class="nav-icon">🔵</span> Opportunities</a>
       <a class="nav-item" data-page="active-bids" href="#active-bids" onclick="navigate('active-bids');return false"><span class="nav-icon">🟡</span> Active Bids</a>
@@ -241,6 +242,7 @@ function navigate(page) {
   if (page === 'search') { VIEW = { name: 'search' }; return renderSearchResults(); }
   if (page === 'contacts') { VIEW = { name: 'contacts' }; return renderContacts(); }
   if (page === 'digest') { VIEW = { name: 'digest' }; return renderDigest(); }
+  if (page === 'calendar') { VIEW = { name: 'calendar' }; return renderCalendar(); }
   VIEW = { name: 'projects' }; return load();
 }
 
@@ -249,6 +251,7 @@ async function rerenderView() {
     case 'search':    return renderSearchResults();
     case 'contacts':  return renderContacts();
     case 'digest':    return renderDigest();
+    case 'calendar':  return renderCalendar();
     case 'projects':  return load();
     case 'project':   return renderProjectPage(VIEW.arg);
     case 'bidlist':   return renderBidList(VIEW.arg);
@@ -372,6 +375,140 @@ async function renderSearchResults() {
     <div class="page-header"><div><div class="page-title">🔍 Search Results</div><div class="page-subtitle">${total} result${total !== 1 ? 's' : ''} for "<strong>${esc(q)}</strong>"</div></div></div>
     ${BID_STAGE_ORDER.map(bidSection).join('')}
     ${CO_STAGE_ORDER.map(coSection).join('')}`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CALENDAR — month grid of due dates + follow-ups, across bids AND change
+// orders (v1 only had bids since COs were folded into the same collection).
+// ═══════════════════════════════════════════════════════════════════════════
+const ESTIMATOR_PALETTE = ['#2563eb', '#16a34a', '#dc2626', '#d97706', '#7c3aed', '#0891b2', '#be185d', '#ea580c'];
+const estimatorColor = (id) => id ? ESTIMATOR_PALETTE[Number(id) % ESTIMATOR_PALETTE.length] : '#64748b';
+let CAL_STATE = { year: new Date().getFullYear(), month: new Date().getMonth(), filter: 'all' };
+let CAL_DAY_MAP = {};
+
+async function renderCalendar() {
+  setActiveNav('calendar');
+  const main = document.getElementById('main');
+  main.innerHTML = '<div style="padding:30px;color:var(--text-muted)">Loading…</div>';
+  let items;
+  try {
+    await ensureMeta();
+    const [opp, active, sub, activeCo, subCo] = await Promise.all([
+      api('GET', '/api/v2/bid-list?stage=opportunity'), api('GET', '/api/v2/bid-list?stage=active_bid'), api('GET', '/api/v2/bid-list?stage=submitted'),
+      api('GET', '/api/v2/co-list?stage=active_co'), api('GET', '/api/v2/co-list?stage=submitted_co'),
+    ]);
+    items = [
+      ...[...opp, ...active, ...sub].map(b => ({ kind: 'bid', id: b.id, project_id: b.project_id, title: b.project, label: b.bid_number, due_date: b.due_date, next_followup_date: b.next_followup_date, estimator: b.estimator, salesperson: b.salesperson, customer: (b.customers || []).join(', '), stage: b.stage })),
+      ...[...activeCo, ...subCo].map(c => ({ kind: 'co', id: c.id, project_id: c.project_id, title: `${c.co_number} — ${c.name}`, label: c.project, due_date: c.due_date, next_followup_date: c.next_followup_date, estimator: c.estimator, salesperson: null, customer: null, stage: c.stage })),
+    ];
+  } catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
+
+  const { year, month, filter } = CAL_STATE;
+  const monthName = new Date(year, month, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  const estimators = (META.team || []).filter(m => m.role === 'estimator');
+  const legendHtml = [
+    ...estimators.map(m => `<span class="cal-legend-item"><span class="cal-legend-dot" style="background:${estimatorColor(m.id)}"></span>${esc(m.initials)}</span>`),
+    `<span class="cal-legend-item"><span class="cal-legend-dot" style="background:#1e293b;border:1px dashed #94a3b8"></span>Follow-up</span>`,
+  ].join('');
+
+  main.innerHTML = `
+    <div class="page-header"><div><div class="page-title">🗓️ Calendar</div></div></div>
+    <div class="cal-controls">
+      <button class="v2-btn outline" style="padding:6px 12px;font-size:12px" onclick="navCalendar(-1)">‹ Prev</button>
+      <span class="cal-month-label">${esc(monthName)}</span>
+      <button class="v2-btn outline" style="padding:6px 12px;font-size:12px" onclick="navCalendar(1)">Next ›</button>
+      <button class="v2-btn outline" style="padding:6px 12px;font-size:12px" onclick="CAL_STATE.year=new Date().getFullYear();CAL_STATE.month=new Date().getMonth();renderCalendar()">Today</button>
+      <select class="cal-filter-select" onchange="CAL_STATE.filter=this.value;renderCalendar()">
+        <option value="all" ${filter === 'all' ? 'selected' : ''}>Due Dates + Follow-ups</option>
+        <option value="due_only" ${filter === 'due_only' ? 'selected' : ''}>Due Dates Only</option>
+        <option value="followups_only" ${filter === 'followups_only' ? 'selected' : ''}>Follow-ups Only</option>
+      </select>
+    </div>
+    ${buildCalendarGrid(year, month, items, filter)}
+    <div class="cal-legend">${legendHtml}</div>`;
+}
+
+function navCalendar(dir) {
+  let m = CAL_STATE.month + dir, y = CAL_STATE.year;
+  if (m < 0) { m = 11; y--; } if (m > 11) { m = 0; y++; }
+  CAL_STATE.month = m; CAL_STATE.year = y;
+  renderCalendar();
+}
+
+function buildCalendarGrid(year, month, items, filter) {
+  const firstDay = new Date(year, month, 1);
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const startDOW = firstDay.getDay();
+  const pad = n => String(n).padStart(2, '0');
+
+  CAL_DAY_MAP = {};
+  const add = (dateStr, item, type) => {
+    if (!dateStr) return;
+    const d = dateStr.substring(0, 10);
+    if (parseInt(d.substring(5, 7)) - 1 !== month || parseInt(d.substring(0, 4)) !== year) return;
+    (CAL_DAY_MAP[d] = CAL_DAY_MAP[d] || []).push({ item, type });
+  };
+  items.forEach(it => {
+    if (filter !== 'followups_only') add(it.due_date, it, 'due');
+    if (filter !== 'due_only') add(it.next_followup_date, it, 'fu');
+  });
+
+  const headers = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => `<div class="cal-hdr-cell">${d}</div>`).join('');
+  let cells = '';
+  for (let i = 0; i < startDOW; i++) cells += '<div class="cal-day-empty"></div>';
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const ds = `${year}-${pad(month + 1)}-${pad(d)}`;
+    const isToday = ds === today;
+    const dayItems = CAL_DAY_MAP[ds] || [];
+    const shown = dayItems.slice(0, 3);
+    const extra = dayItems.length - 3;
+
+    const chips = shown.map(({ item, type }) => {
+      if (type === 'due') {
+        const c = estimatorColor(item.estimator?.id);
+        return `<div class="cal-chip" style="background:${c}a6;border-left-color:${c}">
+          <span class="cal-chip-txt">${esc(item.title)}</span>
+          ${item.estimator ? `<span class="cal-chip-ini" style="color:#fff">${esc(item.estimator.initials)}</span>` : ''}
+        </div>`;
+      }
+      return `<div class="cal-chip cal-chip-fu"><span class="cal-chip-txt">📞 ${esc(item.title)}</span></div>`;
+    }).join('');
+
+    cells += `<div class="cal-day${isToday ? ' cal-day-today' : ''}${dayItems.length ? ' cal-day-clickable' : ''}"
+      ${dayItems.length ? `onclick="openCalDayModal('${ds}')"` : ''}>
+      <div class="cal-day-num${isToday ? ' cal-day-num-today' : ''}">${d}</div>
+      <div class="cal-day-chips">${chips}
+        ${extra > 0 ? `<button class="cal-chip-more" onclick="event.stopPropagation();openCalDayModal('${ds}')">+${extra} more</button>` : ''}
+      </div>
+    </div>`;
+  }
+  const rem = (startDOW + daysInMonth) % 7;
+  if (rem) for (let i = rem; i < 7; i++) cells += '<div class="cal-day-empty"></div>';
+  return `<div class="cal-hdr">${headers}</div><div class="cal-grid">${cells}</div>`;
+}
+
+function openCalDayModal(dateStr) {
+  const items = CAL_DAY_MAP[dateStr] || [];
+  if (!items.length) return;
+  const label = new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+  const rows = items.map(({ item, type }) => {
+    const color = type === 'due' ? estimatorColor(item.estimator?.id) : '#64748b';
+    const typeLabel = type === 'due' ? '📐 Due date' : '📞 Follow-up';
+    return `<div class="proj-row" onclick="closeProfileModal();${item.kind === 'bid' ? `openBidFlyout(${item.project_id},${item.id})` : `openCoFlyout(${item.project_id},${item.id})`}">
+      <div style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0;margin-top:5px"></div>
+      <div style="flex:1;min-width:0">
+        <div class="proj-name">${esc(item.title)}</div>
+        <div class="proj-meta">${typeLabel}
+          ${item.estimator ? ` · Est ${esc(item.estimator.initials)}` : ''}
+          ${item.salesperson ? ` Sales ${esc(item.salesperson.initials)}` : ''}
+          ${item.customer ? ` · ${esc(item.customer)}` : ''}
+        </div>
+      </div>
+      ${stageBadge(item.stage)}
+    </div>`;
+  }).join('');
+  openProfileModal(label, `<div class="card" style="padding:0">${rows}</div>`);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
