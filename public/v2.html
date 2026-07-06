@@ -869,7 +869,10 @@ async function renderCoList(stage) {
   if (stage === 'submitted_co' && filterState(stage).sort === 'due') filterState(stage).sort = 'followup';
 
   main.innerHTML = `
-    <div class="page-header"><div><div class="page-title">${meta.title}</div><div class="page-subtitle" id="cl-count-${stage}">${LIST_STATE[stage].length} ${meta.sub}</div></div></div>
+    <div class="page-header">
+      <div><div class="page-title">${meta.title}</div><div class="page-subtitle" id="cl-count-${stage}">${LIST_STATE[stage].length} ${meta.sub}</div></div>
+      ${stage === 'active_co' ? `<button class="v2-btn green" onclick="actNewChangeOrder()">+ New Change Order</button>` : ''}
+    </div>
     <div class="card" style="padding:0">${filterBarHtml(stage, sortOpts)}<div id="cl-body-${stage}"></div></div>`;
   renderCoListBody(stage);
 }
@@ -1153,6 +1156,7 @@ function bidNode(b) {
         ${b.customers.length ? `<div style="margin-top:4px">${b.customers.map(cust => `
           <div style="font-size:12px;margin-top:2px">
             <span onclick="openCompanyProfile(${cust.id})" style="cursor:pointer;color:#2563eb;font-weight:600">🏢 ${esc(cust.name)}</span>
+            <a href="#" onclick="event.preventDefault();actRemoveBidCustomer(${cust.bid_customer_id},'${esc(cust.name)}')" style="font-size:11px;color:#dc2626;margin-left:6px">✕ remove</a>
             ${bidCustomerContactsHtml(cust)}
           </div>`).join('')}</div>` : ''}
         ${(b.submissions || []).length ? `<div class="v2-fu"><div style="font-weight:600;color:var(--text);margin-bottom:3px">Submissions</div>${b.submissions.map(s => submissionRow(s, b)).join('')}</div>` : ''}
@@ -1808,6 +1812,51 @@ function actSetPM(jobId) {
   ], data => api('PATCH', `/api/v2/jobs/${jobId}`, data), 'Assign');
 }
 
+// Global entry point (Active Change Orders page) — a CO always requires an
+// existing Job, so this is a two-step picker: project, then which of its
+// jobs (usually one, but legacy + bid-backed duplicates can leave more than
+// one until merged). Falls through to the same actAddCO() form once a job
+// is chosen — no duplicated form logic.
+function actNewChangeOrder() {
+  document.getElementById('v2-form-overlay')?.remove();
+  const ov = document.createElement('div');
+  ov.className = 'v2-overlay'; ov.id = 'v2-form-overlay';
+  ov.onclick = e => { if (e.target === ov) ov.remove(); };
+  ov.innerHTML = `
+    <div class="v2-modal" style="max-width:420px">
+      <div class="v2-modal-hd">+ New Change Order<button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">✕</button></div>
+      <div class="v2-modal-bd">
+        <div class="v2-field"><label>Project</label>
+          <select id="vf-nco-project">
+            <option value="">— pick a project —</option>
+            ${projectOpts().map(o => `<option value="${o.value}">${esc(o.label)}</option>`).join('')}
+          </select>
+        </div>
+        <div id="nco-job-area"></div>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+
+  document.getElementById('vf-nco-project').onchange = async (e) => {
+    const pid = e.target.value;
+    const jobArea = document.getElementById('nco-job-area');
+    if (!pid) { jobArea.innerHTML = ''; return; }
+    jobArea.innerHTML = '<div style="font-size:12px;color:var(--text-muted)">Loading jobs…</div>';
+    try {
+      const proj = await api('GET', `/api/v2/projects/${pid}`);
+      if (!proj.jobs.length) {
+        jobArea.innerHTML = `<div class="v2-modal-err" style="display:block;padding:0;margin-top:8px">This project has no job yet — a change order always needs an existing job. Jobs are created when a bid here is awarded, or add one via "+ Legacy Job" on the Projects page.</div>`;
+        return;
+      }
+      jobArea.innerHTML = `<div class="v2-field"><label>Job</label>
+          <select id="vf-nco-job">
+            ${proj.jobs.map(j => `<option value="${j.id}">${j.job_number ? 'Job ' + esc(j.job_number) : 'Job # pending (from accounting)'}</option>`).join('')}
+          </select></div>
+        <button class="v2-btn blue" style="margin-top:4px" onclick="document.getElementById('v2-form-overlay').remove();actAddCO(document.getElementById('vf-nco-job').value)">Next → Change Order Details</button>`;
+    } catch (err) { jobArea.innerHTML = `<div class="v2-modal-err" style="display:block;padding:0;margin-top:8px">${esc(err.message)}</div>`; }
+  };
+}
+
 function actAddCO(jobId) {
   showForm('+ Add Change Order', [
     { id: 'co_number', label: 'RFC / COR / CO #', type: 'text', required: true, placeholder: 'RFC-01' },
@@ -2013,7 +2062,10 @@ async function renderContacts() {
   main.innerHTML = `
     <div class="page-header">
       <div><div class="page-title">👤 Contacts</div><div class="page-subtitle" id="ct-count">${CONTACTS_STATE.rows.length} contacts</div></div>
-      <button class="v2-btn green" onclick="actNewContact()">+ New Contact</button>
+      <div style="display:flex;gap:8px">
+        <button class="v2-btn outline" onclick="actNewCompany()">+ New Company</button>
+        <button class="v2-btn green" onclick="actNewContact()">+ New Contact</button>
+      </div>
     </div>
     <div class="card" style="padding:0">
       <div class="v2-filterbar">
@@ -2077,6 +2129,21 @@ function renderContactsBody() {
   }).join('') : '<div style="padding:24px;text-align:center;color:var(--text-muted)">No matches</div>';
 }
 
+function actNewCompany() {
+  showForm('+ New Company', [
+    { id: 'name', label: 'Company Name', type: 'text', required: true },
+    { id: 'street', label: 'Street', type: 'text' },
+    { id: 'city', label: 'City', type: 'text' },
+    { id: 'state', label: 'State', type: 'text', placeholder: 'PA' },
+    { id: 'zip', label: 'ZIP', type: 'text' },
+    { id: 'phone', label: 'Phone', type: 'text' },
+    { id: 'domain', label: 'Website', type: 'text', placeholder: 'www.example.com' },
+  ], async data => {
+    const c = await api('POST', '/api/v2/companies', data);
+    META = await api('GET', '/api/v2/meta'); CURRENT_USER = META.current_user;
+    return c;
+  }, 'Create Company', 'green');
+}
 function actNewContact(prefillCompanyId) {
   showForm('+ New Contact', [
     { id: 'first_name', label: 'First Name', type: 'text' },
@@ -2217,6 +2284,11 @@ async function actLinkContact(bidCustomerId, companyId) {
 }
 async function actUnlinkContact(bidCustomerId, contactId) {
   try { await api('DELETE', `/api/v2/bid-customers/${bidCustomerId}/contacts/${contactId}`); await refresh(); }
+  catch (e) { alert('Failed: ' + e.message); }
+}
+async function actRemoveBidCustomer(bidCustomerId, name) {
+  if (!confirm(`Remove ${name} from this bid? Only works if they haven't been submitted to yet.`)) return;
+  try { await api('DELETE', `/api/v2/bid-customers/${bidCustomerId}`); await refresh(); }
   catch (e) { alert('Failed: ' + e.message); }
 }
 

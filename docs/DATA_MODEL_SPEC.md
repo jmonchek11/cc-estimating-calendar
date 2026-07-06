@@ -253,6 +253,12 @@ stateDiagram-v2
 
 **Duplicate-safe project picker (Create Opportunity, + New Bid, New Legacy Job):** the project field is a single searchable combobox, not a free-text box or a binary "new vs. existing" chooser. Typing fuzzy-matches against every existing Project name (normalized substring, shared significant word, or small edit-distance — same family of matching as Data Health's duplicate clustering) and surfaces close matches live with a "⚠️ Found similar project(s)" flag; you pick one (sets `project_id`) or explicitly confirm a new name (`project_name`, tagged "new" as a chip). This is the front-line defense against double-entering the same project — Data Health's duplicate merge tool remains the backstop for anything that slips through.
 
+**Removing a customer added by mistake (✕ remove, on each customer row in the bid flyout):** deletes the `BidCustomer` row outright. Blocked with a clear error if that customer already has a `BidSubmission` on this bid, or if they're the awarded company — those represent real activity, not a roster mistake, and silently deleting the row would orphan that history. `DELETE /api/v2/bid-customers/:id` → `removeBidCustomer()`.
+
+**Standalone Company creation (Contacts page "+ New Company," alongside "+ New Contact"):** creates a `Company` directly with the same fields the JIS importer captures (street/city/state/zip/phone/domain), for when there's no bid or contact context yet. `POST /api/v2/companies` → `createCompanyV2()`.
+
+**Change Order creation, global entry point ("+ New Change Order" on the Active Change Orders page):** a two-step picker — Project, then which of its Jobs (a project normally has one, but legacy + bid-backed duplicates can leave more than one until merged) — since a Change Order can never exist without a Job (enforced server-side in `createChangeOrder()`, not just a UI nicety). If the chosen project has no Job yet, the picker stops with a clear message rather than silently offering to create one — Jobs come from an award or an explicit Legacy Job, never invented on the fly by the CO form. Falls through to the same per-job "+ Add Change Order" form used from within a project's hierarchy — no duplicated form logic.
+
 ### 2.1a Submission outcome lifecycle (per customer)
 
 Each `BidSubmission` carries its own `outcome` (`pending` → `awarded` | `not_awarded`) and its own `next_followup_date`. A bid with three customers has three independent submissions, each followed up and resolved separately.

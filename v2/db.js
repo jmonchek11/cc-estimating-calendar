@@ -578,6 +578,36 @@ async function addBidCustomers(id, data) {
   return { bid_id: bid._id, added };
 }
 
+// Remove a customer mistakenly added to a bid. Blocked if a submission
+// already exists for that company on this bid, or if they're the awarded
+// company — those represent real activity, not a roster mistake, and
+// deleting the row would silently orphan that history.
+async function removeBidCustomer(bidCustomerId) {
+  const M = getModels();
+  const bc = await M.BidCustomer.findById(Number(bidCustomerId)).lean();
+  if (!bc) throw new Error('Customer not found on this bid');
+  const hasSubmission = await M.BidSubmission.exists({ bid_id: bc.bid_id, company_id: bc.company_id });
+  if (hasSubmission) throw new Error('Can’t remove — this customer already has a submission on this bid.');
+  const bid = await M.Bid.findById(bc.bid_id).lean();
+  if (bid?.awarded_company_id === bc.company_id) throw new Error('Can’t remove the awarded company.');
+  await M.BidCustomer.deleteOne({ _id: bc._id });
+  return { ok: true };
+}
+
+// Standalone company creation (Contacts page "+ New Company") — same fields
+// the JIS importer captures, for when there's no bid/contact context yet.
+async function createCompanyV2(data) {
+  const M = getModels();
+  require_(data, ['name']);
+  const id = await nextId('companies');
+  await M.Company.create({
+    _id: id, name: data.name.trim(),
+    street: data.street || null, city: data.city || null, state: data.state || null, zip: data.zip || null,
+    phone: data.phone || null, domain: data.domain || null,
+  });
+  return { id };
+}
+
 // The bid's follow-up date is a rollup: the earliest next_followup_date among
 // its still-pending submissions (for dashboard/digest "overdue" queries).
 async function recomputeBidFollowup(bidId) {
@@ -1478,4 +1508,5 @@ module.exports = {
   addReminder, dismissReminder, deleteReminder, getRemindersFor, getDueReminders, markReminderEmailed,
   getDigest,
   getTeamV2, createTeamMemberV2, updateTeamMemberV2, updateSettingsV2, getSettings,
+  removeBidCustomer, createCompanyV2,
 };

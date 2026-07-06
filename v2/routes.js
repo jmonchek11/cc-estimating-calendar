@@ -127,6 +127,7 @@ router.delete('/api/v2/admin/override/:id',    requireAdmin, t(req => v2db.remov
 router.post('/api/v2/bids/:id/close',         t(req => v2db.closeBid(req.params.id, req.body)));
 router.post('/api/v2/bids/:id/submissions',   t(req => v2db.addSubmission(req.params.id, req.body)));
 router.post('/api/v2/bids/:id/customers',     t(req => v2db.addBidCustomers(req.params.id, req.body)));
+router.delete('/api/v2/bid-customers/:id',    t(req => v2db.removeBidCustomer(req.params.id)));
 
 // Per-submission win/loss
 router.post('/api/v2/submissions/:id/award', async (req, res) => {
@@ -161,6 +162,7 @@ router.patch('/api/v2/contacts/:id',     t(req => v2db.updateContact(req.params.
 router.delete('/api/v2/contacts/:id',    t(req => v2db.deleteContact(req.params.id)));
 
 router.get('/api/v2/companies/:id/bids', async (req, res) => { try { res.json(await v2db.getCompanyBids(req.params.id)); } catch (e) { res.status(500).json({ error: e.message }); } });
+router.post('/api/v2/companies',         t(req => v2db.createCompanyV2(req.body)));
 
 // Per-bid-customer contact linking (bid flyout's per-customer contact list)
 router.post('/api/v2/bid-customers/:id/contacts',              t(req => v2db.addBidCustomerContact(req.params.id, req.body.contact_id)));
