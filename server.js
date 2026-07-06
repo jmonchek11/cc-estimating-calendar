@@ -26,6 +26,12 @@ app.use(session({
   cookie: { maxAge: 8 * 60 * 60 * 1000 }
 }));
 
+// ── Cutover: v2 is now the primary app at "/". v1 stays reachable at
+// "/legacy" as a fallback. Must be registered BEFORE express.static, which
+// would otherwise auto-serve public/index.html (v1) for "/" on its own.
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'v2.html')));
+app.get('/legacy', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+
 // Serve static files before auth middleware
 app.use(express.static(path.join(__dirname, 'public')));
 

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>v2 Preview — LIS Estimating</title>
+<title>LIS Estimating Calendar</title>
 <link rel="icon" href="/favicon.ico">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -146,7 +146,6 @@
     <nav id="sidebar">
       <div class="sidebar-header">
         <div class="logo"><img src="logo.png" alt="Liberty Integrated Solutions" style="width:100%;max-width:160px;object-fit:contain;padding:4px 0" /></div>
-        <div style="font-size:11px;font-weight:800;color:#f59e0b;text-align:center;letter-spacing:.6px;margin-top:2px">V2 PREVIEW</div>
       </div>
       <div class="sidebar-search-wrap">
         <div class="sidebar-search-inner">
@@ -178,7 +177,9 @@
       <div class="nav-section-label">DATA</div>
       <a class="nav-item" data-page="health" href="#health" onclick="navigate('health');return false"><span class="nav-icon">🩺</span> Data Health</a>
       <a class="nav-item" data-page="settings" href="#settings" onclick="navigate('settings');return false"><span class="nav-icon">⚙️</span> Settings</a>
-      <a class="nav-item" href="/" style="margin-top:auto"><span class="nav-icon">↩</span> Back to live app</a>
+      <div id="sidebar-user" style="margin-top:auto;padding:10px 16px;font-size:11.5px;color:var(--text-muted)"></div>
+      <a class="nav-item" href="/legacy"><span class="nav-icon">↩</span> Old version (legacy)</a>
+      <a class="nav-item" href="#" onclick="actLogout();return false"><span class="nav-icon">🚪</span> Sign out</a>
     </nav>
     <main id="main"><div style="padding:30px;color:var(--text-muted)">Loading…</div></main>
   </div>
@@ -225,7 +226,17 @@ function setActiveNav(page) {
 }
 
 async function ensureMeta() {
-  if (!META.companies.length) { META = await api('GET', '/api/v2/meta'); CURRENT_USER = META.current_user; }
+  if (META.companies.length) return;
+  const r = await fetch('/api/v2/meta');
+  if (r.status === 401) {
+    // Login itself still lives on the old page (/legacy) — send the user
+    // there and bring them right back here once they're signed in.
+    window.location.href = '/legacy?returnTo=' + encodeURIComponent(location.pathname + location.hash);
+    return new Promise(() => {}); // navigating away — never resolve, don't render a flash of "error"
+  }
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+  META = data; CURRENT_USER = META.current_user;
 }
 
 // Tracks the current page so post-action refresh() re-renders the right view
@@ -886,7 +897,7 @@ async function load() {
   let projects;
   try {
     const r = await fetch('/api/v2/projects');
-    if (r.status === 401) { main.innerHTML = '<div class="err-card" style="margin:20px">Not logged in. <a href="/">Log in on the main app</a> first, then come back to /v2.</div>'; return; }
+    if (r.status === 401) { window.location.href = '/legacy?returnTo=' + encodeURIComponent(location.pathname + location.hash); return; }
     projects = await r.json();
     ALL_PROJECTS = projects.map(p => ({ id: p.id, name: p.name }));
     await ensureMeta();
@@ -2348,8 +2359,15 @@ function renderJISReview(p) {
   };
 }
 
+async function actLogout() {
+  try { await fetch('/api/auth/logout', { method: 'POST' }); } catch {}
+  window.location.href = '/legacy';
+}
+
 async function bootstrap() {
-  try { await ensureMeta(); } catch { /* not logged in — page renderers show the message */ }
+  try { await ensureMeta(); } catch { /* not logged in — ensureMeta already redirected, or a real error will surface per-page */ }
+  const userEl = document.getElementById('sidebar-user');
+  if (userEl && CURRENT_USER) userEl.textContent = CURRENT_USER.name + (CURRENT_USER.is_admin ? ' (admin)' : '');
   navigate('dashboard');
 }
 bootstrap();

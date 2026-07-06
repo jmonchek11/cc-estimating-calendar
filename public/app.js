@@ -5740,6 +5740,8 @@ async function submitLogin() {
       const cpOverlay = document.getElementById('change-password-overlay');
       cpOverlay.style.display = 'flex';
     } else {
+      const returnTo = new URLSearchParams(location.search).get('returnTo');
+      if (returnTo) { window.location.href = returnTo; return; }
       hideLoginOverlay();
       updateSidebarUser(member);
       await onHashChange();
@@ -5777,6 +5779,8 @@ async function submitNewPassword() {
     await api.post('/api/auth/set-password', { password: pwd });
     State.currentUser.must_change_password = false;
     document.getElementById('change-password-overlay').style.display = 'none';
+    const returnTo = new URLSearchParams(location.search).get('returnTo');
+    if (returnTo) { window.location.href = returnTo; return; }
     hideLoginOverlay();
     updateSidebarUser(State.currentUser);
     await onHashChange();
