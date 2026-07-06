@@ -415,13 +415,17 @@ async function renderSettings() {
   const roleLabel = { estimator: 'Estimator', sales: 'Salesperson' };
 
   const teamRows = team.map(m => `
-    <div class="proj-row" style="${m.active ? '' : 'opacity:.5'}" ${isAdmin ? `onclick="actEditTeamMember(${m.id})"` : ''}>
+    <div class="proj-row" style="${m.active ? '' : 'opacity:.5'}">
       <div style="flex:1;min-width:0">
         <div class="proj-name">${esc(m.name)} <span class="initials-pill">${esc(m.initials)}</span>
-          ${!m.active ? '<span class="badge" style="background:#e2e8f0;color:#64748b">INACTIVE</span>' : ''}</div>
+          ${!m.active ? '<span class="badge" style="background:#e2e8f0;color:#64748b">INACTIVE</span>' : ''}
+          ${m.has_password === false ? '<span class="badge" style="background:#fef3c7;color:#b45309">NO PASSWORD SET</span>' : ''}</div>
         <div class="proj-meta">${roleLabel[m.role] || esc(m.role)}${m.email ? ` · ${esc(m.email)}` : ''}</div>
       </div>
-      ${isAdmin ? '<span style="color:var(--text-muted)">✏️</span>' : ''}
+      ${isAdmin ? `<div class="v2-actions" style="margin:0">
+        <button class="v2-btn outline" style="padding:5px 10px;font-size:11px" onclick="actEditTeamMember(${m.id})">✏️ Edit</button>
+        <button class="v2-btn outline" style="padding:5px 10px;font-size:11px" onclick="actResetTeamPassword(${m.id},'${esc(m.name)}')">🔑 Set Password</button>
+      </div>` : ''}
     </div>`).join('');
 
   main.innerHTML = `
@@ -479,6 +483,11 @@ function actEditTeamMember(id) {
     { id: 'active', label: 'Active', type: 'select', required: true, value: m?.active ? '1' : '0', options: [{ value: '1', label: 'Active' }, { value: '0', label: 'Inactive' }] },
   ], data => api('PATCH', `/api/v2/team/${id}`, { ...data, active: Number(data.active) }), 'Save');
 }
+function actResetTeamPassword(id, name) {
+  showForm(`🔑 Set Password — ${esc(name)}`, [
+    { id: 'temp_password', label: 'Temporary Password', type: 'text', required: true, placeholder: 'They\'ll be asked to change it on first login' },
+  ], data => api('POST', `/api/team/${id}/reset-password`, data), 'Set Password', 'amber');
+}
 async function actSaveFollowupSettings() {
   try {
     await api('PUT', '/api/v2/settings', {
@@ -507,53 +516,62 @@ const estimatorColor = (id) => id ? ESTIMATOR_PALETTE[Number(id) % ESTIMATOR_PAL
 let CAL_STATE = { year: new Date().getFullYear(), month: new Date().getMonth(), filter: 'all' };
 let CAL_DAY_MAP = {};
 
+async function fetchCalendarItems() {
+  const [opp, active, sub, activeCo, subCo] = await Promise.all([
+    api('GET', '/api/v2/bid-list?stage=opportunity'), api('GET', '/api/v2/bid-list?stage=active_bid'), api('GET', '/api/v2/bid-list?stage=submitted'),
+    api('GET', '/api/v2/co-list?stage=active_co'), api('GET', '/api/v2/co-list?stage=submitted_co'),
+  ]);
+  return [
+    ...[...opp, ...active, ...sub].map(b => ({ kind: 'bid', id: b.id, project_id: b.project_id, title: b.project, label: b.bid_number, due_date: b.due_date, next_followup_date: b.next_followup_date, estimator: b.estimator, salesperson: b.salesperson, customer: (b.customers || []).join(', '), stage: b.stage })),
+    ...[...activeCo, ...subCo].map(c => ({ kind: 'co', id: c.id, project_id: c.project_id, title: `${c.co_number} — ${c.name}`, label: c.project, due_date: c.due_date, next_followup_date: c.next_followup_date, estimator: c.estimator, salesperson: null, customer: null, stage: c.stage })),
+  ];
+}
+function calendarLegendHtml() {
+  const estimators = (META.team || []).filter(m => m.role === 'estimator');
+  return [
+    ...estimators.map(m => `<span class="cal-legend-item"><span class="cal-legend-dot" style="background:${estimatorColor(m.id)}"></span>${esc(m.initials)}</span>`),
+    `<span class="cal-legend-item"><span class="cal-legend-dot" style="background:#1e293b;border:1px dashed #94a3b8"></span>Follow-up</span>`,
+  ].join('');
+}
+function calendarControlsHtml(reRenderFn) {
+  const { year, month, filter } = CAL_STATE;
+  const monthName = new Date(year, month, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  return `<div class="cal-controls">
+      <button class="v2-btn outline" style="padding:6px 12px;font-size:12px" onclick="navCalendar(-1)">‹ Prev</button>
+      <span class="cal-month-label">${esc(monthName)}</span>
+      <button class="v2-btn outline" style="padding:6px 12px;font-size:12px" onclick="navCalendar(1)">Next ›</button>
+      <button class="v2-btn outline" style="padding:6px 12px;font-size:12px" onclick="CAL_STATE.year=new Date().getFullYear();CAL_STATE.month=new Date().getMonth();${reRenderFn}()">Today</button>
+      <select class="cal-filter-select" onchange="CAL_STATE.filter=this.value;${reRenderFn}()">
+        <option value="all" ${filter === 'all' ? 'selected' : ''}>Due Dates + Follow-ups</option>
+        <option value="due_only" ${filter === 'due_only' ? 'selected' : ''}>Due Dates Only</option>
+        <option value="followups_only" ${filter === 'followups_only' ? 'selected' : ''}>Follow-ups Only</option>
+      </select>
+    </div>`;
+}
+
 async function renderCalendar() {
   setActiveNav('calendar');
   const main = document.getElementById('main');
   main.innerHTML = '<div style="padding:30px;color:var(--text-muted)">Loading…</div>';
   let items;
-  try {
-    await ensureMeta();
-    const [opp, active, sub, activeCo, subCo] = await Promise.all([
-      api('GET', '/api/v2/bid-list?stage=opportunity'), api('GET', '/api/v2/bid-list?stage=active_bid'), api('GET', '/api/v2/bid-list?stage=submitted'),
-      api('GET', '/api/v2/co-list?stage=active_co'), api('GET', '/api/v2/co-list?stage=submitted_co'),
-    ]);
-    items = [
-      ...[...opp, ...active, ...sub].map(b => ({ kind: 'bid', id: b.id, project_id: b.project_id, title: b.project, label: b.bid_number, due_date: b.due_date, next_followup_date: b.next_followup_date, estimator: b.estimator, salesperson: b.salesperson, customer: (b.customers || []).join(', '), stage: b.stage })),
-      ...[...activeCo, ...subCo].map(c => ({ kind: 'co', id: c.id, project_id: c.project_id, title: `${c.co_number} — ${c.name}`, label: c.project, due_date: c.due_date, next_followup_date: c.next_followup_date, estimator: c.estimator, salesperson: null, customer: null, stage: c.stage })),
-    ];
-  } catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
+  try { await ensureMeta(); items = await fetchCalendarItems(); }
+  catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
 
   const { year, month, filter } = CAL_STATE;
-  const monthName = new Date(year, month, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-  const estimators = (META.team || []).filter(m => m.role === 'estimator');
-  const legendHtml = [
-    ...estimators.map(m => `<span class="cal-legend-item"><span class="cal-legend-dot" style="background:${estimatorColor(m.id)}"></span>${esc(m.initials)}</span>`),
-    `<span class="cal-legend-item"><span class="cal-legend-dot" style="background:#1e293b;border:1px dashed #94a3b8"></span>Follow-up</span>`,
-  ].join('');
-
   main.innerHTML = `
     <div class="page-header"><div><div class="page-title">🗓️ Calendar</div></div></div>
-    <div class="cal-controls">
-      <button class="v2-btn outline" style="padding:6px 12px;font-size:12px" onclick="navCalendar(-1)">‹ Prev</button>
-      <span class="cal-month-label">${esc(monthName)}</span>
-      <button class="v2-btn outline" style="padding:6px 12px;font-size:12px" onclick="navCalendar(1)">Next ›</button>
-      <button class="v2-btn outline" style="padding:6px 12px;font-size:12px" onclick="CAL_STATE.year=new Date().getFullYear();CAL_STATE.month=new Date().getMonth();renderCalendar()">Today</button>
-      <select class="cal-filter-select" onchange="CAL_STATE.filter=this.value;renderCalendar()">
-        <option value="all" ${filter === 'all' ? 'selected' : ''}>Due Dates + Follow-ups</option>
-        <option value="due_only" ${filter === 'due_only' ? 'selected' : ''}>Due Dates Only</option>
-        <option value="followups_only" ${filter === 'followups_only' ? 'selected' : ''}>Follow-ups Only</option>
-      </select>
-    </div>
+    ${calendarControlsHtml('renderCalendar')}
     ${buildCalendarGrid(year, month, items, filter)}
-    <div class="cal-legend">${legendHtml}</div>`;
+    <div class="cal-legend">${calendarLegendHtml()}</div>`;
 }
 
 function navCalendar(dir) {
   let m = CAL_STATE.month + dir, y = CAL_STATE.year;
   if (m < 0) { m = 11; y--; } if (m > 11) { m = 0; y++; }
   CAL_STATE.month = m; CAL_STATE.year = y;
-  renderCalendar();
+  // The calendar shows up both as its own page and embedded on the
+  // dashboard — re-render whichever one is actually on screen.
+  (VIEW.name === 'calendar' ? renderCalendar : renderDashboard)();
 }
 
 function buildCalendarGrid(year, month, items, filter) {
@@ -938,11 +956,12 @@ async function load() {
 
 // ── Dashboard page (v2 data) ──
 async function renderDashboard() {
+  VIEW = { name: 'dashboard' };
   setActiveNav('dashboard');
   const main = document.getElementById('main');
   main.innerHTML = '<div style="padding:30px;color:var(--text-muted)">Loading…</div>';
-  let d;
-  try { await ensureMeta(); d = await api('GET', '/api/v2/dashboard'); }
+  let d, calItems;
+  try { await ensureMeta(); [d, calItems] = await Promise.all([api('GET', '/api/v2/dashboard'), fetchCalendarItems()]); }
   catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
 
   const stat = (label, value, sub, color) => `
@@ -984,6 +1003,12 @@ async function renderDashboard() {
             <span class="amount" style="font-size:12px">${fmt$(b.amount)}</span>
           </div>`).join('') : '<div class="text-muted" style="font-size:13px;padding:6px 0">No awards in the last 30 days</div>'}
       </div>
+    </div>
+    <div class="card" style="margin-top:18px;padding:16px">
+      <div class="section-title" style="margin-bottom:10px">🗓️ Calendar</div>
+      ${calendarControlsHtml('renderDashboard')}
+      ${buildCalendarGrid(CAL_STATE.year, CAL_STATE.month, calItems, CAL_STATE.filter)}
+      <div class="cal-legend">${calendarLegendHtml()}</div>
     </div>`;
 }
 

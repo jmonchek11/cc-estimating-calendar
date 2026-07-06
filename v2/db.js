@@ -285,7 +285,7 @@ async function getMeta() {
 async function getTeamV2() {
   const M = getModels();
   const team = await M.TeamMember.find().sort({ name: 1 }).lean();
-  return team.map(t => ({ id: t._id, name: t.name, initials: t.initials, role: t.role, email: t.email, active: !!t.active, is_admin: !!t.is_admin }));
+  return team.map(t => ({ id: t._id, name: t.name, initials: t.initials, role: t.role, email: t.email, active: !!t.active, is_admin: !!t.is_admin, has_password: !!t.password_hash }));
 }
 async function createTeamMemberV2({ name, initials, role, email, temp_password }) {
   require_({ name, initials, role }, ['name', 'initials', 'role']);
