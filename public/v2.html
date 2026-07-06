@@ -148,6 +148,18 @@
         <div class="logo"><img src="logo.png" alt="Liberty Integrated Solutions" style="width:100%;max-width:160px;object-fit:contain;padding:4px 0" /></div>
         <div style="font-size:11px;font-weight:800;color:#f59e0b;text-align:center;letter-spacing:.6px;margin-top:2px">V2 PREVIEW</div>
       </div>
+      <div class="sidebar-search-wrap">
+        <div class="sidebar-search-inner">
+          <span class="sidebar-search-icon">🔍</span>
+          <input type="text" id="global-search-input" class="sidebar-search-input"
+                 placeholder="Search bids, COs, projects, companies…"
+                 oninput="debounceGlobalSearch()"
+                 onkeydown="if(event.key==='Escape')clearGlobalSearch()"
+                 autocomplete="off" />
+          <button id="sidebar-search-clear" class="sidebar-search-clear" onclick="clearGlobalSearch()" style="display:none" title="Clear">✕</button>
+        </div>
+      </div>
+
       <div class="nav-section-label">PIPELINE</div>
       <a class="nav-item" data-page="dashboard" href="#dashboard" onclick="navigate('dashboard');return false"><span class="nav-icon">⬛</span> Dashboard</a>
       <div class="nav-section-label">BIDS</div>
@@ -223,11 +235,13 @@ function navigate(page) {
   if (page === 'submitted-bids') { VIEW = { name: 'bidlist', arg: 'submitted' }; return renderBidList('submitted'); }
   if (page === 'active-cos') { VIEW = { name: 'colist', arg: 'active_co' }; return renderCoList('active_co'); }
   if (page === 'submitted-cos') { VIEW = { name: 'colist', arg: 'submitted_co' }; return renderCoList('submitted_co'); }
+  if (page === 'search') { VIEW = { name: 'search' }; return renderSearchResults(); }
   VIEW = { name: 'projects' }; return load();
 }
 
 async function rerenderView() {
   switch (VIEW.name) {
+    case 'search':    return renderSearchResults();
     case 'projects':  return load();
     case 'project':   return renderProjectPage(VIEW.arg);
     case 'bidlist':   return renderBidList(VIEW.arg);
@@ -235,6 +249,122 @@ async function rerenderView() {
     case 'dashboard': return renderDashboard();
     case 'health':    return showHealth();
   }
+}
+
+// ── Global search (sidebar box, Ctrl/Cmd+K) ───────────────────────────────────
+let GLOBAL_SEARCH = '';
+let globalSearchTimer;
+function debounceGlobalSearch() {
+  clearTimeout(globalSearchTimer);
+  const q = (document.getElementById('global-search-input')?.value || '').trim();
+  GLOBAL_SEARCH = q;
+  const clearBtn = document.getElementById('sidebar-search-clear');
+  if (clearBtn) clearBtn.style.display = q ? 'block' : 'none';
+  if (q.length < 2) { if (VIEW.name === 'search') renderSearchResults(); return; }
+  globalSearchTimer = setTimeout(() => { if (VIEW.name !== 'search') navigate('search'); else renderSearchResults(); }, 280);
+}
+function clearGlobalSearch() {
+  GLOBAL_SEARCH = '';
+  const inp = document.getElementById('global-search-input');
+  if (inp) { inp.value = ''; inp.blur(); }
+  const clearBtn = document.getElementById('sidebar-search-clear');
+  if (clearBtn) clearBtn.style.display = 'none';
+  if (VIEW.name === 'search') navigate('dashboard');
+}
+document.addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); document.getElementById('global-search-input')?.focus(); }
+});
+
+const BID_STAGE_ORDER = ['active_bid', 'submitted', 'opportunity', 'awarded', 'not_awarded', 'closed'];
+const CO_STAGE_ORDER = ['active_co', 'submitted_co', 'approved', 'not_approved', 'voided'];
+
+async function renderSearchResults() {
+  setActiveNav(null);
+  const main = document.getElementById('main');
+  const inp = document.getElementById('global-search-input');
+  const q = (inp?.value || GLOBAL_SEARCH || '').trim();
+  GLOBAL_SEARCH = q;
+  const clearBtn = document.getElementById('sidebar-search-clear');
+  if (clearBtn) clearBtn.style.display = q ? 'block' : 'none';
+
+  if (q.length < 2) {
+    main.innerHTML = `
+      <div class="page-header"><div><div class="page-title">🔍 Search</div></div></div>
+      <div style="padding:40px 20px;text-align:center;color:var(--text-muted)">
+        <div style="font-size:32px;margin-bottom:10px">🔍</div>
+        <div style="font-weight:700;color:var(--text);margin-bottom:6px">Search everything</div>
+        <div>Type in the search bar on the left to find any bid or change order across <strong>all stages</strong> —<br>by project name, bid #, CO #, job #, or company.</div>
+        <div style="font-size:12px;margin-top:10px">Tip: press <kbd style="background:#e2e8f0;padding:1px 5px;border-radius:3px;font-size:11px">Ctrl K</kbd> to focus the search bar from anywhere.</div>
+      </div>`;
+    if (inp) setTimeout(() => inp.focus(), 50);
+    return;
+  }
+
+  main.innerHTML = '<div style="padding:30px;color:var(--text-muted)">Searching…</div>';
+  let results;
+  try { results = await api('GET', '/api/v2/search?q=' + encodeURIComponent(q)); }
+  catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
+
+  const total = results.bids.length + results.change_orders.length;
+  if (!total) {
+    main.innerHTML = `
+      <div class="page-header"><div><div class="page-title">🔍 Search Results</div><div class="page-subtitle">No results for "<strong>${esc(q)}</strong>"</div></div></div>
+      <div style="padding:40px 20px;text-align:center;color:var(--text-muted)">
+        <div style="font-size:32px;margin-bottom:10px">😶</div>
+        <div>No bids or change orders matched "<strong>${esc(q)}</strong>".<br>Try a project name, bid #, CO #, job #, or company name.</div>
+      </div>`;
+    return;
+  }
+
+  const bidGroups = {}; results.bids.forEach(b => (bidGroups[b.stage] = bidGroups[b.stage] || []).push(b));
+  const coGroups = {}; results.change_orders.forEach(c => (coGroups[c.stage] = coGroups[c.stage] || []).push(c));
+
+  const bidSection = (stage) => {
+    const items = bidGroups[stage]; if (!items?.length) return '';
+    return `<div style="margin-bottom:18px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+        <div style="font-weight:700;font-size:13px;color:${STAGE_COLOR[stage]}">${STAGE[stage]}</div>
+        <span class="badge" style="background:${STAGE_COLOR[stage]};color:#fff">${items.length}</span>
+      </div>
+      <div class="card" style="padding:0">${items.map(b => `
+        <div class="proj-row" onclick="openBidFlyout(${b.project_id},${b.id})">
+          <div style="flex:1;min-width:0">
+            <div class="proj-name">${esc(b.project)}${b.bid_number ? ` <span style="color:var(--text-muted);font-weight:400;font-size:12px">#${esc(b.bid_number)}</span>` : ''}</div>
+            <div class="proj-meta">
+              ${b.customers.length ? esc(b.customers.join(', ')) : '<span style="color:#dc2626">no customer</span>'}
+              ${b.estimator ? `<span class="proj-meta-sep">·</span> Est ${ini(b.estimator)}` : ''}
+              ${b.salesperson ? ` Sales ${ini(b.salesperson)}` : ''}
+            </div>
+          </div>
+          <div style="text-align:right;flex-shrink:0">${b.estimate_amount ? `<span class="amount" style="font-size:13px">${fmt$(b.estimate_amount)}</span>` : ''}</div>
+        </div>`).join('')}</div>
+    </div>`;
+  };
+  const coSection = (stage) => {
+    const items = coGroups[stage]; if (!items?.length) return '';
+    return `<div style="margin-bottom:18px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+        <div style="font-weight:700;font-size:13px;color:${STAGE_COLOR[stage]}">CO — ${STAGE[stage]}</div>
+        <span class="badge" style="background:${STAGE_COLOR[stage]};color:#fff">${items.length}</span>
+      </div>
+      <div class="card" style="padding:0">${items.map(c => `
+        <div class="proj-row" onclick="openCoFlyout(${c.project_id},${c.id})">
+          <div style="flex:1;min-width:0">
+            <div class="proj-name"><span style="color:#d97706">${esc(c.co_number)}</span> ${esc(c.name)}</div>
+            <div class="proj-meta">
+              ${esc(c.project)}${c.job_number ? ` <span class="proj-meta-sep">·</span> Job ${esc(c.job_number)}` : ''}
+              ${c.estimator ? `<span class="proj-meta-sep">·</span> Est ${ini(c.estimator)}` : ''}
+            </div>
+          </div>
+          <div style="text-align:right;flex-shrink:0">${c.estimate_amount ? `<span class="amount" style="font-size:13px">${fmt$(c.estimate_amount)}</span>` : ''}</div>
+        </div>`).join('')}</div>
+    </div>`;
+  };
+
+  main.innerHTML = `
+    <div class="page-header"><div><div class="page-title">🔍 Search Results</div><div class="page-subtitle">${total} result${total !== 1 ? 's' : ''} for "<strong>${esc(q)}</strong>"</div></div></div>
+    ${BID_STAGE_ORDER.map(bidSection).join('')}
+    ${CO_STAGE_ORDER.map(coSection).join('')}`;
 }
 
 const BID_LIST_META = {

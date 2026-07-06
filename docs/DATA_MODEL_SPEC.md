@@ -432,7 +432,7 @@ Features built in v1, mapped onto the new model:
 | Project panel hierarchy (awarded bold, COs nested) | ✅ improved | No more isCO guessing |
 | Bid flyout (details, contacts, reminders, lifecycle, View Project →) | ✅ | Lifecycle section reads Job + ChangeOrders directly |
 | Filters (person, "mine only") + sorting on bid/CO list pages | ✅ Built | Client-side toolbar on each list page (`v2.html` filterBarHtml/renderBidListBody/renderCoListBody) — search box, estimator/salesperson dropdown, mine-only toggle, sort-by dropdown (due date / follow-up date / amount / project name). Filter state persists per stage while navigating. |
-| Global search | ⚠️ Planned, not yet built | v1 only searched Bid fields; v2's version should also match Company name, job #, and CO # since those are now real entities, not free text |
+| Global search | ✅ Built, improved | Sidebar box + Ctrl/Cmd+K (`v2/db.js` getSearchResults, `/api/v2/search`). Unlike v1 (Bid fields only), matches project name, bid #, CO #, job #, and Company name — real entities now, not free text. Results grouped by stage, Bids and Change Orders shown separately. Contact matching deferred until the Contacts UI exists (next). |
 | Contact/company profile modals + bid history | ✅ improved | Real Company entity makes per-customer stats exact |
 | Estimator profiles + stats | ✅ | |
 | IBEW jurisdiction picker | ✅ | Moves into the Submit Bid modal (it's a submission-time field) |

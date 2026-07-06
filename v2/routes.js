@@ -48,6 +48,11 @@ router.get('/api/v2/co-list', async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+router.get('/api/v2/search', async (req, res) => {
+  try { res.json(await v2db.getSearchResults(req.query.q)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.get('/api/v2/health', async (req, res) => {
   try { res.json(await v2db.getDataHealth()); }
   catch (e) { res.status(500).json({ error: e.message }); }

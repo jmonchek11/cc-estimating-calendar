@@ -788,6 +788,59 @@ function _clusterSimilar(items, ignore) {
 }
 
 // ── Bid list for a stage (working views) ──────────────────────────────────────
+// ── Global search — across Bids AND Change Orders, all stages ────────────────
+// Unlike v1 (which only regex-matched Bid.project_name/bid_number/customer/
+// job_number, since those were the only fields it had), v2 can match on the
+// real entities: Company name (via BidCustomer), Job #, and CO # — no more
+// free-text customer guessing. Contact search is added once the Contacts UI
+// exists (v1 parity item, tracked separately).
+async function getSearchResults(q) {
+  const M = getModels();
+  const needle = String(q || '').trim().toLowerCase();
+  if (needle.length < 2) return { bids: [], change_orders: [] };
+
+  const [bids, cos, jobs, projects, companies, members, bidCustomers] = await Promise.all([
+    M.Bid.find({ superseded: { $ne: 1 } }).lean(),
+    M.ChangeOrder.find().lean(),
+    M.Job.find().lean(),
+    M.Project.find().lean(),
+    M.Company.find().lean(),
+    M.TeamMember.find().lean(),
+    M.BidCustomer.find().lean(),
+  ]);
+  const pName = {}; projects.forEach(p => pName[p._id] = p.name);
+  const coName = {}; companies.forEach(c => coName[c._id] = c.name);
+  const jobById = {}; jobs.forEach(j => jobById[j._id] = j);
+  const tm = teamMap(members);
+  const custByBid = {}; bidCustomers.forEach(bc => (custByBid[bc.bid_id] = custByBid[bc.bid_id] || []).push(coName[bc.company_id]));
+  const hit = (...fields) => fields.some(f => f && String(f).toLowerCase().includes(needle));
+
+  const matchedBids = bids
+    .filter(b => hit(pName[b.project_id], b.bid_number, ...(custByBid[b._id] || [])))
+    .map(b => ({
+      id: b._id, project_id: b.project_id, project: pName[b.project_id] || '—',
+      bid_number: b.bid_number, stage: b.stage,
+      estimator: tm[b.estimator_id] || null, salesperson: tm[b.salesperson_id] || null,
+      customers: [...new Set((custByBid[b._id] || []).filter(Boolean))],
+      estimate_amount: b.estimate_amount, due_date: b.due_date, next_followup_date: b.next_followup_date,
+    }));
+
+  const matchedCos = cos
+    .filter(c => { const j = jobById[c.job_id]; return hit(c.co_number, c.name, j?.job_number, j ? pName[j.project_id] : null); })
+    .map(c => {
+      const job = jobById[c.job_id];
+      return {
+        id: c._id, co_number: c.co_number, name: c.name, stage: c.stage,
+        project: job ? (pName[job.project_id] || '—') : '—', project_id: job ? job.project_id : null,
+        job_number: job ? job.job_number : null,
+        estimator: tm[c.estimator_id] || null, due_date: c.due_date,
+        estimate_amount: c.estimate_amount, next_followup_date: c.next_followup_date,
+      };
+    });
+
+  return { bids: matchedBids, change_orders: matchedCos };
+}
+
 async function getBidList(stage) {
   const M = getModels();
   const bids = await M.Bid.find({ stage, superseded: { $ne: 1 } }).sort({ due_date: 1, _id: 1 }).lean();
@@ -1104,7 +1157,7 @@ async function applyCleanupOverrides() {
 }
 
 module.exports = {
-  getProjects, getProjectDetail, getMeta, getDashboard, getBidList, getCoList, getDataHealth, mergeProjects, mergeCompanies, mergeJobs,
+  getProjects, getProjectDetail, getMeta, getDashboard, getBidList, getCoList, getSearchResults, getDataHealth, mergeProjects, mergeCompanies, mergeJobs,
   dismissDuplicates, deleteEmptyProject, applyCleanupOverrides, removeOverride,
   recomputeBidHeadline, recomputeBidFollowup, nextId,
   createOpportunity, createDirectBid, startBid, submitBid, addSubmission, addBidCustomers, adminUpdate,
