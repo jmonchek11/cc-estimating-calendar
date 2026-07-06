@@ -1647,17 +1647,34 @@ function renderContactsBody() {
   if (q.trim()) { const n = q.trim().toLowerCase(); out = out.filter(c => [c.full_name, c.email, c.phone, c.company?.name].some(f => f && String(f).toLowerCase().includes(n))); }
 
   document.getElementById('ct-count').textContent = `${out.length} of ${rows.length} contacts`;
-  document.getElementById('ct-body').innerHTML = out.length ? out.map(c => `
+
+  // Group by company, sorted A-Z; "No Company" (nothing on file) always last.
+  const groups = {};
+  out.forEach(c => { const key = c.company?.name || '￿'; (groups[key] = groups[key] || []).push(c); });
+  const sortedKeys = Object.keys(groups).sort((a, b) => a.localeCompare(b));
+
+  const contactRow = (c) => `
     <div class="proj-row" onclick="openContactProfile(${c.id})">
       <div style="flex:1;min-width:0">
         <div class="proj-name">${esc(c.full_name)}</div>
         <div class="proj-meta">
-          ${c.company ? `<span onclick="event.stopPropagation();openCompanyProfile(${c.company.id})" style="cursor:pointer;color:#2563eb">${esc(c.company.name)}</span>` : '<span style="color:#dc2626">no company</span>'}
-          ${c.phone ? `<span class="proj-meta-sep">·</span> ${esc(c.phone)}` : ''}
-          ${c.email ? `<span class="proj-meta-sep">·</span> ${esc(c.email)}` : ''}
+          ${c.phone ? esc(c.phone) : ''}${c.phone && c.email ? '<span class="proj-meta-sep">·</span>' : ''}${c.email ? esc(c.email) : ''}
         </div>
       </div>
-    </div>`).join('') : '<div style="padding:24px;text-align:center;color:var(--text-muted)">No matches</div>';
+    </div>`;
+
+  document.getElementById('ct-body').innerHTML = out.length ? sortedKeys.map(key => {
+    const isNoCompany = key === '￿';
+    const contacts = groups[key];
+    const companyId = contacts[0].company?.id;
+    return `<div style="border-top:1px solid var(--border)">
+      <div style="padding:8px 16px;background:#f8fafc;font-weight:700;font-size:12px;color:${isNoCompany ? 'var(--text-muted)' : '#2563eb'};${!isNoCompany ? 'cursor:pointer' : ''}"
+        ${!isNoCompany ? `onclick="openCompanyProfile(${companyId})"` : ''}>
+        ${isNoCompany ? 'No Company' : '🏢 ' + esc(key)} <span style="font-weight:400;color:var(--text-muted)">(${contacts.length})</span>
+      </div>
+      ${contacts.map(contactRow).join('')}
+    </div>`;
+  }).join('') : '<div style="padding:24px;text-align:center;color:var(--text-muted)">No matches</div>';
 }
 
 function actNewContact(prefillCompanyId) {
