@@ -99,6 +99,20 @@ router.post('/api/v2/bids/:id/customers',     t(req => v2db.addBidCustomers(req.
 router.post('/api/v2/submissions/:id/award',        t(req => v2db.awardSubmission(req.params.id, req.body)));
 router.post('/api/v2/submissions/:id/not-awarded',  t(req => v2db.notAwardSubmission(req.params.id, req.body)));
 
+// ── Contacts ──────────────────────────────────────────────────────────────────
+router.get('/api/v2/contacts',           async (req, res) => { try { res.json(await v2db.getContacts(req.query)); } catch (e) { res.status(500).json({ error: e.message }); } });
+router.get('/api/v2/contacts/:id',       async (req, res) => { try { const c = await v2db.getContactDetail(req.params.id); if (!c) return res.status(404).json({ error: 'Not found' }); res.json(c); } catch (e) { res.status(500).json({ error: e.message }); } });
+router.get('/api/v2/contacts/:id/bids',  async (req, res) => { try { res.json(await v2db.getContactBids(req.params.id)); } catch (e) { res.status(500).json({ error: e.message }); } });
+router.post('/api/v2/contacts',          t(req => v2db.createContact(req.body)));
+router.patch('/api/v2/contacts/:id',     t(req => v2db.updateContact(req.params.id, req.body)));
+router.delete('/api/v2/contacts/:id',    t(req => v2db.deleteContact(req.params.id)));
+
+router.get('/api/v2/companies/:id/bids', async (req, res) => { try { res.json(await v2db.getCompanyBids(req.params.id)); } catch (e) { res.status(500).json({ error: e.message }); } });
+
+// Per-bid-customer contact linking (bid flyout's per-customer contact list)
+router.post('/api/v2/bid-customers/:id/contacts',              t(req => v2db.addBidCustomerContact(req.params.id, req.body.contact_id)));
+router.delete('/api/v2/bid-customers/:id/contacts/:contactId', t(req => v2db.removeBidCustomerContact(req.params.id, req.params.contactId)));
+
 // ── Follow-ups (bid_submission or change_order parent) ────────────────────────
 router.post('/api/v2/followups',              t(req => v2db.logFollowupV2({ ...req.body, contacted_by: req.body.contacted_by || req.session.userId })));
 

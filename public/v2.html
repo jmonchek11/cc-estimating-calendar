@@ -171,6 +171,8 @@
       <a class="nav-item" data-page="submitted-cos" href="#submitted-cos" onclick="navigate('submitted-cos');return false"><span class="nav-icon">📤</span> Submitted Change Orders</a>
       <div class="nav-section-label">PROJECTS</div>
       <a class="nav-item" data-page="projects" href="#projects" onclick="navigate('projects');return false"><span class="nav-icon">🏗️</span> Projects</a>
+      <div class="nav-section-label">PEOPLE</div>
+      <a class="nav-item" data-page="contacts" href="#contacts" onclick="navigate('contacts');return false"><span class="nav-icon">👤</span> Contacts</a>
       <div class="nav-section-label">DATA</div>
       <a class="nav-item" data-page="health" href="#health" onclick="navigate('health');return false"><span class="nav-icon">🩺</span> Data Health</a>
       <a class="nav-item" href="/" style="margin-top:auto"><span class="nav-icon">↩</span> Back to live app</a>
@@ -236,12 +238,14 @@ function navigate(page) {
   if (page === 'active-cos') { VIEW = { name: 'colist', arg: 'active_co' }; return renderCoList('active_co'); }
   if (page === 'submitted-cos') { VIEW = { name: 'colist', arg: 'submitted_co' }; return renderCoList('submitted_co'); }
   if (page === 'search') { VIEW = { name: 'search' }; return renderSearchResults(); }
+  if (page === 'contacts') { VIEW = { name: 'contacts' }; return renderContacts(); }
   VIEW = { name: 'projects' }; return load();
 }
 
 async function rerenderView() {
   switch (VIEW.name) {
     case 'search':    return renderSearchResults();
+    case 'contacts':  return renderContacts();
     case 'projects':  return load();
     case 'project':   return renderProjectPage(VIEW.arg);
     case 'bidlist':   return renderBidList(VIEW.arg);
@@ -769,9 +773,8 @@ function bidNode(b) {
           ${(b.submissions || []).filter(s => s.is_current).length > 1 ? `<span class="badge" style="background:#dbeafe;color:#1e40af">${b.submissions.filter(s => s.is_current).length} customers</span>` : ''}
         </div>
         <div style="font-size:12px;color:var(--text-muted);margin-top:4px;line-height:1.6">
-          ${b.customers.length ? `Bid to: <strong style="color:var(--text)">${esc(b.customers.map(c=>c.name).join(', '))}</strong>` : ''}
-          ${b.awarded_company ? ` · Won by <strong style="color:#16a34a">${esc(b.awarded_company.name)}</strong> ${fmtD(b.award_date)}` : ''}
-          <br>
+          ${!b.customers.length ? '<span style="color:#dc2626">no customer</span><br>' : ''}
+          ${b.awarded_company ? `Won by <strong style="color:#16a34a">${esc(b.awarded_company.name)}</strong> ${fmtD(b.award_date)}<br>` : ''}
           ${b.estimator ? `Est: ${ini(b.estimator)}` : ''}
           ${b.sub_estimators.map(s => `${ini(s)}<span style="font-size:10px">${esc(s.scope)}</span>`).join(' ')}
           ${b.salesperson ? ` Sales: ${ini(b.salesperson)}` : ''}
@@ -782,6 +785,11 @@ function bidNode(b) {
           ${b.not_awarded_notes ? `<br><span style="color:#dc2626">Not awarded ${fmtD(b.date_not_awarded)}:</span> ${esc(b.not_awarded_notes)}` : ''}
           ${b.notes ? `<br>📝 ${esc(b.notes)}` : ''}
         </div>
+        ${b.customers.length ? `<div style="margin-top:4px">${b.customers.map(cust => `
+          <div style="font-size:12px;margin-top:2px">
+            <span onclick="openCompanyProfile(${cust.id})" style="cursor:pointer;color:#2563eb;font-weight:600">🏢 ${esc(cust.name)}</span>
+            ${bidCustomerContactsHtml(cust)}
+          </div>`).join('')}</div>` : ''}
         ${(b.submissions || []).length ? `<div class="v2-fu"><div style="font-weight:600;color:var(--text);margin-bottom:3px">Submissions</div>${b.submissions.map(s => submissionRow(s, b)).join('')}</div>` : ''}
         ${bidActions(b)}
       </div>
@@ -1003,7 +1011,9 @@ function comboRenderMenu(fid) {
   const alreadyNew = (COMBO_STATE[fid] || []).some(s => !s.id && s.name.toLowerCase() === q);
   if (q && !exact && !alreadyNew && f.allowNew !== false)
     html += `<div class="v2-combo-opt v2-combo-new" onmousedown="event.preventDefault();comboAddNew('${fid}')">➕ ${isProject ? `Create new project "${esc(raw)}"` : `Add "${esc(raw)}" as a new ${noun}`}</div>`;
-  menu.innerHTML = html || `<div class="v2-combo-empty">${isProject ? 'No similar projects found — keep typing to create a new one' : `No matches — keep typing to add a new ${noun}`}</div>`;
+  const emptyMsg = isProject ? 'No similar projects found — keep typing to create a new one'
+    : f.allowNew === false ? 'No matches' : `No matches — keep typing to add a new ${noun}`;
+  menu.innerHTML = html || `<div class="v2-combo-empty">${emptyMsg}</div>`;
   menu.style.display = 'block';
 }
 function comboPick(fid, val) {
@@ -1584,6 +1594,213 @@ async function deleteEmptyProject(id) {
     await api('DELETE', `/api/v2/admin/project/${id}`);
     await showHealth();
   } catch (e) { alert('Delete failed: ' + e.message); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CONTACTS — directory, profile modal (bid history + stats), company profile.
+// Contact.company_id is a real FK (v1's Contact.company was free text), so
+// company links and stats here are exact instead of string-matched.
+// ═══════════════════════════════════════════════════════════════════════════
+let CONTACTS_STATE = { rows: [], q: '', companyId: '', noCompany: false };
+
+async function renderContacts() {
+  setActiveNav('contacts');
+  const main = document.getElementById('main');
+  main.innerHTML = '<div style="padding:30px;color:var(--text-muted)">Loading…</div>';
+  try { await ensureMeta(); CONTACTS_STATE.rows = await api('GET', '/api/v2/contacts'); }
+  catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
+
+  main.innerHTML = `
+    <div class="page-header">
+      <div><div class="page-title">👤 Contacts</div><div class="page-subtitle" id="ct-count">${CONTACTS_STATE.rows.length} contacts</div></div>
+      <button class="v2-btn green" onclick="actNewContact()">+ New Contact</button>
+    </div>
+    <div class="card" style="padding:0">
+      <div class="v2-filterbar">
+        <input type="text" id="ct-q" placeholder="Search name, email, phone, company…" value="${esc(CONTACTS_STATE.q)}" oninput="onContactsFilterChange()">
+        <select id="ct-company" onchange="onContactsFilterChange()">
+          <option value="">All companies</option>
+          ${META.companies.map(c => `<option value="${c.id}" ${String(c.id) === CONTACTS_STATE.companyId ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
+        </select>
+        <label class="mine"><input type="checkbox" id="ct-nocompany" ${CONTACTS_STATE.noCompany ? 'checked' : ''} onchange="onContactsFilterChange()"> No company</label>
+        <span class="clear-link" onclick="clearContactsFilters()">Clear</span>
+      </div>
+      <div id="ct-body"></div>
+    </div>`;
+  renderContactsBody();
+}
+function onContactsFilterChange() {
+  CONTACTS_STATE.q = document.getElementById('ct-q')?.value || '';
+  CONTACTS_STATE.companyId = document.getElementById('ct-company')?.value || '';
+  CONTACTS_STATE.noCompany = !!document.getElementById('ct-nocompany')?.checked;
+  renderContactsBody();
+}
+function clearContactsFilters() {
+  CONTACTS_STATE.q = ''; CONTACTS_STATE.companyId = ''; CONTACTS_STATE.noCompany = false;
+  renderContacts();
+}
+function renderContactsBody() {
+  const { rows, q, companyId, noCompany } = CONTACTS_STATE;
+  let out = rows;
+  if (companyId) out = out.filter(c => String(c.company_id) === companyId);
+  if (noCompany) out = out.filter(c => !c.company_id);
+  if (q.trim()) { const n = q.trim().toLowerCase(); out = out.filter(c => [c.full_name, c.email, c.phone, c.company?.name].some(f => f && String(f).toLowerCase().includes(n))); }
+
+  document.getElementById('ct-count').textContent = `${out.length} of ${rows.length} contacts`;
+  document.getElementById('ct-body').innerHTML = out.length ? out.map(c => `
+    <div class="proj-row" onclick="openContactProfile(${c.id})">
+      <div style="flex:1;min-width:0">
+        <div class="proj-name">${esc(c.full_name)}</div>
+        <div class="proj-meta">
+          ${c.company ? `<span onclick="event.stopPropagation();openCompanyProfile(${c.company.id})" style="cursor:pointer;color:#2563eb">${esc(c.company.name)}</span>` : '<span style="color:#dc2626">no company</span>'}
+          ${c.phone ? `<span class="proj-meta-sep">·</span> ${esc(c.phone)}` : ''}
+          ${c.email ? `<span class="proj-meta-sep">·</span> ${esc(c.email)}` : ''}
+        </div>
+      </div>
+    </div>`).join('') : '<div style="padding:24px;text-align:center;color:var(--text-muted)">No matches</div>';
+}
+
+function actNewContact(prefillCompanyId) {
+  showForm('+ New Contact', [
+    { id: 'first_name', label: 'First Name', type: 'text' },
+    { id: 'last_name', label: 'Last Name', type: 'text' },
+    { id: 'company_id', label: 'Company', type: 'project', multi: false, required: true, newKey: 'new_company',
+      options: META.companies.map(c => ({ value: c.id, label: c.name })), value: prefillCompanyId, placeholder: 'Type company name…' },
+    { id: 'phone', label: 'Phone', type: 'text' },
+    { id: 'email', label: 'Email', type: 'text' },
+    { id: 'notes', label: 'Notes', type: 'textarea' },
+  ], async data => {
+    const c = await api('POST', '/api/v2/contacts', data);
+    META = await api('GET', '/api/v2/meta'); CURRENT_USER = META.current_user; // pick up a brand-new company
+    return c;
+  }, 'Create Contact', 'green');
+}
+
+let CONTACT_DETAIL_CACHE = {};
+function actEditContact(id) {
+  const c = CONTACT_DETAIL_CACHE[id]; if (!c) return;
+  showForm('✏️ Edit Contact', [
+    { id: 'first_name', label: 'First Name', type: 'text', value: c.first_name },
+    { id: 'last_name', label: 'Last Name', type: 'text', value: c.last_name },
+    { id: 'company_id', label: 'Company', type: 'project', multi: false, required: true, newKey: 'new_company',
+      options: META.companies.map(co => ({ value: co.id, label: co.name })), value: c.company_id, placeholder: 'Type company name…' },
+    { id: 'phone', label: 'Phone', type: 'text', value: c.phone },
+    { id: 'email', label: 'Email', type: 'text', value: c.email },
+    { id: 'notes', label: 'Notes', type: 'textarea', value: c.notes },
+  ], async data => {
+    await api('PATCH', `/api/v2/contacts/${c.id}`, data);
+    META = await api('GET', '/api/v2/meta'); CURRENT_USER = META.current_user;
+    closeProfileModal();
+    if (VIEW.name === 'contacts') await renderContacts();
+  }, 'Save');
+}
+
+async function actDeleteContact(id) {
+  if (!confirm('Delete this contact? It will be removed from any bids it\'s linked to.')) return;
+  try { await api('DELETE', `/api/v2/contacts/${id}`); closeProfileModal(); if (VIEW.name === 'contacts') await renderContacts(); }
+  catch (e) { alert('Delete failed: ' + e.message); }
+}
+
+function closeProfileModal() { document.getElementById('v2-profile-overlay')?.remove(); }
+
+const bidStatsHtml = (stats) => `
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0">
+    <div class="stat-card" style="flex:1;min-width:80px"><div style="font-size:20px;font-weight:800">${stats.total}</div><div style="font-size:11px;color:var(--text-muted)">Total Bids</div></div>
+    <div class="stat-card" style="flex:1;min-width:80px"><div style="font-size:20px;font-weight:800;color:#d97706">${stats.active}</div><div style="font-size:11px;color:var(--text-muted)">Active</div></div>
+    <div class="stat-card" style="flex:1;min-width:80px"><div style="font-size:20px;font-weight:800;color:#16a34a">${stats.wins}</div><div style="font-size:11px;color:var(--text-muted)">Wins</div></div>
+    <div class="stat-card" style="flex:1;min-width:80px"><div style="font-size:20px;font-weight:800">${stats.winRate == null ? '—' : stats.winRate + '%'}</div><div style="font-size:11px;color:var(--text-muted)">Win Rate</div></div>
+    <div class="stat-card" style="flex:1;min-width:100px"><div style="font-size:16px;font-weight:800;color:#16a34a">${fmt$(stats.wonValue)}</div><div style="font-size:11px;color:var(--text-muted)">Won Value</div></div>
+  </div>`;
+
+const bidHistoryRowsHtml = (bids) => bids.length ? bids.map(b => `
+    <div class="proj-row" onclick="closeProfileModal();openBidFlyout(${b.project_id},${b.id})">
+      <div style="flex:1;min-width:0">
+        <div class="proj-name">${esc(b.project)}${b.bid_number ? ` <span style="color:var(--text-muted);font-weight:400;font-size:12px">#${esc(b.bid_number)}</span>` : ''}
+          ${b.superseded ? '<span class="badge" style="background:#e2e8f0;color:#64748b">SUPERSEDED</span>' : ''}</div>
+        <div class="proj-meta">${stageBadge(b.stage)}</div>
+      </div>
+      <div style="text-align:right;flex-shrink:0">${b.estimate_amount ? `<span class="amount" style="font-size:13px">${fmt$(b.estimate_amount)}</span>` : ''}</div>
+    </div>`).join('') : '<div style="padding:16px;text-align:center;color:var(--text-muted)">No bids yet</div>';
+
+function openProfileModal(title, bodyHtml) {
+  closeProfileModal(); closeFlyout();
+  const ov = document.createElement('div');
+  ov.className = 'v2-overlay'; ov.id = 'v2-profile-overlay';
+  ov.onclick = e => { if (e.target === ov) closeProfileModal(); };
+  ov.innerHTML = `<div class="v2-modal" style="max-width:520px">
+    <div class="v2-modal-hd">${title}<button class="v2-btn outline" onclick="closeProfileModal()">✕</button></div>
+    <div class="v2-modal-bd">${bodyHtml}</div>
+  </div>`;
+  document.body.appendChild(ov);
+}
+
+async function openContactProfile(id) {
+  openProfileModal('Loading…', '<div style="color:var(--text-muted)">Loading…</div>');
+  let c, hist;
+  try { [c, hist] = await Promise.all([api('GET', `/api/v2/contacts/${id}`), api('GET', `/api/v2/contacts/${id}/bids`)]); }
+  catch (e) { openProfileModal('Error', `<div class="err-card">${esc(e.message)}</div>`); return; }
+  CONTACT_DETAIL_CACHE[c.id] = c;
+
+  const body = `
+    <div style="font-size:13px;color:var(--text-muted);line-height:1.7">
+      ${c.company ? `<span onclick="closeProfileModal();openCompanyProfile(${c.company.id})" style="cursor:pointer;color:#2563eb;font-weight:600">🏢 ${esc(c.company.name)}</span><br>` : ''}
+      ${c.phone ? `📞 ${esc(c.phone)}<br>` : ''}
+      ${c.email ? `✉️ ${esc(c.email)}<br>` : ''}
+      ${c.notes ? `📝 ${esc(c.notes)}` : ''}
+    </div>
+    ${bidStatsHtml(hist.stats)}
+    <div style="font-weight:700;font-size:13px;margin:12px 0 4px">Bid History</div>
+    <div class="card" style="padding:0;max-height:280px;overflow-y:auto">${bidHistoryRowsHtml(hist.bids)}</div>
+    <div class="v2-actions" style="margin-top:12px">
+      <button class="v2-btn outline" onclick="actEditContact(${c.id})">✏️ Edit</button>
+      <button class="v2-btn red" onclick="actDeleteContact(${c.id})">🗑 Delete</button>
+    </div>`;
+  openProfileModal(`👤 ${esc(c.full_name)}`, body);
+}
+
+async function openCompanyProfile(companyId) {
+  openProfileModal('Loading…', '<div style="color:var(--text-muted)">Loading…</div>');
+  let hist, contacts;
+  try { [hist, contacts] = await Promise.all([api('GET', `/api/v2/companies/${companyId}/bids`), api('GET', `/api/v2/contacts?company_id=${companyId}`)]); }
+  catch (e) { openProfileModal('Error', `<div class="err-card">${esc(e.message)}</div>`); return; }
+  const co = META.companies.find(c => c.id === companyId);
+
+  const body = `
+    ${bidStatsHtml(hist.stats)}
+    <div style="font-weight:700;font-size:13px;margin:12px 0 4px">Contacts</div>
+    <div class="card" style="padding:0;margin-bottom:12px">${contacts.length ? contacts.map(c => `
+      <div class="proj-row" onclick="closeProfileModal();openContactProfile(${c.id})">
+        <div style="flex:1;min-width:0"><div class="proj-name" style="font-size:13px">${esc(c.full_name)}</div>
+        <div class="proj-meta">${c.phone ? esc(c.phone) : ''}${c.email ? ` · ${esc(c.email)}` : ''}</div></div>
+      </div>`).join('') : `<div style="padding:12px;text-align:center;color:var(--text-muted);font-size:13px">No contacts yet</div>`}
+      <div style="padding:8px 14px"><a href="#" onclick="event.preventDefault();actNewContact(${companyId})" style="font-size:12px;color:#2563eb">+ Add contact at this company</a></div>
+    </div>
+    <div style="font-weight:700;font-size:13px;margin:12px 0 4px">Bid History</div>
+    <div class="card" style="padding:0;max-height:260px;overflow-y:auto">${bidHistoryRowsHtml(hist.bids)}</div>`;
+  openProfileModal(`🏢 ${esc(co?.name || 'Company')}`, body);
+}
+
+// Per-customer contacts inside the bid flyout — pick from contacts already at
+// that company, or add a brand-new one, without leaving the flyout.
+function bidCustomerContactsHtml(cust) {
+  const chips = (cust.contacts || []).map(ct => `
+    <span class="v2-chip" style="background:#f8fafc;color:var(--text);border-color:var(--border)" onclick="openContactProfile(${ct.id})">
+      👤 ${esc(ct.full_name)}<button type="button" onclick="event.stopPropagation();actUnlinkContact(${cust.bid_customer_id},${ct.id})">✕</button>
+    </span>`).join('');
+  return `<div style="margin-top:4px">${chips}
+    <a href="#" onclick="event.preventDefault();event.stopPropagation();actLinkContact(${cust.bid_customer_id},${cust.id})" style="font-size:11px;color:#2563eb;margin-left:4px">+ contact</a>
+  </div>`;
+}
+async function actLinkContact(bidCustomerId, companyId) {
+  const existing = await api('GET', `/api/v2/contacts?company_id=${companyId}`);
+  showForm('Link a Contact', [
+    { id: 'contact_id', label: 'Contact at this company', type: 'company', multi: false, required: true, allowNew: false,
+      newKey: '_unused', options: existing.map(c => ({ value: c.id, label: c.full_name })), placeholder: 'Search…' },
+  ], data => api('POST', `/api/v2/bid-customers/${bidCustomerId}/contacts`, { contact_id: data.contact_id }), 'Link');
+}
+async function actUnlinkContact(bidCustomerId, contactId) {
+  try { await api('DELETE', `/api/v2/bid-customers/${bidCustomerId}/contacts/${contactId}`); await refresh(); }
+  catch (e) { alert('Failed: ' + e.message); }
 }
 
 async function bootstrap() {

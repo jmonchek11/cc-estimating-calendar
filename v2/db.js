@@ -92,6 +92,9 @@ async function getProjectDetail(projectId) {
     M.BidCustomer.find({ bid_id: { $in: bidIds } }).lean(),
     M.BidSubmission.find({ bid_id: { $in: bidIds } }).sort({ date_submitted: 1, _id: 1 }).lean(),
   ]);
+  const allContactIds = [...new Set(bidCustomers.flatMap(bc => bc.contact_ids || []))];
+  const contacts = allContactIds.length ? await M.Contact.find({ _id: { $in: allContactIds } }).lean() : [];
+  const contactById = {}; contacts.forEach(c => { contactById[c._id] = fmtContactBrief(c); });
   const allFollowups = await M.Followup.find({
     $or: [
       { parent_type: 'bid_submission', parent_id: { $in: submissions.map(s => s._id) } },
@@ -113,7 +116,10 @@ async function getProjectDetail(projectId) {
     estimator: tm[b.estimator_id] || null,
     salesperson: tm[b.salesperson_id] || null,
     sub_estimators: (b.sub_estimators || []).map(s => ({ ...(tm[s.estimator_id] || {}), scope: s.scope })),
-    customers: bidCustomers.filter(bc => bc.bid_id === b._id).map(bc => companyById[bc.company_id]).filter(Boolean),
+    customers: bidCustomers.filter(bc => bc.bid_id === b._id).map(bc => {
+      const co = companyById[bc.company_id]; if (!co) return null;
+      return { ...co, bid_customer_id: bc._id, contacts: (bc.contact_ids || []).map(id => contactById[id]).filter(Boolean) };
+    }).filter(Boolean),
     start_date: b.start_date,
     date_received: b.date_received,
     due_date: b.due_date,
@@ -390,6 +396,119 @@ async function resolveCompanyIds(company_ids, new_companies) {
   for (const cid of (company_ids || [])) { const n = Number(cid); if (n) ids.push(n); }
   for (const nm of (new_companies || [])) ids.push(await resolveCompanyByName(nm));
   return [...new Set(ids)];
+}
+
+// ── Contacts ───────────────────────────────────────────────────────────────
+// Contact.company_id is a real FK (no free-text company, unlike v1). Soft
+// delete via `active` — the field v2's schema already has for exactly this.
+function fmtContactBrief(c) {
+  return { id: c._id, first_name: c.first_name, last_name: c.last_name, full_name: [c.first_name, c.last_name].filter(Boolean).join(' ') || '(no name)', phone: c.phone, email: c.email };
+}
+async function fmtContact(c, companyById) {
+  return { ...fmtContactBrief(c), company_id: c.company_id, company: companyById[c.company_id] || null, notes: c.notes, active: !!c.active };
+}
+async function getContacts({ search, company_id, no_company } = {}) {
+  const M = getModels();
+  const [contacts, companies] = await Promise.all([M.Contact.find({ active: 1 }).lean(), M.Company.find().lean()]);
+  const companyById = {}; companies.forEach(c => companyById[c._id] = { id: c._id, name: c.name });
+  let out = await Promise.all(contacts.map(c => fmtContact(c, companyById)));
+  if (company_id) out = out.filter(c => c.company_id === Number(company_id));
+  if (no_company === 'true' || no_company === true) out = out.filter(c => !c.company_id);
+  if (search) {
+    const needle = search.toLowerCase();
+    out = out.filter(c => [c.full_name, c.email, c.phone, c.company?.name].some(f => f && String(f).toLowerCase().includes(needle)));
+  }
+  return out.sort((a, b) => (a.last_name || '').localeCompare(b.last_name || '') || (a.first_name || '').localeCompare(b.first_name || ''));
+}
+async function getContactDetail(id) {
+  const M = getModels();
+  const [c, companies] = await Promise.all([M.Contact.findById(Number(id)).lean(), M.Company.find().lean()]);
+  if (!c) return null;
+  const companyById = {}; companies.forEach(co => companyById[co._id] = { id: co._id, name: co.name });
+  return fmtContact(c, companyById);
+}
+async function createContact(data) {
+  const M = getModels();
+  const companyId = data.company_id ? Number(data.company_id) : (data.new_company ? await resolveCompanyByName(data.new_company) : null);
+  if (!companyId) throw new Error('Company is required');
+  const id = await nextId('contacts');
+  await M.Contact.create({
+    _id: id, company_id: companyId,
+    first_name: data.first_name || null, last_name: data.last_name || null,
+    phone: data.phone || null, email: data.email ? String(data.email).toLowerCase().trim() : null,
+    notes: data.notes || null, active: 1,
+  });
+  return getContactDetail(id);
+}
+async function updateContact(id, data) {
+  const M = getModels();
+  const upd = { updated_at: ts() };
+  if ('first_name' in data) upd.first_name = data.first_name || null;
+  if ('last_name' in data) upd.last_name = data.last_name || null;
+  if ('phone' in data) upd.phone = data.phone || null;
+  if ('email' in data) upd.email = data.email ? String(data.email).toLowerCase().trim() : null;
+  if ('notes' in data) upd.notes = data.notes || null;
+  if (data.company_id) upd.company_id = Number(data.company_id);
+  else if (data.new_company) upd.company_id = await resolveCompanyByName(data.new_company);
+  const r = await M.Contact.updateOne({ _id: Number(id) }, { $set: upd });
+  if (!r.matchedCount) throw new Error('Contact not found');
+  return getContactDetail(id);
+}
+async function deleteContact(id) {
+  const M = getModels();
+  await M.Contact.updateOne({ _id: Number(id) }, { $set: { active: 0, updated_at: ts() } });
+  await M.BidCustomer.updateMany({ contact_ids: Number(id) }, { $pull: { contact_ids: Number(id) } });
+}
+
+// Same win/loss/pipeline stats v1 showed on contact & company profile modals.
+function calcBidStats(bids) {
+  const ACTIVE = ['opportunity', 'active_bid', 'submitted'];
+  const won = bids.filter(b => b.stage === 'awarded');
+  const lost = bids.filter(b => b.stage === 'not_awarded');
+  const active = bids.filter(b => ACTIVE.includes(b.stage) && !b.superseded);
+  const decided = won.length + lost.length;
+  return {
+    total: bids.length, active: active.length, wins: won.length, losses: lost.length,
+    winRate: decided > 0 ? Math.round(won.length / decided * 100) : null,
+    wonValue: won.reduce((s, b) => s + (b.estimate_amount || 0), 0),
+    totalValue: bids.reduce((s, b) => s + (b.estimate_amount || 0), 0),
+  };
+}
+async function bidSummaries(bidIds) {
+  const M = getModels();
+  const bids = await M.Bid.find({ _id: { $in: bidIds } }).sort({ created_at: -1 }).lean();
+  const projects = await M.Project.find().lean();
+  const pName = {}; projects.forEach(p => pName[p._id] = p.name);
+  return bids.map(b => ({
+    id: b._id, project_id: b.project_id, project: pName[b.project_id] || '—',
+    bid_number: b.bid_number, stage: b.stage, superseded: !!b.superseded,
+    estimate_amount: b.estimate_amount, due_date: b.due_date, award_date: b.award_date,
+  }));
+}
+async function getContactBids(contactId) {
+  const M = getModels();
+  const bcRows = await M.BidCustomer.find({ contact_ids: Number(contactId) }).lean();
+  const bids = await bidSummaries([...new Set(bcRows.map(bc => bc.bid_id))]);
+  return { bids, stats: calcBidStats(bids) };
+}
+async function getCompanyBids(companyId) {
+  const M = getModels();
+  const bcRows = await M.BidCustomer.find({ company_id: Number(companyId) }).lean();
+  const bids = await bidSummaries([...new Set(bcRows.map(bc => bc.bid_id))]);
+  return { bids, stats: calcBidStats(bids) };
+}
+
+// Add/remove a contact from a specific bid-customer row (bid flyout's per-customer contact list).
+async function addBidCustomerContact(bidCustomerId, contactId) {
+  const M = getModels();
+  const r = await M.BidCustomer.updateOne({ _id: Number(bidCustomerId) }, { $addToSet: { contact_ids: Number(contactId) } });
+  if (!r.matchedCount) throw new Error('Bid customer row not found');
+  return { ok: true };
+}
+async function removeBidCustomerContact(bidCustomerId, contactId) {
+  const M = getModels();
+  await M.BidCustomer.updateOne({ _id: Number(bidCustomerId) }, { $pull: { contact_ids: Number(contactId) } });
+  return { ok: true };
 }
 
 // Add one or more customers to a bid's roster — independent of any submission.
@@ -1161,6 +1280,8 @@ module.exports = {
   dismissDuplicates, deleteEmptyProject, applyCleanupOverrides, removeOverride,
   recomputeBidHeadline, recomputeBidFollowup, nextId,
   createOpportunity, createDirectBid, startBid, submitBid, addSubmission, addBidCustomers, adminUpdate,
+  getContacts, getContactDetail, createContact, updateContact, deleteContact, getContactBids, getCompanyBids,
+  addBidCustomerContact, removeBidCustomerContact,
   awardSubmission, notAwardSubmission, closeBid, logFollowupV2,
   createLegacyJob, updateJob,
   createChangeOrder, submitCO, approveCO, notApproveCO, voidCO, reopenCO,
