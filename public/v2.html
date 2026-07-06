@@ -111,7 +111,12 @@
     border: 1px solid #bfdbfe; border-radius: 5px; padding: 2px 6px; font-size: 12px; font-weight: 600; }
   .v2-chip button { border: none; background: none; color: #1e40af; cursor: pointer; font-size: 12px; line-height: 1; padding: 0; }
   .v2-chip em { color: #16a34a; font-style: normal; font-weight: 700; }
-  .v2-combo-menu { display: none; position: absolute; z-index: 10; left: 0; right: 0; margin-top: 3px;
+  /* position:fixed (not absolute) + JS-computed coordinates (see comboRenderMenu) —
+     an absolutely-positioned dropdown gets clipped by any scrollable ancestor
+     (e.g. .v2-modal's overflow-y:auto), which squeezed every dropdown in a
+     form modal into whatever space happened to be left. Fixed positioning
+     escapes that since no ancestor here uses transform/filter. */
+  .v2-combo-menu { display: none; position: fixed; z-index: 200;
     background: #fff; border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 6px 18px rgba(0,0,0,.12);
     max-height: 230px; overflow-y: auto; }
   .v2-combo-opt { padding: 7px 10px; font-size: 13px; cursor: pointer; }
@@ -1153,10 +1158,12 @@ function bidNode(b) {
           ${b.not_awarded_notes ? `<br><span style="color:#dc2626">Not awarded ${fmtD(b.date_not_awarded)}:</span> ${esc(b.not_awarded_notes)}` : ''}
           ${b.notes ? `<br>📝 ${esc(b.notes)}` : ''}
         </div>
-        ${b.customers.length ? `<div style="margin-top:4px">${b.customers.map(cust => `
-          <div style="font-size:12px;margin-top:2px">
-            <span onclick="openCompanyProfile(${cust.id})" style="cursor:pointer;color:#2563eb;font-weight:600">🏢 ${esc(cust.name)}</span>
-            <a href="#" onclick="event.preventDefault();actRemoveBidCustomer(${cust.bid_customer_id},'${esc(cust.name)}')" style="font-size:11px;color:#dc2626;margin-left:6px">✕ remove</a>
+        ${b.customers.length ? `<div style="display:flex;flex-direction:column;gap:6px;margin-top:6px">${b.customers.map(cust => `
+          <div style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:#fafbfc">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+              <span onclick="openCompanyProfile(${cust.id})" style="cursor:pointer;color:#2563eb;font-weight:700;font-size:12.5px">🏢 ${esc(cust.name)}</span>
+              <button type="button" title="Remove customer from this bid" onclick="actRemoveBidCustomer(${cust.bid_customer_id},'${esc(cust.name)}')" style="border:none;background:none;color:#dc2626;cursor:pointer;font-size:13px;padding:2px 4px;line-height:1">✕</button>
+            </div>
             ${bidCustomerContactsHtml(cust)}
           </div>`).join('')}</div>` : ''}
         ${(b.submissions || []).length ? `<div class="v2-fu"><div style="font-weight:600;color:var(--text);margin-bottom:3px">Submissions</div>${b.submissions.map(s => submissionRow(s, b)).join('')}</div>` : ''}
@@ -1418,6 +1425,13 @@ function comboRenderMenu(fid) {
   const emptyMsg = isProject ? 'No similar projects found — keep typing to create a new one'
     : f.allowNew === false ? 'No matches' : `No matches — keep typing to add a new ${noun}`;
   menu.innerHTML = html || `<div class="v2-combo-empty">${emptyMsg}</div>`;
+  // Fixed positioning computed from the real on-screen box (see the CSS
+  // comment on .v2-combo-menu for why this can't just be absolute+CSS).
+  const box = input.closest('.v2-combo-box') || input;
+  const rect = box.getBoundingClientRect();
+  menu.style.left = rect.left + 'px';
+  menu.style.width = rect.width + 'px';
+  menu.style.top = (rect.bottom + 3) + 'px';
   menu.style.display = 'block';
 }
 function comboPick(fid, val) {
@@ -1817,7 +1831,13 @@ function actSetPM(jobId) {
 // jobs (usually one, but legacy + bid-backed duplicates can leave more than
 // one until merged). Falls through to the same actAddCO() form once a job
 // is chosen — no duplicated form logic.
-function actNewChangeOrder() {
+async function actNewChangeOrder() {
+  // ALL_PROJECTS is only populated by visiting the Projects page — this
+  // button lives on the Change Orders page, so fetch fresh rather than
+  // trust a cache that may never have been filled this session.
+  const projects = await api('GET', '/api/v2/projects');
+  ALL_PROJECTS = projects.map(p => ({ id: p.id, name: p.name }));
+
   document.getElementById('v2-form-overlay')?.remove();
   const ov = document.createElement('div');
   ov.className = 'v2-overlay'; ov.id = 'v2-form-overlay';
@@ -2271,8 +2291,9 @@ function bidCustomerContactsHtml(cust) {
     <span class="v2-chip" style="background:#f8fafc;color:var(--text);border-color:var(--border)" onclick="openContactProfile(${ct.id})">
       👤 ${esc(ct.full_name)}<button type="button" onclick="event.stopPropagation();actUnlinkContact(${cust.bid_customer_id},${ct.id})">✕</button>
     </span>`).join('');
-  return `<div style="margin-top:4px">${chips}
-    <a href="#" onclick="event.preventDefault();event.stopPropagation();actLinkContact(${cust.bid_customer_id},${cust.id})" style="font-size:11px;color:#2563eb;margin-left:4px">+ contact</a>
+  return `<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:6px">
+    ${chips}
+    <button type="button" class="v2-btn outline" style="padding:2px 9px;font-size:11px" onclick="event.stopPropagation();actLinkContact(${cust.bid_customer_id},${cust.id})">+ Contact</button>
   </div>`;
 }
 async function actLinkContact(bidCustomerId, companyId) {
