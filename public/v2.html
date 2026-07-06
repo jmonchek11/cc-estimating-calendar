@@ -118,6 +118,7 @@
   .v2-combo-opt:hover { background: #f1f5f9; }
   .v2-combo-new { color: #16a34a; font-weight: 600; border-top: 1px solid var(--border); }
   .v2-combo-empty { padding: 7px 10px; font-size: 12px; color: var(--text-muted); }
+  .v2-combo-warn { padding: 6px 10px; font-size: 11px; font-weight: 600; color: #92400e; background: #fffbeb; border-bottom: 1px solid #fcd34d; }
 
   /* Detail flyout (slide-over) */
   .fly-overlay { position: fixed; inset: 0; background: rgba(15,23,42,.35); z-index: 90; opacity: 0; transition: opacity .15s; }
@@ -698,12 +699,38 @@ function fuRow(f) {
 // FORM MODAL FRAMEWORK
 // fields: [{ id, label, type: text|number|date|select|textarea|multicheck, required, options, value, placeholder }]
 // ═══════════════════════════════════════════════════════════════════════════
-// ── Searchable company combobox (field type 'company') ──────────────────────
-// Picks existing companies OR lets you type a brand-new name (chip tagged "new").
-// f.multi → many chips; otherwise single. Selection lives in COMBO_STATE[f.id]
-// as [{id, name}] (id null = new company to create on the server).
+// ── Searchable combobox (field types 'company' and 'project') ───────────────
+// Picks an existing record OR lets you type a brand-new name (chip tagged
+// "new"). f.multi → many chips; otherwise single. Selection lives in
+// COMBO_STATE[f.id] as [{id, name}] (id null = new record to create).
+// 'project' fields additionally fuzzy-match (normalized substring, shared
+// significant word, or small edit distance) so a near-duplicate project name
+// surfaces as a suggestion instead of silently creating a second Project row.
 let COMBO_STATE = {};   // fieldId -> [{id, name}]
 let COMBO_FIELDS = {};  // fieldId -> field def
+
+function _normName(s) { return (s || '').toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim(); }
+function _lev(a, b) {
+  const m = a.length, n = b.length;
+  const d = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) d[i][0] = i;
+  for (let j = 0; j <= n; j++) d[0][j] = j;
+  for (let i = 1; i <= m; i++) for (let j = 1; j <= n; j++)
+    d[i][j] = a[i - 1] === b[j - 1] ? d[i - 1][j - 1] : 1 + Math.min(d[i - 1][j], d[i][j - 1], d[i - 1][j - 1]);
+  return d[m][n];
+}
+// Fuzzy score for project-name matching — lower is a closer match, null = no match.
+function _projMatchScore(query, label) {
+  const qn = _normName(query), on = _normName(label);
+  if (!qn) return null;
+  if (on === qn) return 0;
+  if (on.includes(qn) || qn.includes(on)) return 1;
+  const words = qn.split(' ').filter(w => w.length >= 4);
+  if (words.some(w => on.includes(w))) return 2;
+  const dist = _lev(qn, on);
+  if (dist <= 3 && qn.length >= 4) return 3;
+  return null;
+}
 
 function comboRenderChips(fid) {
   const el = document.getElementById('cc-' + fid + '-chips'); if (!el) return;
@@ -714,15 +741,26 @@ function comboRemove(fid, i) { (COMBO_STATE[fid] || []).splice(i, 1); comboRende
 function comboRenderMenu(fid) {
   const f = COMBO_FIELDS[fid], input = document.getElementById('vf-' + fid), menu = document.getElementById('cc-' + fid + '-menu');
   if (!f || !input || !menu) return;
-  const q = input.value.trim().toLowerCase();
+  const raw = input.value.trim(), q = raw.toLowerCase();
   const chosen = new Set((COMBO_STATE[fid] || []).filter(s => s.id).map(s => s.id));
-  const opts = f.options.filter(o => !chosen.has(o.value) && (!q || o.label.toLowerCase().includes(q))).slice(0, 8);
-  let html = opts.map(o => `<div class="v2-combo-opt" onmousedown="event.preventDefault();comboPick('${fid}',${o.value})">${esc(o.label)}</div>`).join('');
+  const isProject = f.type === 'project';
+  const noun = isProject ? 'project' : 'customer';
+  let opts;
+  if (isProject) {
+    if (!raw) opts = [];
+    else opts = f.options.filter(o => !chosen.has(o.value))
+      .map(o => ({ o, score: _projMatchScore(raw, o.label) }))
+      .filter(x => x.score !== null).sort((a, b) => a.score - b.score).slice(0, 6).map(x => x.o);
+  } else {
+    opts = f.options.filter(o => !chosen.has(o.value) && (!q || o.label.toLowerCase().includes(q))).slice(0, 8);
+  }
+  const warn = (isProject && opts.length) ? `<div class="v2-combo-warn">⚠️ Found similar project${opts.length > 1 ? 's' : ''} below — pick one if it's the same job</div>` : '';
+  let html = warn + opts.map(o => `<div class="v2-combo-opt" onmousedown="event.preventDefault();comboPick('${fid}',${o.value})">${esc(o.label)}</div>`).join('');
   const exact = f.options.some(o => o.label.toLowerCase() === q);
   const alreadyNew = (COMBO_STATE[fid] || []).some(s => !s.id && s.name.toLowerCase() === q);
   if (q && !exact && !alreadyNew && f.allowNew !== false)
-    html += `<div class="v2-combo-opt v2-combo-new" onmousedown="event.preventDefault();comboAddNew('${fid}')">➕ Add "${esc(input.value.trim())}" as a new customer</div>`;
-  menu.innerHTML = html || '<div class="v2-combo-empty">No matches — keep typing to add a new customer</div>';
+    html += `<div class="v2-combo-opt v2-combo-new" onmousedown="event.preventDefault();comboAddNew('${fid}')">➕ ${isProject ? `Create new project "${esc(raw)}"` : `Add "${esc(raw)}" as a new ${noun}`}</div>`;
+  menu.innerHTML = html || `<div class="v2-combo-empty">${isProject ? 'No similar projects found — keep typing to create a new one' : `No matches — keep typing to add a new ${noun}`}</div>`;
   menu.style.display = 'block';
 }
 function comboPick(fid, val) {
@@ -740,7 +778,7 @@ function comboAddNew(fid) {
 }
 function initCombos(ov, fields) {
   COMBO_STATE = {}; COMBO_FIELDS = {};
-  for (const f of fields.filter(x => x.type === 'company')) {
+  for (const f of fields.filter(x => x.type === 'company' || x.type === 'project')) {
     COMBO_FIELDS[f.id] = f; COMBO_STATE[f.id] = [];
     if (f.value != null) { const o = f.options.find(o => o.value == f.value); if (o) COMBO_STATE[f.id].push({ id: o.value, name: o.label }); }
     comboRenderChips(f.id);
@@ -770,7 +808,7 @@ function showForm(title, fields, onSubmit, submitLabel = 'Save', submitClass = '
       return `<div class="v2-field"><label>${f.label}${req}</label>
         ${f.options.map(o => `<label class="v2-check"><input type="checkbox" data-multi="${f.id}" value="${o.value}"> ${esc(o.label)}</label>`).join('')}</div>`;
     }
-    if (f.type === 'company') {
+    if (f.type === 'company' || f.type === 'project') {
       return `<div class="v2-field"><label>${f.label}${req}</label>
         <div class="v2-combo">
           <div class="v2-combo-box">
@@ -808,7 +846,7 @@ function showForm(title, fields, onSubmit, submitLabel = 'Save', submitClass = '
       if (f.type === 'multicheck') {
         data[f.id] = [...ov.querySelectorAll(`input[data-multi="${f.id}"]:checked`)].map(c => Number(c.value));
         if (f.required && !data[f.id].length) missing.push(f.label);
-      } else if (f.type === 'company') {
+      } else if (f.type === 'company' || f.type === 'project') {
         const sel = COMBO_STATE[f.id] || [];
         const ids = sel.filter(s => s.id).map(s => s.id);
         const names = sel.filter(s => !s.id).map(s => s.name);
@@ -850,22 +888,7 @@ const startBidFields = () => ([
 ]);
 
 // + New Bid → choose new vs existing project, then go straight to active_bid
-function actNewBid() {
-  document.getElementById('v2-form-overlay')?.remove();
-  const ov = document.createElement('div');
-  ov.className = 'v2-overlay'; ov.id = 'v2-form-overlay';
-  ov.onclick = e => { if (e.target === ov) ov.remove(); };
-  ov.innerHTML = `
-    <div class="v2-modal" style="max-width:380px">
-      <div class="v2-modal-hd">+ New Bid<button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">✕</button></div>
-      <div class="v2-modal-bd">
-        <p style="font-size:13px;color:var(--text-muted);margin:0">Is this bid for a new project or an existing one?</p>
-        <button class="v2-btn green" style="padding:11px" onclick="newBidForm({ newProject: true })">🆕 Start a New Project</button>
-        <button class="v2-btn blue" style="padding:11px" onclick="newBidForm({ existingProject: true })">📁 Existing Project</button>
-      </div>
-    </div>`;
-  document.body.appendChild(ov);
-}
+function actNewBid() { newBidForm({}); }
 
 // Merge duplicate jobs (same job #) within a project — COs move to the bid-backed
 // job (the real one); the legacy duplicate is deleted. Live, no re-import needed.
@@ -894,17 +917,19 @@ function actAddBidToProject(projectId) {
   newBidForm({ projectId, projectName: name });
 }
 
-// Direct bid creation. opts: { projectId, projectName } (locked project) |
-// { newProject:true } | { existingProject:true }
-function newBidForm({ projectId, projectName, newProject, existingProject } = {}) {
+// Direct bid creation. opts: { projectId, projectName } locks the project
+// (e.g. "+ Add Bid to Project" from within a project's own page — no picker
+// needed, there's no ambiguity). Otherwise shows the smart project combobox:
+// type a name, get live fuzzy-matched suggestions of existing projects so a
+// near-duplicate never silently creates a second Project row.
+function newBidForm({ projectId, projectName } = {}) {
   const fields = [];
   let title = '+ New Bid';
   if (projectId) {
     title = `+ Add Bid — ${esc(projectName)}`;
-  } else if (newProject) {
-    fields.push({ id: 'project_name', label: 'New Project Name', type: 'text', required: true, placeholder: 'e.g. Einstein ED Renovation' });
-  } else { // existingProject
-    fields.push({ id: 'project_id', label: 'Project', type: 'select', required: true, options: projectOpts() });
+  } else {
+    fields.push({ id: 'project_id', label: 'Project', type: 'project', multi: false, required: true,
+      newKey: 'project_name', options: projectOpts(), placeholder: 'Type project name…' });
   }
   fields.push(...startBidFields());
   showForm(title, fields, data => {
@@ -918,14 +943,16 @@ function newBidForm({ projectId, projectName, newProject, existingProject } = {}
 // ═══════════════════════════════════════════════════════════════════════════
 function actNewOpportunity() {
   showForm('💡 New Opportunity', [
-    { id: 'project_name', label: 'Project Name', type: 'text', required: true, placeholder: 'e.g. Einstein ED Renovation' },
+    { id: 'project_id', label: 'Project', type: 'project', multi: false, required: true,
+      newKey: 'project_name', options: projectOpts(), placeholder: 'Type project name…' },
     { id: 'notes', label: 'Notes (internal discussion)', type: 'textarea', placeholder: 'Why are we considering this?' },
   ], data => api('POST', '/api/v2/opportunities', data), 'Create Opportunity');
 }
 
 function actNewLegacyJob() {
   showForm('🏭 New Legacy Job (bid pre-dates system)', [
-    { id: 'project_name', label: 'Project Name', type: 'text', required: true },
+    { id: 'project_id', label: 'Project', type: 'project', multi: false, required: true,
+      newKey: 'project_name', options: projectOpts(), placeholder: 'Type project name…' },
     { id: 'job_number', label: 'Job # (if known)', type: 'text', placeholder: '26-XXXX' },
     { id: 'awarded_company_id', label: 'Customer (who awarded us)', type: 'company', multi: false, newKey: 'new_company', options: companyOpts() },
     { id: 'pm_id', label: 'PM', type: 'select', options: teamOpts(['pm', 'sales', 'estimator']) },
