@@ -141,7 +141,7 @@ erDiagram
 
     CONTACT {
         int id PK
-        int company_id FK "replaces free-text company field"
+        int company_id FK "nullable — some real contacts have no known employer; replaces free-text company field"
         string first_name
         string last_name
         string phone
@@ -433,7 +433,7 @@ Features built in v1, mapped onto the new model:
 | Bid flyout (details, contacts, reminders, lifecycle, View Project →) | ✅ | Lifecycle section reads Job + ChangeOrders directly |
 | Filters (person, "mine only") + sorting on bid/CO list pages | ✅ Built | Client-side toolbar on each list page (`v2.html` filterBarHtml/renderBidListBody/renderCoListBody) — search box, estimator/salesperson dropdown, mine-only toggle, sort-by dropdown (due date / follow-up date / amount / project name). Filter state persists per stage while navigating. |
 | Global search | ✅ Built, improved | Sidebar box + Ctrl/Cmd+K (`v2/db.js` getSearchResults, `/api/v2/search`). Unlike v1 (Bid fields only), matches project name, bid #, CO #, job #, and Company name — real entities now, not free text. Results grouped by stage, Bids and Change Orders shown separately. Contact matching deferred until the Contacts UI exists (next). |
-| Contact/company profile modals + bid history | ✅ Built, improved | Directory page (`/#contacts` — search, company filter, "no company" toggle), profile modals with win/loss/pipeline stats (`calcBidStats`) and bid history, full CRUD. Contact.company_id is a real FK (v1's was free text), so stats are exact instead of string-matched. Per-customer contacts also manageable right from the bid flyout (link/unlink without leaving it) via `BidCustomer.contact_ids`. |
+| Contact/company profile modals + bid history | ✅ Built, improved | Directory page (`/#contacts` — search, company filter, "no company" toggle), profile modals with win/loss/pipeline stats (`calcBidStats`) and bid history, full CRUD. Contact.company_id is a real FK (v1's was free text), so stats are exact instead of string-matched. Per-customer contacts also manageable right from the bid flyout (link/unlink without leaving it) via `BidCustomer.contact_ids`. **Data source fixed:** the initial import wrongly seeded Contacts from Excel's sparse per-salesperson tabs (146 contacts, ~18 w/ phone) instead of v1's real, actively-maintained Contact collection (665 contacts, 610 w/ phone, 646 w/ email). `v2/import-contacts-from-v1.js` replaced it with the real data, mapping v1's free-text `company` string to a v2 Company entity (find-or-create by normalized name; 57 new companies created). `company_id` is nullable — 247 real contacts genuinely have no known employer in v1. |
 | Estimator profiles + stats | ✅ | |
 | IBEW jurisdiction picker | ✅ | Moves into the Submit Bid modal (it's a submission-time field) |
 | Sub-estimators with scope | ✅ | Unchanged shape |

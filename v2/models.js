@@ -184,7 +184,7 @@ const BidSubmissionSchema = new mongoose.Schema({
 
 const ContactSchema = new mongoose.Schema({
   _id:        Number,
-  company_id: { type: Number, required: true },                  // FK → Company (no free-text company)
+  company_id: { type: Number, default: null },                   // FK → Company (no free-text company) — nullable: some real contacts have no known employer
   first_name: { type: String, default: null },
   last_name:  { type: String, default: null },
   phone:      { type: String, default: null },
