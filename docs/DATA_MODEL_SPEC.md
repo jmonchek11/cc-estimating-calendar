@@ -38,6 +38,10 @@ erDiagram
     PROJECT {
         int id PK "internal only, never shown in UI"
         string name "THE project name - single source"
+        string street "job site address, from the JIS title sheet"
+        string city
+        string state
+        string zip
         int created_by FK
         datetime created_at
         datetime updated_at
@@ -55,6 +59,7 @@ erDiagram
         date due_date
         date start_date
         string drawing_stage "free text: 50% budget, 80% budget, 100% CD, etc"
+        string drawings "drawing SET description from the JIS title sheet, e.g. 'Rev 2 dated 5/1/26 prepared by XYZ Architects' — distinct from drawing_stage"
         decimal estimate_amount "DENORMALIZED headline - derived from BID_SUBMISSION"
         date date_submitted "DENORMALIZED headline - derived from BID_SUBMISSION"
         string approved_by "DENORMALIZED headline - derived from BID_SUBMISSION"
@@ -107,9 +112,12 @@ erDiagram
     COMPANY {
         int id PK
         string name "single source for customer names"
+        string street
         string city
         string state
-        string domain
+        string zip
+        string phone
+        string domain "company URL"
         datetime created_at
         datetime updated_at
     }
@@ -446,6 +454,7 @@ Features built in v1, mapped onto the new model:
 | Excel sync (`sync-excel-lib.js`) | ⚠️ Replaced | Becomes the one-time 2026 import script (§6). Ongoing Excel sync is retired — the app IS the system of record in v2. |
 | Project auto-grouping / duplicate review | ⚠️ Migration-only | Used during import; not needed at runtime since bids are born with a project FK |
 | Data Cleanup page (issue chips, RFC/COR cleanup, customer propagation, job-number scan, bulk link) | ❌ Obsolete by design | These tools exist to reconcile the duplicated datapoints v2 eliminates. The "Awarded No Job #" view survives as a normal filter (jobs awaiting accounting's job #). |
+| **New:** Import Bid from JIS (Job Information Sheet) | ✅ Built (not in v1) | "📄 Import Bid (JIS)" button on the Projects page. Uploads the estimating coordinator's filled-out JIS `.xlsx`, reads its "Title Sheet" tab (bid #, due date, drawing set description, job name/address, estimator/salesperson, up to 6 GC/customer blocks with company info + point of contact), and matches against existing team members/companies/contacts. Preview-then-confirm — nothing is written until reviewed. If the bid # already exists (the common case — bids are usually already in the system from the Excel sync before the JIS is filled out), it's **enriched** (project address, `Bid.drawings`, GC companies/contacts attached) without touching stage/estimator/salesperson/due_date, which stay owned by the normal workflow. If the bid # doesn't exist yet, a new bid is created (project picked via the same duplicate-safe combobox, estimator/salesperson must be confirmed if not auto-matched). New GC companies/contacts are created with the full detail captured on the title sheet. Backend: `v2/jis.js` (parseTitleSheet/previewJISImport/applyJISImport); routes `POST /api/v2/jis/preview` and `/apply`. Verified end-to-end against a real JIS (B26-0218). |
 | Admin stage override | ⚠️ Keep, rarely needed | Still useful for correcting mistakes, but bad-stage data shouldn't occur in v2 |
 | Admin-only project rename (✏️ pencil) | ✅ | Confirmed (Q1) — many projects were misnamed in the original Excel; rename stays admin-only |
 | Bid "phases" (50% Budget, 80% DD…) | ✅ Replaced | Resolved (Q4): re-bid-under-same-project + `drawing_stage` text field per bid; **BidSubmission** for post-submit customer tweaks / best-and-final |

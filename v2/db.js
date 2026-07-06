@@ -1285,4 +1285,5 @@ module.exports = {
   awardSubmission, notAwardSubmission, closeBid, logFollowupV2,
   createLegacyJob, updateJob,
   createChangeOrder, submitCO, approveCO, notApproveCO, voidCO, reopenCO,
+  _norm, resolveCompanyByName, ensureBidCustomer, teamMap,
 };

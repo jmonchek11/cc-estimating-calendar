@@ -34,6 +34,10 @@ const ProjectSchema = new mongoose.Schema({
   _id:        Number,                       // internal only — never shown in UI
   name:       { type: String, required: true },
   source_key: { type: String, default: null },   // stable import key: "job:<#>" or "name:<norm>" — survives re-import
+  street:     { type: String, default: null },   // job site address — from the JIS title sheet
+  city:       { type: String, default: null },
+  state:      { type: String, default: null },
+  zip:        { type: String, default: null },
   created_by: { type: Number, default: null },
   created_at: { type: String, default: ts },
   updated_at: { type: String, default: ts },
@@ -55,6 +59,7 @@ const BidSchema = new mongoose.Schema({
   due_date:       { type: String, default: null },
   start_date:     { type: String, default: null },
   drawing_stage:  { type: String, default: null },               // "50% budget", "80% budget", "100% CD"…
+  drawings:       { type: String, default: null },               // drawing SET description, e.g. "Rev 2 dated 5/1/26 prepared by XYZ Architects" — from the JIS title sheet, distinct from drawing_stage
   notes:          { type: String, default: null },
 
   // Denormalized "headline" snapshot of the bid's current submission — kept in
@@ -141,9 +146,12 @@ const ChangeOrderSchema = new mongoose.Schema({
 const CompanySchema = new mongoose.Schema({
   _id:        Number,
   name:       { type: String, required: true },                  // single source for customer names
+  street:     { type: String, default: null },
   city:       { type: String, default: null },
   state:      { type: String, default: null },
-  domain:     { type: String, default: null },
+  zip:        { type: String, default: null },
+  phone:      { type: String, default: null },
+  domain:     { type: String, default: null },                   // company URL
   created_at: { type: String, default: ts },
   updated_at: { type: String, default: ts },
 }, opts);

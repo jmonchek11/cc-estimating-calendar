@@ -571,6 +571,7 @@ async function load() {
         <button class="v2-btn green" style="padding:8px 14px;font-size:12px" onclick="actNewBid()">+ New Bid</button>
         <button class="v2-btn blue" style="padding:8px 14px;font-size:12px" onclick="actNewOpportunity()">+ New Opportunity</button>
         <button class="v2-btn outline" style="padding:8px 14px;font-size:12px" onclick="actNewLegacyJob()">+ Legacy Job</button>
+        <button class="v2-btn amber" style="padding:8px 14px;font-size:12px" onclick="actImportJIS()">📄 Import Bid (JIS)</button>
       </div>
     </div>
     <div class="card" style="padding:0">${projects.map(p => `
@@ -1818,6 +1819,170 @@ async function actLinkContact(bidCustomerId, companyId) {
 async function actUnlinkContact(bidCustomerId, contactId) {
   try { await api('DELETE', `/api/v2/bid-customers/${bidCustomerId}/contacts/${contactId}`); await refresh(); }
   catch (e) { alert('Failed: ' + e.message); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// IMPORT BID FROM JIS (Job Information Sheet) — upload → preview → apply.
+// The preview never writes anything; matches against existing team/company/
+// contact records are shown for review, then Apply performs the actual
+// create-or-enrich (v2/jis.js on the backend).
+// ═══════════════════════════════════════════════════════════════════════════
+let JIS_PREVIEW = null;
+
+function actImportJIS() {
+  document.getElementById('v2-form-overlay')?.remove();
+  const ov = document.createElement('div');
+  ov.className = 'v2-overlay'; ov.id = 'v2-form-overlay';
+  ov.onclick = e => { if (e.target === ov) ov.remove(); };
+  ov.innerHTML = `
+    <div class="v2-modal" style="max-width:420px">
+      <div class="v2-modal-hd">📄 Import Bid from JIS<button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">✕</button></div>
+      <div class="v2-modal-bd">
+        <p style="font-size:13px;color:var(--text-muted);margin:0">Upload a filled-out Job Information Sheet (.xlsx). Its "Title Sheet" tab will be read and matched against existing projects, team members, companies, and contacts — nothing is saved until you review and confirm.</p>
+        <input type="file" id="jis-file-input" accept=".xlsx" style="font-size:13px">
+        <div id="jis-upload-err" style="color:#dc2626;font-size:12px;display:none"></div>
+      </div>
+      <div class="v2-modal-ft">
+        <button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">Cancel</button>
+        <button class="v2-btn amber" id="jis-upload-btn">Read File →</button>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+  document.getElementById('jis-upload-btn').onclick = async () => {
+    const input = document.getElementById('jis-file-input');
+    const errEl = document.getElementById('jis-upload-err');
+    if (!input.files.length) { errEl.textContent = 'Choose a file first'; errEl.style.display = 'block'; return; }
+    const file = input.files[0];
+    try {
+      const base64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result.split(',')[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const preview = await api('POST', '/api/v2/jis/preview', { file_base64: base64 });
+      JIS_PREVIEW = preview;
+      ov.remove();
+      renderJISReview(preview);
+    } catch (e) { errEl.textContent = e.message; errEl.style.display = 'block'; }
+  };
+}
+
+function renderJISReview(p) {
+  document.getElementById('v2-form-overlay')?.remove();
+  const ov = document.createElement('div');
+  ov.className = 'v2-overlay'; ov.id = 'v2-form-overlay';
+  ov.onclick = e => { if (e.target === ov) ov.remove(); };
+
+  const isNewBid = !p.existing_bid;
+  const bidBanner = p.existing_bid
+    ? `<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:9px 12px;font-size:12.5px;color:#1e40af">
+        This bid # already exists (<strong>${esc(p.existing_bid.bid_number)}</strong>, stage: ${STAGE[p.existing_bid.stage] || p.existing_bid.stage}) — this will <strong>enrich</strong> it (address, drawings, GC companies/contacts) without touching its stage, estimator, or due date.
+      </div>`
+    : `<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:9px 12px;font-size:12.5px;color:#92400e">No existing bid found for # <strong>${esc(p.bid_number || '(none parsed)')}</strong> — a new bid will be created.</div>`;
+
+  const projectField = isNewBid ? `
+    <div class="v2-field"><label>Project</label>
+      <div class="v2-combo">
+        <div class="v2-combo-box"><span id="cc-jis_project-chips"></span>
+          <input id="vf-jis_project" class="v2-combo-input" type="text" autocomplete="off" placeholder="Type project name…" value="${esc(p.job_name || '')}">
+        </div>
+        <div class="v2-combo-menu" id="cc-jis_project-menu"></div>
+      </div>
+    </div>` : '';
+
+  const teamField = (label, jisInfo, fieldId) => isNewBid ? `
+    <div class="v2-field"><label>${label}${jisInfo.jis_name ? ` <span style="font-weight:400;color:var(--text-muted)">(JIS: ${esc(jisInfo.jis_name)})</span>` : ''}</label>
+      <select id="vf-${fieldId}">
+        <option value="">—</option>
+        ${teamOpts().map(o => `<option value="${o.value}" ${jisInfo.matched?.id === o.value ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
+      </select>
+    </div>` : '';
+
+  const gcCard = (gc, i) => `
+    <div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-top:8px">
+      <div style="font-weight:700;font-size:13px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        🏢 ${esc(gc.jis_name)}
+        ${gc.matched_company ? `<span class="badge" style="background:#dcfce7;color:#16a34a">✓ matches existing</span>` : `<span class="badge" style="background:#fef3c7;color:#b45309">🆕 will create</span>`}
+      </div>
+      <div style="font-size:12px;color:var(--text-muted);margin-top:2px">
+        ${[gc.street, [gc.city, gc.state, gc.zip].filter(Boolean).join(', ')].filter(Boolean).join(' · ')}
+        ${gc.phone ? ` · ${esc(gc.phone)}` : ''}
+      </div>
+      ${gc.poc ? `<div style="font-size:12px;margin-top:5px;padding-top:5px;border-top:1px solid var(--border)">
+        👤 ${esc(gc.poc.jis_name)} ${gc.poc.matched_contact ? `<span class="badge" style="background:#dcfce7;color:#16a34a;font-size:10px">✓ existing contact</span>` : `<span class="badge" style="background:#fef3c7;color:#b45309;font-size:10px">🆕 new contact</span>`}
+        <div style="color:var(--text-muted)">${gc.poc.phone ? esc(gc.poc.phone) : ''}${gc.poc.phone && gc.poc.email ? ' · ' : ''}${gc.poc.email ? esc(gc.poc.email) : ''}</div>
+      </div>` : ''}
+    </div>`;
+
+  ov.innerHTML = `
+    <div class="v2-modal" style="max-width:560px">
+      <div class="v2-modal-hd">📄 Review JIS Import<button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">✕</button></div>
+      <div class="v2-modal-bd">
+        ${bidBanner}
+        ${projectField}
+        <div class="v2-field"><label>Bid # ${isNewBid ? '<span class="req">*</span>' : ''}</label><input id="vf-jis_bid_number" type="text" value="${esc(p.bid_number || '')}" ${isNewBid ? '' : 'disabled'}></div>
+        <div class="v2-field"><label>Due Date</label><input id="vf-jis_due_date" type="date" value="${esc(p.due_date || '')}" ${isNewBid ? '' : 'disabled'}></div>
+        <div class="v2-field"><label>Drawings</label><textarea id="vf-jis_drawings" rows="2" placeholder="Drawing set description…">${esc(p.drawings || '')}</textarea></div>
+        <div class="v2-field"><label>Job Address</label>
+          <input id="vf-jis_street" type="text" placeholder="Street" value="${esc(p.address?.street || '')}" style="margin-bottom:6px">
+          <div style="display:flex;gap:6px">
+            <input id="vf-jis_city" type="text" placeholder="City" value="${esc(p.address?.city || '')}" style="flex:2">
+            <input id="vf-jis_state" type="text" placeholder="ST" value="${esc(p.address?.state || '')}" style="flex:1">
+            <input id="vf-jis_zip" type="text" placeholder="ZIP" value="${esc(p.address?.zip || '')}" style="flex:1">
+          </div>
+        </div>
+        ${teamField('Estimator', p.estimator, 'jis_estimator')}
+        ${teamField('Salesperson', p.salesperson, 'jis_salesperson')}
+        <div style="font-weight:700;font-size:13px;margin-top:6px">Customers (GCs) — ${p.gcs.length}</div>
+        ${p.gcs.length ? p.gcs.map(gcCard).join('') : '<div style="color:var(--text-muted);font-size:13px">None found on the Title Sheet.</div>'}
+      </div>
+      <div class="v2-modal-err" id="jis-apply-err"></div>
+      <div class="v2-modal-ft">
+        <button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">Cancel</button>
+        <button class="v2-btn amber" id="jis-apply-btn">${isNewBid ? 'Create Bid' : 'Enrich Bid'}</button>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+
+  if (isNewBid) initCombos(ov, [{ id: 'jis_project', type: 'project', multi: false, options: projectOpts(), value: null }]);
+
+  document.getElementById('jis-apply-btn').onclick = async () => {
+    const errEl = document.getElementById('jis-apply-err');
+    const payload = {
+      bid_number: document.getElementById('vf-jis_bid_number')?.value?.trim() || p.bid_number,
+      due_date: document.getElementById('vf-jis_due_date')?.value || p.due_date,
+      drawings: document.getElementById('vf-jis_drawings')?.value?.trim() || null,
+      address: {
+        street: document.getElementById('vf-jis_street')?.value?.trim() || null,
+        city: document.getElementById('vf-jis_city')?.value?.trim() || null,
+        state: document.getElementById('vf-jis_state')?.value?.trim() || null,
+        zip: document.getElementById('vf-jis_zip')?.value?.trim() || null,
+      },
+      gcs: p.gcs.map(gc => ({
+        company_id: gc.matched_company?.id || null,
+        jis_name: gc.jis_name, street: gc.street, city: gc.city, state: gc.state, zip: gc.zip, phone: gc.phone, domain: gc.domain,
+        poc: gc.poc ? { contact_id: gc.poc.matched_contact?.id || null, jis_name: gc.poc.jis_name, phone: gc.poc.phone, email: gc.poc.email } : null,
+      })),
+    };
+    if (isNewBid) {
+      const sel = COMBO_STATE['jis_project'] || [];
+      payload.project_id = sel[0]?.id || null;
+      payload.project_name = sel[0] && !sel[0].id ? sel[0].name : null;
+      if (!payload.project_id && !payload.project_name) { errEl.textContent = 'Project is required'; errEl.style.display = 'block'; return; }
+      payload.estimator_id = document.getElementById('vf-jis_estimator')?.value || null;
+      payload.salesperson_id = document.getElementById('vf-jis_salesperson')?.value || null;
+      if (!payload.estimator_id || !payload.salesperson_id) { errEl.textContent = 'Estimator and salesperson are required'; errEl.style.display = 'block'; return; }
+      if (!payload.bid_number) { errEl.textContent = 'Bid # is required'; errEl.style.display = 'block'; return; }
+    } else {
+      payload.existing_bid_id = p.existing_bid.id;
+    }
+    try {
+      await api('POST', '/api/v2/jis/apply', payload);
+      ov.remove();
+      await refresh();
+    } catch (e) { errEl.textContent = e.message; errEl.style.display = 'block'; }
+  };
 }
 
 async function bootstrap() {

@@ -7,6 +7,7 @@
  */
 const express = require('express');
 const v2db = require('./db');
+const jis = require('./jis');
 const maindb = require('../db');   // v1 db — for the logged-in user's admin flag
 
 const router = express.Router();
@@ -98,6 +99,19 @@ router.post('/api/v2/bids/:id/customers',     t(req => v2db.addBidCustomers(req.
 // Per-submission win/loss
 router.post('/api/v2/submissions/:id/award',        t(req => v2db.awardSubmission(req.params.id, req.body)));
 router.post('/api/v2/submissions/:id/not-awarded',  t(req => v2db.notAwardSubmission(req.params.id, req.body)));
+
+// ── Import Bid from JIS (Job Information Sheet) ───────────────────────────────
+// file_base64: the .xlsx file, base64-encoded (existing express.json limit is
+// 25mb, plenty for a JIS). Preview writes nothing; apply performs the actual
+// create-or-enrich after the user has reviewed/corrected any matches.
+router.post('/api/v2/jis/preview', async (req, res) => {
+  try {
+    if (!req.body.file_base64) return res.status(400).json({ error: 'No file provided' });
+    const buffer = Buffer.from(req.body.file_base64, 'base64');
+    res.json(await jis.previewJISImport(buffer));
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+router.post('/api/v2/jis/apply', t(req => jis.applyJISImport(req.body)));
 
 // ── Contacts ──────────────────────────────────────────────────────────────────
 router.get('/api/v2/contacts',           async (req, res) => { try { res.json(await v2db.getContacts(req.query)); } catch (e) { res.status(500).json({ error: e.message }); } });
