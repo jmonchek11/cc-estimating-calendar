@@ -14,7 +14,21 @@
  */
 const mailer = require('../mailer');
 const maindb = require('../db');
+const V1TeamMember = require('../models/TeamMember');
 const { getModels } = require('./models');
+
+// v1 and v2 are SEPARATE databases with independently-assigned TeamMember
+// ids (confirmed: every id differs for the same person — e.g. Connor Winters
+// is v1 id 10 but v2 id 2). v2's own TeamMember rows have almost no emails
+// populated (only ever seeded with name/initials/role) — real emails only
+// exist in v1's roster. So any v2-id -> email lookup has to bridge by NAME.
+async function emailForV2Member(v2MemberId) {
+  const M = getModels();
+  const v2m = await M.TeamMember.findById(Number(v2MemberId)).lean();
+  if (!v2m) return null;
+  const v1m = await V1TeamMember.findOne({ name: v2m.name, active: 1 }).lean();
+  return v1m?.email ? { email: v1m.email, name: v1m.name } : null;
+}
 
 async function bidEmailShape(bidId) {
   const M = getModels();
@@ -69,4 +83,4 @@ async function emailShapeForReminder(reminder) {
   return reminder.parent_type === 'change_order' ? coEmailShape(reminder.parent_id) : bidEmailShape(reminder.parent_id);
 }
 
-module.exports = { bidEmailShape, coEmailShape, emailShapeForReminder, notifyAwarded };
+module.exports = { bidEmailShape, coEmailShape, emailShapeForReminder, notifyAwarded, emailForV2Member };

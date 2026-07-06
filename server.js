@@ -748,18 +748,19 @@ cron.schedule('0 7 * * *', async () => {
 }, { timezone: 'America/New_York' });
 
 // Daily 7:05 AM ET — v2's reminders (polymorphic: bid or change_order)
+// recipientIds are v2's OWN TeamMember ids (a separate id space from v1's —
+// see v2/notify.js) so recipient emails must go through emailForV2Member,
+// which bridges to v1's roster by name (the only place real emails live).
 cron.schedule('5 7 * * *', async () => {
   console.log('[cron] running v2 daily reminder check');
   try {
     const due = await v2db.getDueReminders();
     if (!due.length) return console.log('[cron] v2: no reminders due today');
-    const team = await db.getAllTeam();
-    const memberMap = Object.fromEntries(team.map(m => [m.id, m]));
 
     for (const { reminder, recipientIds } of due) {
       const shape = await v2notify.emailShapeForReminder(reminder);
       if (!shape) { await v2db.markReminderEmailed(reminder._id); continue; }
-      const emails = recipientIds.map(id => memberMap[id]).filter(m => m?.email);
+      const emails = (await Promise.all(recipientIds.map(id => v2notify.emailForV2Member(id)))).filter(Boolean);
       for (const r of emails) {
         const { subject, html } = mailer.emailReminder(shape, reminder, r.name);
         await mailer.sendMail({ to: r.email, subject, html });

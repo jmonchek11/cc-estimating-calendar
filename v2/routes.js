@@ -60,6 +60,16 @@ router.get('/api/v2/digest', async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+router.post('/api/v2/admin/send-digest', requireAdmin, async (req, res) => {
+  try {
+    const mailer = require('../mailer');
+    const [digest, users] = await Promise.all([v2db.getDigest(), maindb.getActiveUserEmails()]);
+    const { subject, html } = mailer.emailDigest(digest);
+    await mailer.sendMail({ to: users.map(u => u.email), subject, html });
+    res.json({ ok: true, sent_to: users.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.get('/api/v2/health', async (req, res) => {
   try { res.json(await v2db.getDataHealth()); }
   catch (e) { res.status(500).json({ error: e.message }); }
@@ -71,7 +81,15 @@ router.get('/api/v2/meta', async (req, res) => {
     let current_user = null;
     try {
       const m = await maindb.getMember(req.session.userId);
-      if (m) current_user = { id: m.id, name: m.name, is_admin: !!m.is_admin };
+      if (m) {
+        // v1 and v2 are separate databases with independently-assigned
+        // TeamMember ids (confirmed: every id differs for the same person).
+        // current_user.id must be the v2 id — it's compared against v2's
+        // bid.estimator_id/salesperson_id everywhere ("mine only" etc).
+        // is_admin/name/v1_id still come from v1 since that's where login lives.
+        const v2Match = meta.team.find(t => v2db._norm(t.name) === v2db._norm(m.name));
+        current_user = { id: v2Match ? v2Match.id : null, v1_id: m.id, name: m.name, is_admin: !!m.is_admin };
+      }
     } catch { /* ignore — current_user stays null */ }
     res.json({ ...meta, current_user });
   } catch (e) { res.status(500).json({ error: e.message }); }
