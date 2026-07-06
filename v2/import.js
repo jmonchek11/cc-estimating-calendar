@@ -51,6 +51,9 @@ const TEAM = [
 const ts = () => new Date().toISOString().replace('T', ' ').substring(0, 19);
 const s = (v) => { if (v == null) return null; const t = String(v).trim(); return (!t || t === 'N/A' || t === 'TBD') ? null : t; };
 const amt = (v) => { if (v == null) return null; const n = typeof v === 'number' ? v : parseFloat(String(v).replace(/[$,]/g, '')); return (isNaN(n) || n <= 0) ? null : n; };
+// Excel's "Phone #" column is blank for most rows but stores that blank as the
+// number 0 (not an empty cell) — s(0) would otherwise pass it through as "0".
+const phoneVal = (v) => { if (v == null || v === 0 || v === '0') return null; const t = String(v).trim(); return t || null; };
 function xdate(v) {
   if (!v) return null;
   if (typeof v === 'string') { const m = v.trim().match(/^(\d{4}-\d{2}-\d{2})/); return m ? m[1] : null; }
@@ -156,7 +159,7 @@ async function main() {
     for (const r of XLSX.utils.sheet_to_json(ws, { range: 0, defval: null })) {
       const co = s(r['Company']), nm = s(r['Name']);
       if (co) rawCompanies.add(co);
-      if (co && nm) tabContacts.push({ company: co, name: nm, phone: s(r['Phone #']) });
+      if (co && nm) tabContacts.push({ company: co, name: nm, phone: phoneVal(r['Phone #']) });
     }
   }
   // canonical name per normalized key (alias wins, else longest raw spelling)
