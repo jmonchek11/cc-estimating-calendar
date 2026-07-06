@@ -60,6 +60,12 @@ router.get('/api/v2/digest', async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Team (v2's own roster — see v2/notify.js for the id-space note) ───────────
+router.get('/api/v2/team',            async (req, res) => { try { res.json(await v2db.getTeamV2()); } catch (e) { res.status(500).json({ error: e.message }); } });
+
+// ── Settings (v2's own follow-up timer config) ────────────────────────────────
+router.get('/api/v2/settings',        async (req, res) => { try { res.json(await v2db.getSettings()); } catch (e) { res.status(500).json({ error: e.message }); } });
+
 router.post('/api/v2/admin/send-digest', requireAdmin, async (req, res) => {
   try {
     const mailer = require('../mailer');
@@ -102,6 +108,13 @@ const t = (fn) => async (req, res) => {
   try { res.json(await fn(req)); }
   catch (e) { res.status(400).json({ error: e.message }); }
 };
+
+// ── Team (v2's own roster — see v2/notify.js for the id-space note) ───────────
+router.post('/api/v2/team',           requireAdmin, t(req => v2db.createTeamMemberV2(req.body)));
+router.patch('/api/v2/team/:id',      requireAdmin, t(req => v2db.updateTeamMemberV2(req.params.id, req.body)));
+
+// ── Settings (v2's own follow-up timer config) ────────────────────────────────
+router.put('/api/v2/settings',        requireAdmin, t(req => v2db.updateSettingsV2(req.body)));
 
 router.post('/api/v2/opportunities',          t(req => v2db.createOpportunity({ ...req.body, created_by: req.session.userId })));
 router.post('/api/v2/bids',                   t(req => v2db.createDirectBid({ ...req.body, created_by: req.session.userId })));

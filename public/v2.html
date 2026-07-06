@@ -177,6 +177,7 @@
       <a class="nav-item" data-page="contacts" href="#contacts" onclick="navigate('contacts');return false"><span class="nav-icon">👤</span> Contacts</a>
       <div class="nav-section-label">DATA</div>
       <a class="nav-item" data-page="health" href="#health" onclick="navigate('health');return false"><span class="nav-icon">🩺</span> Data Health</a>
+      <a class="nav-item" data-page="settings" href="#settings" onclick="navigate('settings');return false"><span class="nav-icon">⚙️</span> Settings</a>
       <a class="nav-item" href="/" style="margin-top:auto"><span class="nav-icon">↩</span> Back to live app</a>
     </nav>
     <main id="main"><div style="padding:30px;color:var(--text-muted)">Loading…</div></main>
@@ -243,6 +244,7 @@ function navigate(page) {
   if (page === 'contacts') { VIEW = { name: 'contacts' }; return renderContacts(); }
   if (page === 'digest') { VIEW = { name: 'digest' }; return renderDigest(); }
   if (page === 'calendar') { VIEW = { name: 'calendar' }; return renderCalendar(); }
+  if (page === 'settings') { VIEW = { name: 'settings' }; return renderSettings(); }
   VIEW = { name: 'projects' }; return load();
 }
 
@@ -252,6 +254,7 @@ async function rerenderView() {
     case 'contacts':  return renderContacts();
     case 'digest':    return renderDigest();
     case 'calendar':  return renderCalendar();
+    case 'settings':  return renderSettings();
     case 'projects':  return load();
     case 'project':   return renderProjectPage(VIEW.arg);
     case 'bidlist':   return renderBidList(VIEW.arg);
@@ -375,6 +378,116 @@ async function renderSearchResults() {
     <div class="page-header"><div><div class="page-title">🔍 Search Results</div><div class="page-subtitle">${total} result${total !== 1 ? 's' : ''} for "<strong>${esc(q)}</strong>"</div></div></div>
     ${BID_STAGE_ORDER.map(bidSection).join('')}
     ${CO_STAGE_ORDER.map(coSection).join('')}`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SETTINGS — Team management + follow-up timer + admin tools. TeamMember and
+// Settings are collections SHARED with v1 (same underlying MongoDB), so this
+// reuses v1's existing /api/team and /api/settings routes directly instead
+// of duplicating that CRUD in v2 — it's the same data either way.
+// ═══════════════════════════════════════════════════════════════════════════
+// NOTE on scope: v1 and v2 are separate databases with independently-
+// assigned TeamMember ids (see v2/notify.js). This page manages v2's OWN
+// roster — the one that actually backs v2's estimator/salesperson dropdowns
+// and filters. It does NOT touch login (still v1's system, bridged by name).
+// A team member added here can be picked on bids immediately but can't log
+// in until the two rosters are unified — flagged in the page copy below.
+let TEAM_CACHE = [];
+async function renderSettings() {
+  setActiveNav('settings');
+  const main = document.getElementById('main');
+  main.innerHTML = '<div style="padding:30px;color:var(--text-muted)">Loading…</div>';
+  let team, settings;
+  try {
+    await ensureMeta();
+    [team, settings] = await Promise.all([api('GET', '/api/v2/team'), api('GET', '/api/v2/settings')]);
+    TEAM_CACHE = team;
+  } catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
+
+  const isAdmin = !!CURRENT_USER?.is_admin;
+  const roleLabel = { estimator: 'Estimator', sales: 'Salesperson' };
+
+  const teamRows = team.map(m => `
+    <div class="proj-row" style="${m.active ? '' : 'opacity:.5'}" ${isAdmin ? `onclick="actEditTeamMember(${m.id})"` : ''}>
+      <div style="flex:1;min-width:0">
+        <div class="proj-name">${esc(m.name)} <span class="initials-pill">${esc(m.initials)}</span>
+          ${!m.active ? '<span class="badge" style="background:#e2e8f0;color:#64748b">INACTIVE</span>' : ''}</div>
+        <div class="proj-meta">${roleLabel[m.role] || esc(m.role)}${m.email ? ` · ${esc(m.email)}` : ''}</div>
+      </div>
+      ${isAdmin ? '<span style="color:var(--text-muted)">✏️</span>' : ''}
+    </div>`).join('');
+
+  main.innerHTML = `
+    <div class="page-header">
+      <div><div class="page-title">⚙️ Settings</div><div class="page-subtitle">${team.length} team members</div></div>
+      ${isAdmin ? `<button class="v2-btn green" onclick="actNewTeamMember()">+ Add Team Member</button>` : ''}
+    </div>
+
+    <div class="card" style="margin-bottom:14px">
+      <div style="padding:12px 16px;border-bottom:1px solid var(--border)">
+        <div style="font-weight:700;font-size:14px">👥 Team</div>
+        ${isAdmin ? `<div style="font-size:11.5px;color:var(--text-muted);margin-top:3px">Controls who shows up as an estimator/salesperson in v2. A brand-new person here can be assigned to bids right away but can't log in yet — that still goes through the main login system, matched by name.</div>` : ''}
+      </div>
+      <div style="padding:0">${teamRows}</div>
+    </div>
+
+    <div class="card" style="margin-bottom:14px">
+      <div style="padding:12px 16px;border-bottom:1px solid var(--border);font-weight:700;font-size:14px">⏱ Follow-up Timer</div>
+      <div style="padding:14px 16px">
+        <div class="v2-field"><label>Days until first follow-up (after submission)</label>
+          <input id="set-fu-initial" type="number" min="1" value="${settings.fu_initial_days ?? 3}" ${isAdmin ? '' : 'disabled'} style="max-width:120px"></div>
+        <div class="v2-field"><label>Days between recurring follow-ups</label>
+          <input id="set-fu-recurring" type="number" min="1" value="${settings.fu_recurring_days ?? 7}" ${isAdmin ? '' : 'disabled'} style="max-width:120px"></div>
+        ${isAdmin ? `<button class="v2-btn blue" onclick="actSaveFollowupSettings()">Save</button>` : ''}
+      </div>
+    </div>
+
+    ${isAdmin ? `
+    <div class="card">
+      <div style="padding:12px 16px;border-bottom:1px solid var(--border);font-weight:700;font-size:14px">✉️ Email Tools</div>
+      <div style="padding:14px 16px;display:flex;gap:8px">
+        <button class="v2-btn outline" onclick="actSendTestEmail()">Send Test Email (to me)</button>
+        <button class="v2-btn amber" onclick="actSendDigestNow()">Send Weekly Digest Now</button>
+      </div>
+    </div>` : ''}
+  `;
+}
+
+function actNewTeamMember() {
+  showForm('+ Add Team Member', [
+    { id: 'name', label: 'Name', type: 'text', required: true },
+    { id: 'initials', label: 'Initials', type: 'text', required: true, placeholder: 'JD' },
+    { id: 'role', label: 'Role', type: 'select', required: true, options: [{ value: 'estimator', label: 'Estimator' }, { value: 'sales', label: 'Salesperson' }] },
+    { id: 'email', label: 'Email', type: 'text' },
+  ], data => api('POST', '/api/v2/team', data), 'Create', 'green');
+}
+function actEditTeamMember(id) {
+  const m = (TEAM_CACHE || []).find(t => t.id === id);
+  showForm('✏️ Edit Team Member', [
+    { id: 'name', label: 'Name', type: 'text', required: true, value: m?.name },
+    { id: 'initials', label: 'Initials', type: 'text', required: true, value: m?.initials },
+    { id: 'role', label: 'Role', type: 'select', required: true, value: m?.role, options: [{ value: 'estimator', label: 'Estimator' }, { value: 'sales', label: 'Salesperson' }] },
+    { id: 'email', label: 'Email', type: 'text', value: m?.email },
+    { id: 'active', label: 'Active', type: 'select', required: true, value: m?.active ? '1' : '0', options: [{ value: '1', label: 'Active' }, { value: '0', label: 'Inactive' }] },
+  ], data => api('PATCH', `/api/v2/team/${id}`, { ...data, active: Number(data.active) }), 'Save');
+}
+async function actSaveFollowupSettings() {
+  try {
+    await api('PUT', '/api/v2/settings', {
+      fu_initial_days: Number(document.getElementById('set-fu-initial').value),
+      fu_recurring_days: Number(document.getElementById('set-fu-recurring').value),
+    });
+    alert('Saved.');
+  } catch (e) { alert('Failed: ' + e.message); }
+}
+async function actSendTestEmail() {
+  try { const r = await api('POST', '/api/admin/test-email'); alert('Test email sent to ' + (r.sent_to || 'you') + '.'); }
+  catch (e) { alert('Failed: ' + e.message); }
+}
+async function actSendDigestNow() {
+  if (!confirm('Send the weekly digest email to all active users right now?')) return;
+  try { const r = await api('POST', '/api/v2/admin/send-digest'); alert(`Digest sent to ${r.sent_to} user(s).`); }
+  catch (e) { alert('Failed: ' + e.message); }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

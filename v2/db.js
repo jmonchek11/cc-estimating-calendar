@@ -277,6 +277,47 @@ async function getMeta() {
   };
 }
 
+// ── Team (v2's OWN roster — see the id-space note in v2/notify.js. Editing
+// here affects v2's estimator/salesperson dropdowns, filters, and "mine
+// only"; it does NOT create a login — that still goes through v1's system,
+// keyed by name-match, until the two rosters are unified.) ───────────────────
+async function getTeamV2() {
+  const M = getModels();
+  const team = await M.TeamMember.find().sort({ name: 1 }).lean();
+  return team.map(t => ({ id: t._id, name: t.name, initials: t.initials, role: t.role, email: t.email, active: !!t.active, is_admin: !!t.is_admin }));
+}
+async function createTeamMemberV2({ name, initials, role, email }) {
+  require_({ name, initials, role }, ['name', 'initials', 'role']);
+  const M = getModels();
+  // Existing 14 rows were seeded with hand-assigned ids during import, not
+  // via the Counter collection — an uninitialized nextId('team_members')
+  // would start at 1 and collide. Compute the next id from what's there.
+  const existing = await M.TeamMember.find().select('_id').lean();
+  const id = Math.max(0, ...existing.map(t => t._id)) + 1;
+  await M.TeamMember.create({ _id: id, name: name.trim(), initials: initials.toUpperCase(), role, email: email ? email.toLowerCase().trim() : null, active: 1 });
+  return { id };
+}
+async function updateTeamMemberV2(id, data) {
+  const M = getModels();
+  const upd = {};
+  if ('name' in data) upd.name = data.name;
+  if ('initials' in data) upd.initials = String(data.initials).toUpperCase();
+  if ('role' in data) upd.role = data.role;
+  if ('email' in data) upd.email = data.email ? String(data.email).toLowerCase().trim() : null;
+  if ('active' in data) upd.active = Number(data.active);
+  const r = await M.TeamMember.updateOne({ _id: Number(id) }, { $set: upd });
+  if (!r.matchedCount) throw new Error('Team member not found');
+  return { ok: true };
+}
+async function updateSettingsV2(data) {
+  const M = getModels();
+  const upd = {};
+  if ('fu_initial_days' in data) upd.fu_initial_days = Number(data.fu_initial_days);
+  if ('fu_recurring_days' in data) upd.fu_recurring_days = Number(data.fu_recurring_days);
+  await M.Settings.findByIdAndUpdate('company', { $set: upd }, { upsert: true });
+  return getSettings();
+}
+
 // ── Opportunity creation ──────────────────────────────────────────────────────
 // Creates a Project (or attaches to an existing one) + an opportunity Bid.
 async function createOpportunity({ project_id, project_name, notes, created_by }) {
@@ -1433,4 +1474,5 @@ module.exports = {
   _norm, resolveCompanyByName, ensureBidCustomer, teamMap,
   addReminder, dismissReminder, deleteReminder, getRemindersFor, getDueReminders, markReminderEmailed,
   getDigest,
+  getTeamV2, createTeamMemberV2, updateTeamMemberV2, updateSettingsV2, getSettings,
 };
