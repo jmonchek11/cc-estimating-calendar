@@ -308,6 +308,7 @@ async function updateTeamMemberV2(id, data) {
   if ('role' in data) upd.role = data.role;
   if ('email' in data) upd.email = data.email ? String(data.email).toLowerCase().trim() : null;
   if ('active' in data) upd.active = Number(data.active);
+  if ('is_admin' in data) upd.is_admin = !!Number(data.is_admin);
   const r = await M.TeamMember.updateOne({ _id: Number(id) }, { $set: upd });
   if (!r.matchedCount) throw new Error('Team member not found');
   return { ok: true };

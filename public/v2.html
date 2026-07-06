@@ -423,6 +423,7 @@ async function renderSettings() {
     <div class="proj-row" style="${m.active ? '' : 'opacity:.5'}">
       <div style="flex:1;min-width:0">
         <div class="proj-name">${esc(m.name)} <span class="initials-pill">${esc(m.initials)}</span>
+          ${m.is_admin ? '<span class="badge" style="background:#ede9fe;color:#5b21b6">ADMIN</span>' : ''}
           ${!m.active ? '<span class="badge" style="background:#e2e8f0;color:#64748b">INACTIVE</span>' : ''}
           ${m.has_password === false ? '<span class="badge" style="background:#fef3c7;color:#b45309">NO PASSWORD SET</span>' : ''}</div>
         <div class="proj-meta">${roleLabel[m.role] || esc(m.role)}${m.email ? ` · ${esc(m.email)}` : ''}</div>
@@ -486,7 +487,8 @@ function actEditTeamMember(id) {
     { id: 'role', label: 'Role', type: 'select', required: true, value: m?.role, options: [{ value: 'estimator', label: 'Estimator' }, { value: 'sales', label: 'Salesperson' }] },
     { id: 'email', label: 'Email', type: 'text', value: m?.email },
     { id: 'active', label: 'Active', type: 'select', required: true, value: m?.active ? '1' : '0', options: [{ value: '1', label: 'Active' }, { value: '0', label: 'Inactive' }] },
-  ], data => api('PATCH', `/api/v2/team/${id}`, { ...data, active: Number(data.active) }), 'Save');
+    { id: 'is_admin', label: 'Admin', type: 'select', required: true, value: m?.is_admin ? '1' : '0', options: [{ value: '1', label: 'Yes — full access incl. Data Health merges' }, { value: '0', label: 'No' }] },
+  ], data => api('PATCH', `/api/v2/team/${id}`, { ...data, active: Number(data.active), is_admin: Number(data.is_admin) }), 'Save');
 }
 function actResetTeamPassword(id, name) {
   showForm(`🔑 Set Password — ${esc(name)}`, [
