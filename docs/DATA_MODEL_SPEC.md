@@ -431,7 +431,8 @@ Features built in v1, mapped onto the new model:
 | Projects page (bid counts, pipeline value, estimator pills) | ✅ improved | Hierarchy view becomes natural: Project → Bids → Job → COs is now the actual data shape, not a heuristic |
 | Project panel hierarchy (awarded bold, COs nested) | ✅ improved | No more isCO guessing |
 | Bid flyout (details, contacts, reminders, lifecycle, View Project →) | ✅ | Lifecycle section reads Job + ChangeOrders directly |
-| Global search | ✅ | Searches Projects, Bids, Jobs, COs, Companies, Contacts |
+| Filters (person, "mine only") + sorting on bid/CO list pages | ✅ Built | Client-side toolbar on each list page (`v2.html` filterBarHtml/renderBidListBody/renderCoListBody) — search box, estimator/salesperson dropdown, mine-only toggle, sort-by dropdown (due date / follow-up date / amount / project name). Filter state persists per stage while navigating. |
+| Global search | ⚠️ Planned, not yet built | v1 only searched Bid fields; v2's version should also match Company name, job #, and CO # since those are now real entities, not free text |
 | Contact/company profile modals + bid history | ✅ improved | Real Company entity makes per-customer stats exact |
 | Estimator profiles + stats | ✅ | |
 | IBEW jurisdiction picker | ✅ | Moves into the Submit Bid modal (it's a submission-time field) |

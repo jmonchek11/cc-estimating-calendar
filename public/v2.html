@@ -119,6 +119,14 @@
   .v2-combo-new { color: #16a34a; font-weight: 600; border-top: 1px solid var(--border); }
   .v2-combo-empty { padding: 7px 10px; font-size: 12px; color: var(--text-muted); }
   .v2-combo-warn { padding: 6px 10px; font-size: 11px; font-weight: 600; color: #92400e; background: #fffbeb; border-bottom: 1px solid #fcd34d; }
+  /* list filter/sort toolbar */
+  .v2-filterbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--border); background: #fafbfc; }
+  .v2-filterbar input[type="text"], .v2-filterbar select {
+    font-family: inherit; font-size: 12.5px; padding: 6px 9px; border: 1px solid var(--border); border-radius: 6px; background: #fff; color: var(--text);
+  }
+  .v2-filterbar input[type="text"] { flex: 1; min-width: 160px; }
+  .v2-filterbar label.mine { display: flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--text-muted); cursor: pointer; white-space: nowrap; }
+  .v2-filterbar .clear-link { font-size: 12px; color: #2563eb; cursor: pointer; white-space: nowrap; }
 
   /* Detail flyout (slide-over) */
   .fly-overlay { position: fixed; inset: 0; background: rgba(15,23,42,.35); z-index: 90; opacity: 0; transition: opacity .15s; }
@@ -239,14 +247,97 @@ const CO_LIST_META = {
   submitted_co: { page: 'submitted-cos', title: '📤 Submitted Change Orders', sub: 'awaiting customer decision' },
 };
 
+// ── List filter/sort toolbar (bid lists + CO lists) ──────────────────────────
+// Rows are fetched once per page load and filtered/sorted entirely client-side
+// (dataset is small); LIST_STATE holds the raw fetch, FILTER_STATE holds the
+// toolbar values per stage-key so they survive navigating away and back.
+let LIST_STATE = {};    // stageKey -> raw rows from the API
+let FILTER_STATE = {};  // stageKey -> { q, person, mine, sort }
+
+function filterState(key) { return (FILTER_STATE[key] = FILTER_STATE[key] || { q: '', person: '', mine: false, sort: 'due' }); }
+
+function personOpts() {
+  return META.team.map(t => [`${t.role === 'sales' ? 'sal' : 'est'}:${t.id}`, `${t.name} (${t.initials})`]);
+}
+
+function filterBarHtml(key, sortOpts) {
+  const s = filterState(key);
+  const opts = personOpts();
+  return `<div class="v2-filterbar">
+    <input type="text" id="flt-q-${key}" placeholder="Search project, bid #, customer, job #…" value="${esc(s.q)}" oninput="onListFilterChange('${key}')">
+    <select id="flt-person-${key}" onchange="onListFilterChange('${key}')">
+      <option value="">Anyone</option>
+      ${opts.map(([v, l]) => `<option value="${v}" ${v === s.person ? 'selected' : ''}>${esc(l)}</option>`).join('')}
+    </select>
+    <select id="flt-sort-${key}" onchange="onListFilterChange('${key}')">
+      ${sortOpts.map(([v, l]) => `<option value="${v}" ${v === s.sort ? 'selected' : ''}>Sort: ${esc(l)}</option>`).join('')}
+    </select>
+    ${CURRENT_USER ? `<label class="mine"><input type="checkbox" id="flt-mine-${key}" ${s.mine ? 'checked' : ''} onchange="onListFilterChange('${key}')"> Mine only</label>` : ''}
+    <span class="clear-link" onclick="clearListFilters('${key}')">Clear</span>
+  </div>`;
+}
+
+function clearListFilters(key) {
+  FILTER_STATE[key] = { q: '', person: '', mine: false, sort: filterState(key).sort === 'followup' ? 'followup' : 'due' };
+  if (VIEW.name === 'bidlist') renderBidList(VIEW.arg); else renderCoList(VIEW.arg);
+}
+
+function onListFilterChange(key) {
+  const s = filterState(key);
+  s.q = document.getElementById('flt-q-' + key)?.value || '';
+  s.person = document.getElementById('flt-person-' + key)?.value || '';
+  s.sort = document.getElementById('flt-sort-' + key)?.value || s.sort;
+  s.mine = !!document.getElementById('flt-mine-' + key)?.checked;
+  if (VIEW.name === 'bidlist') renderBidListBody(key); else renderCoListBody(key);
+}
+
+function applyPersonMine(rows, s) {
+  let out = rows;
+  if (s.person) {
+    const [kind, id] = s.person.split(':'); const nid = Number(id);
+    out = out.filter(r => kind === 'sal' ? r.salesperson?.id === nid : r.estimator?.id === nid);
+  }
+  if (s.mine && CURRENT_USER) out = out.filter(r => r.estimator?.id === CURRENT_USER.id || r.salesperson?.id === CURRENT_USER.id);
+  return out;
+}
+function applyTextSearch(rows, q, getFields) {
+  if (!q.trim()) return rows;
+  const needle = q.trim().toLowerCase();
+  return rows.filter(r => getFields(r).some(f => f && String(f).toLowerCase().includes(needle)));
+}
+
 async function renderBidList(stage) {
   const meta = BID_LIST_META[stage];
   setActiveNav(meta.page);
   const main = document.getElementById('main');
   main.innerHTML = '<div style="padding:30px;color:var(--text-muted)">Loading…</div>';
-  let rows;
-  try { await ensureMeta(); rows = await api('GET', '/api/v2/bid-list?stage=' + stage); }
+  try { await ensureMeta(); LIST_STATE[stage] = await api('GET', '/api/v2/bid-list?stage=' + stage); }
   catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
+
+  const sortOpts = stage === 'submitted'
+    ? [['followup', 'Follow-up date'], ['due', 'Due date'], ['amount', 'Amount'], ['project', 'Project name']]
+    : [['due', 'Due date'], ['amount', 'Amount'], ['project', 'Project name']];
+  if (stage === 'submitted' && filterState(stage).sort === 'due') filterState(stage).sort = 'followup';
+
+  main.innerHTML = `
+    <div class="page-header"><div><div class="page-title">${meta.title}</div><div class="page-subtitle" id="bl-count-${stage}">${LIST_STATE[stage].length} ${meta.sub}</div></div></div>
+    <div class="card" style="padding:0">${filterBarHtml(stage, sortOpts)}<div id="bl-body-${stage}"></div></div>`;
+  renderBidListBody(stage);
+}
+
+function renderBidListBody(stage) {
+  const meta = BID_LIST_META[stage];
+  const s = filterState(stage);
+  let rows = LIST_STATE[stage] || [];
+  rows = applyTextSearch(rows, s.q, b => [b.project, b.bid_number, ...b.customers]);
+  rows = applyPersonMine(rows, s);
+  const sorters = {
+    due: (a, b) => (a.due_date || '9999').localeCompare(b.due_date || '9999'),
+    followup: (a, b) => (a.next_followup_date || '9999').localeCompare(b.next_followup_date || '9999'),
+    amount: (a, b) => (b.estimate_amount || 0) - (a.estimate_amount || 0),
+    project: (a, b) => (a.project || '').localeCompare(b.project || ''),
+  };
+  rows = [...rows].sort(sorters[s.sort] || sorters.due);
 
   const right = (b) => {
     if (stage === 'submitted') {
@@ -257,9 +348,8 @@ async function renderBidList(stage) {
     return b.due_date ? `<span style="font-size:12px;font-weight:700;color:${b.due_date < today ? '#dc2626' : 'var(--text-muted)'}">Due ${fmtD(b.due_date)}</span>` : '';
   };
 
-  main.innerHTML = `
-    <div class="page-header"><div><div class="page-title">${meta.title}</div><div class="page-subtitle">${rows.length} ${meta.sub}</div></div></div>
-    <div class="card" style="padding:0">${rows.length ? rows.map(b => `
+  document.getElementById('bl-count-' + stage).textContent = `${rows.length} of ${LIST_STATE[stage].length} ${meta.sub}`;
+  document.getElementById('bl-body-' + stage).innerHTML = rows.length ? rows.map(b => `
       <div class="proj-row" onclick="openBidFlyout(${b.project_id},${b.id})">
         <div style="flex:1;min-width:0">
           <div class="proj-name">${esc(b.project)}${b.bid_number ? ` <span style="color:var(--text-muted);font-weight:400;font-size:12px">#${esc(b.bid_number)}</span>` : ''}
@@ -271,7 +361,7 @@ async function renderBidList(stage) {
           </div>
         </div>
         <div style="text-align:right;flex-shrink:0">${right(b)}</div>
-      </div>`).join('') : '<div style="padding:24px;text-align:center;color:var(--text-muted)">None</div>'}</div>`;
+      </div>`).join('') : '<div style="padding:24px;text-align:center;color:var(--text-muted)">No matches</div>';
 }
 
 async function renderCoList(stage) {
@@ -279,13 +369,36 @@ async function renderCoList(stage) {
   setActiveNav(meta.page);
   const main = document.getElementById('main');
   main.innerHTML = '<div style="padding:30px;color:var(--text-muted)">Loading…</div>';
-  let rows;
-  try { await ensureMeta(); rows = await api('GET', '/api/v2/co-list?stage=' + stage); }
+  try { await ensureMeta(); LIST_STATE[stage] = await api('GET', '/api/v2/co-list?stage=' + stage); }
   catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
 
+  const sortOpts = stage === 'submitted_co'
+    ? [['followup', 'Follow-up date'], ['due', 'Due date'], ['amount', 'Amount'], ['project', 'Project name']]
+    : [['due', 'Due date'], ['amount', 'Amount'], ['project', 'Project name']];
+  if (stage === 'submitted_co' && filterState(stage).sort === 'due') filterState(stage).sort = 'followup';
+
   main.innerHTML = `
-    <div class="page-header"><div><div class="page-title">${meta.title}</div><div class="page-subtitle">${rows.length} ${meta.sub}</div></div></div>
-    <div class="card" style="padding:0">${rows.length ? rows.map(c => {
+    <div class="page-header"><div><div class="page-title">${meta.title}</div><div class="page-subtitle" id="cl-count-${stage}">${LIST_STATE[stage].length} ${meta.sub}</div></div></div>
+    <div class="card" style="padding:0">${filterBarHtml(stage, sortOpts)}<div id="cl-body-${stage}"></div></div>`;
+  renderCoListBody(stage);
+}
+
+function renderCoListBody(stage) {
+  const meta = CO_LIST_META[stage];
+  const s = filterState(stage);
+  let rows = LIST_STATE[stage] || [];
+  rows = applyTextSearch(rows, s.q, c => [c.project, c.co_number, c.name, c.job_number]);
+  rows = applyPersonMine(rows, s);
+  const sorters = {
+    due: (a, b) => (a.due_date || '9999').localeCompare(b.due_date || '9999'),
+    followup: (a, b) => (a.next_followup_date || '9999').localeCompare(b.next_followup_date || '9999'),
+    amount: (a, b) => (b.estimate_amount || 0) - (a.estimate_amount || 0),
+    project: (a, b) => (a.project || '').localeCompare(b.project || ''),
+  };
+  rows = [...rows].sort(sorters[s.sort] || sorters.due);
+
+  document.getElementById('cl-count-' + stage).textContent = `${rows.length} of ${LIST_STATE[stage].length} ${meta.sub}`;
+  document.getElementById('cl-body-' + stage).innerHTML = rows.length ? rows.map(c => {
       const overdue = c.next_followup_date && c.next_followup_date < today;
       return `<div class="proj-row" onclick="openCoFlyout(${c.project_id},${c.id})">
         <div style="flex:1;min-width:0">
@@ -300,7 +413,7 @@ async function renderCoList(stage) {
           ${c.estimate_amount ? `<span class="amount" style="font-size:13px">${fmt$(c.estimate_amount)}</span>` : ''}
           ${c.next_followup_date ? `<div style="font-size:11px;${overdue ? 'color:#dc2626;font-weight:700' : 'color:var(--text-muted)'}">F/U ${fmtD(c.next_followup_date)}${overdue ? ' • OVERDUE' : ''}</div>` : ''}
         </div>
-      </div>`; }).join('') : '<div style="padding:24px;text-align:center;color:var(--text-muted)">None</div>'}</div>`;
+      </div>`; }).join('') : '<div style="padding:24px;text-align:center;color:var(--text-muted)">No matches</div>';
 }
 
 // ── Projects page ──
