@@ -8,6 +8,7 @@
 const express = require('express');
 const v2db = require('./db');
 const jis = require('./jis');
+const notify = require('./notify');
 const maindb = require('../db');   // v1 db — for the logged-in user's admin flag
 
 const router = express.Router();
@@ -97,7 +98,14 @@ router.post('/api/v2/bids/:id/submissions',   t(req => v2db.addSubmission(req.pa
 router.post('/api/v2/bids/:id/customers',     t(req => v2db.addBidCustomers(req.params.id, req.body)));
 
 // Per-submission win/loss
-router.post('/api/v2/submissions/:id/award',        t(req => v2db.awardSubmission(req.params.id, req.body)));
+router.post('/api/v2/submissions/:id/award', async (req, res) => {
+  try {
+    const result = await v2db.awardSubmission(req.params.id, req.body);
+    res.json(result);
+    // fire-and-forget — never let a mail failure affect the award itself
+    maindb.getMember(req.session.userId).then(actor => notify.notifyAwarded(result.bid_id, actor?.name)).catch(() => {});
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
 router.post('/api/v2/submissions/:id/not-awarded',  t(req => v2db.notAwardSubmission(req.params.id, req.body)));
 
 // ── Import Bid from JIS (Job Information Sheet) ───────────────────────────────
@@ -129,6 +137,12 @@ router.delete('/api/v2/bid-customers/:id/contacts/:contactId', t(req => v2db.rem
 
 // ── Follow-ups (bid_submission or change_order parent) ────────────────────────
 router.post('/api/v2/followups',              t(req => v2db.logFollowupV2({ ...req.body, contacted_by: req.body.contacted_by || req.session.userId })));
+
+// ── Reminders (polymorphic — bid or change_order) ─────────────────────────────
+router.get('/api/v2/reminders',                async (req, res) => { try { res.json(await v2db.getRemindersFor(req.query.parent_type, req.query.parent_id)); } catch (e) { res.status(500).json({ error: e.message }); } });
+router.post('/api/v2/reminders',               t(req => v2db.addReminder(req.body.parent_type, req.body.parent_id, req.body)));
+router.put('/api/v2/reminders/:id/dismiss',    t(req => v2db.dismissReminder(req.params.id)));
+router.delete('/api/v2/reminders/:id',         t(req => v2db.deleteReminder(req.params.id)));
 
 // ── Jobs ──────────────────────────────────────────────────────────────────────
 router.post('/api/v2/jobs',                   t(req => v2db.createLegacyJob({ ...req.body, created_by: req.session.userId })));

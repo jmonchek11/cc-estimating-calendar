@@ -792,9 +792,43 @@ function bidNode(b) {
             ${bidCustomerContactsHtml(cust)}
           </div>`).join('')}</div>` : ''}
         ${(b.submissions || []).length ? `<div class="v2-fu"><div style="font-weight:600;color:var(--text);margin-bottom:3px">Submissions</div>${b.submissions.map(s => submissionRow(s, b)).join('')}</div>` : ''}
+        ${remindersHtml('bid', b.id, b.reminders)}
         ${bidActions(b)}
       </div>
     </div>`;
+}
+
+// Reminders — polymorphic (bid or change_order). A personal tickler separate
+// from the follow-up timer: "ping me on this date" regardless of stage.
+function remindersHtml(parentType, parentId, reminders) {
+  const active = (reminders || []).filter(r => !r.dismissed);
+  const rows = active.map(r => {
+    const overdue = r.remind_on < today;
+    return `<div style="font-size:12px;display:flex;align-items:center;gap:6px;padding:3px 0">
+      <span class="${overdue ? 'overdue-txt' : ''}">⏰ ${fmtD(r.remind_on)}${overdue ? ' — OVERDUE' : ''}</span>
+      ${r.note ? `<span style="color:var(--text-muted)">${esc(r.note)}</span>` : ''}
+      <a href="#" onclick="event.preventDefault();actDismissReminder('${parentType}',${parentId},${r._id})" style="font-size:11px;color:#2563eb">dismiss</a>
+      <a href="#" onclick="event.preventDefault();actDeleteReminder('${parentType}',${parentId},${r._id})" style="font-size:11px;color:#dc2626">delete</a>
+    </div>`;
+  }).join('');
+  return `<div style="margin-top:4px">${rows}
+    <a href="#" onclick="event.preventDefault();actAddReminder('${parentType}',${parentId})" style="font-size:11px;color:#2563eb">+ Reminder</a>
+  </div>`;
+}
+function actAddReminder(parentType, parentId) {
+  showForm('⏰ Add Reminder', [
+    { id: 'remind_on', label: 'Remind me on', type: 'date', required: true, value: today },
+    { id: 'note', label: 'Note', type: 'textarea', placeholder: 'What to remember…' },
+  ], data => api('POST', '/api/v2/reminders', { ...data, parent_type: parentType, parent_id: parentId }), 'Add Reminder', 'amber');
+}
+async function actDismissReminder(parentType, parentId, id) {
+  try { await api('PUT', `/api/v2/reminders/${id}/dismiss`); await refresh(); }
+  catch (e) { alert('Failed: ' + e.message); }
+}
+async function actDeleteReminder(parentType, parentId, id) {
+  if (!confirm('Delete this reminder?')) return;
+  try { await api('DELETE', `/api/v2/reminders/${id}`); await refresh(); }
+  catch (e) { alert('Failed: ' + e.message); }
 }
 
 // Bid editable by admin in these (non-terminal) stages
@@ -869,6 +903,7 @@ function coNode(co) {
           ${co.not_approved_notes ? ` · ${esc(co.not_approved_notes)}` : ''}
         </div>
         ${co.followups.length ? `<div class="v2-fu">${co.followups.map(fuRow).join('')}</div>` : ''}
+        ${remindersHtml('change_order', co.id, co.reminders)}
         ${coActions(co)}
       </div>
     </div>`;

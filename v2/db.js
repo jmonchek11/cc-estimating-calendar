@@ -95,6 +95,10 @@ async function getProjectDetail(projectId) {
   const allContactIds = [...new Set(bidCustomers.flatMap(bc => bc.contact_ids || []))];
   const contacts = allContactIds.length ? await M.Contact.find({ _id: { $in: allContactIds } }).lean() : [];
   const contactById = {}; contacts.forEach(c => { contactById[c._id] = fmtContactBrief(c); });
+  const allReminders = await M.Reminder.find({
+    $or: [{ parent_type: 'bid', parent_id: { $in: bidIds } }, { parent_type: 'change_order', parent_id: { $in: cos.map(c => c._id) } }],
+  }).sort({ remind_on: 1 }).lean();
+  const remindersFor = (type, id) => allReminders.filter(r => r.parent_type === type && r.parent_id === id);
   const allFollowups = await M.Followup.find({
     $or: [
       { parent_type: 'bid_submission', parent_id: { $in: submissions.map(s => s._id) } },
@@ -157,6 +161,7 @@ async function getProjectDetail(projectId) {
     close_reason: b.close_reason,
     next_followup_date: b.next_followup_date,
     notes: b.notes,
+    reminders: remindersFor('bid', b._id),
   });
 
   const fmtCo = (co) => ({
@@ -179,6 +184,7 @@ async function getProjectDetail(projectId) {
       .filter(f => f.parent_id === co._id)
       .sort((a, c) => (c.followup_date || '').localeCompare(a.followup_date || ''))
       .map(f => fmtFollowup(f, tm)),
+    reminders: remindersFor('change_order', co._id),
   });
 
   return {
@@ -754,6 +760,55 @@ async function logFollowupV2(data) {
   return { followup_id: fu._id, next_followup_date: next };
 }
 
+// ── Reminders (polymorphic — bid or change_order) ─────────────────────────────
+async function addReminder(parentType, parentId, { note, remind_on }) {
+  if (!remind_on) throw new Error('remind_on required');
+  const M = getModels();
+  const id = await nextId('reminders');
+  await M.Reminder.create({ _id: id, parent_type: parentType, parent_id: Number(parentId), note: note || null, remind_on, dismissed: 0, emailed: 0 });
+  return { id };
+}
+async function dismissReminder(id) {
+  const M = getModels();
+  const r = await M.Reminder.updateOne({ _id: Number(id) }, { $set: { dismissed: 1 } });
+  if (!r.matchedCount) throw new Error('Reminder not found');
+  return { ok: true };
+}
+async function deleteReminder(id) {
+  const M = getModels();
+  await M.Reminder.deleteOne({ _id: Number(id) });
+  return { ok: true };
+}
+async function getRemindersFor(parentType, parentId) {
+  const M = getModels();
+  return M.Reminder.find({ parent_type: parentType, parent_id: Number(parentId) }).sort({ remind_on: 1 }).lean();
+}
+// For the daily reminder-email cron — due, not dismissed, not yet emailed.
+// Returns each reminder alongside the estimator/salesperson (bid) or
+// estimator (change_order) ids who should be notified.
+async function getDueReminders() {
+  const M = getModels();
+  const todayStr = today();
+  const due = await M.Reminder.find({ remind_on: { $lte: todayStr }, dismissed: { $ne: 1 }, emailed: { $ne: 1 } }).lean();
+  const out = [];
+  for (const r of due) {
+    let recipientIds = [];
+    if (r.parent_type === 'bid') {
+      const bid = await M.Bid.findById(r.parent_id).lean();
+      if (bid) recipientIds = [bid.estimator_id, bid.salesperson_id].filter(Boolean);
+    } else if (r.parent_type === 'change_order') {
+      const co = await M.ChangeOrder.findById(r.parent_id).lean();
+      if (co) recipientIds = [co.estimator_id].filter(Boolean);
+    }
+    out.push({ reminder: r, recipientIds: [...new Set(recipientIds)] });
+  }
+  return out;
+}
+async function markReminderEmailed(id) {
+  const M = getModels();
+  await M.Reminder.updateOne({ _id: Number(id) }, { $set: { emailed: 1 } });
+}
+
 // ── Job: manual creation (legacy) + accounting/PM updates ─────────────────────
 async function createLegacyJob(data) {
   const M = getModels();
@@ -1286,4 +1341,5 @@ module.exports = {
   createLegacyJob, updateJob,
   createChangeOrder, submitCO, approveCO, notApproveCO, voidCO, reopenCO,
   _norm, resolveCompanyByName, ensureBidCustomer, teamMap,
+  addReminder, dismissReminder, deleteReminder, getRemindersFor, getDueReminders, markReminderEmailed,
 };

@@ -7,6 +7,8 @@ const path = require('path');
 const cron = require('node-cron');
 const db = require('./db');
 const mailer = require('./mailer');
+const v2db = require('./v2/db');
+const v2notify = require('./v2/notify');
 
 const app = express();
 app.use(express.json({ limit: '25mb' }));
@@ -742,6 +744,31 @@ cron.schedule('0 7 * * *', async () => {
     console.log(`[cron] sent reminder emails for ${due.length} reminder(s)`);
   } catch (e) {
     console.error('[cron] reminder error:', e.message);
+  }
+}, { timezone: 'America/New_York' });
+
+// Daily 7:05 AM ET — v2's reminders (polymorphic: bid or change_order)
+cron.schedule('5 7 * * *', async () => {
+  console.log('[cron] running v2 daily reminder check');
+  try {
+    const due = await v2db.getDueReminders();
+    if (!due.length) return console.log('[cron] v2: no reminders due today');
+    const team = await db.getAllTeam();
+    const memberMap = Object.fromEntries(team.map(m => [m.id, m]));
+
+    for (const { reminder, recipientIds } of due) {
+      const shape = await v2notify.emailShapeForReminder(reminder);
+      if (!shape) { await v2db.markReminderEmailed(reminder._id); continue; }
+      const emails = recipientIds.map(id => memberMap[id]).filter(m => m?.email);
+      for (const r of emails) {
+        const { subject, html } = mailer.emailReminder(shape, reminder, r.name);
+        await mailer.sendMail({ to: r.email, subject, html });
+      }
+      await v2db.markReminderEmailed(reminder._id);
+    }
+    console.log(`[cron] v2: sent reminder emails for ${due.length} reminder(s)`);
+  } catch (e) {
+    console.error('[cron] v2 reminder error:', e.message);
   }
 }, { timezone: 'America/New_York' });
 
