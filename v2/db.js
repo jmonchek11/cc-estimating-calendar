@@ -1058,6 +1058,96 @@ async function getCoList(stage) {
 }
 
 // ── Dashboard rollups (v2) ────────────────────────────────────────────────────
+// ── Weekly Digest — replaces the Monday status meeting ────────────────────────
+// Same shape v1's getDigest() produced (so mailer.js's emailDigest template
+// works unchanged) plus two v2-only sections (coDueSoon/coOverdueFollowups)
+// since v2 splits Change Orders into their own collection instead of folding
+// them into Bid rows. Overdue follow-ups intentionally stay LAST in both the
+// web and email versions (a prior, explicit ask — don't bury the good news
+// under the bad news at the top).
+async function getDigest() {
+  const M = getModels();
+  const todayStr = today();
+  const weekAgo = addDays(todayStr, -7);
+  const twoWeeksAgo = addDays(todayStr, -14);
+  const weekAhead = addDays(todayStr, 7);
+  const twoWeeksAhead = addDays(todayStr, 14);
+  const CLOSED = ['awarded', 'not_awarded', 'closed'];
+
+  const [bids, cos, jobs, projects, companies, members, bidCustomers] = await Promise.all([
+    M.Bid.find({ superseded: { $ne: 1 } }).lean(),
+    M.ChangeOrder.find().lean(),
+    M.Job.find().lean(),
+    M.Project.find().lean(),
+    M.Company.find().lean(),
+    M.TeamMember.find({ active: 1 }).lean(),
+    M.BidCustomer.find().lean(),
+  ]);
+  const pName = {}; projects.forEach(p => pName[p._id] = p.name);
+  const coName = {}; companies.forEach(c => coName[c._id] = c.name);
+  const tm = teamMap(members);
+  const custByBid = {}; bidCustomers.forEach(bc => (custByBid[bc.bid_id] = custByBid[bc.bid_id] || []).push(coName[bc.company_id]));
+
+  const shapeBid = (b) => ({
+    id: b._id, project_name: pName[b.project_id] || '—', bid_number: b.bid_number, stage: b.stage,
+    customer: [...new Set((custByBid[b._id] || []).filter(Boolean))].join(', '),
+    estimator_initials: tm[b.estimator_id]?.initials || null,
+    salesperson_initials: tm[b.salesperson_id]?.initials || null,
+    estimate_amount: b.estimate_amount, estimate_due_date: b.due_date, next_followup_date: b.next_followup_date,
+  });
+  const shapeCo = (c) => {
+    const job = jobs.find(j => j._id === c.job_id);
+    return {
+      id: c._id, project_name: `${c.co_number} — ${c.name}`, bid_number: job ? pName[job.project_id] : null,
+      estimator_initials: tm[c.estimator_id]?.initials || null,
+      estimate_amount: c.estimate_amount, estimate_due_date: c.due_date, next_followup_date: c.next_followup_date,
+    };
+  };
+
+  const pipelineSummary = ['opportunity', 'active_bid', 'submitted'].map(stage => {
+    const l = bids.filter(b => b.stage === stage);
+    return { stage, count: l.length, total_value: l.reduce((s, b) => s + (b.estimate_amount || 0), 0) };
+  });
+  const activeCos = cos.filter(c => ['active_co', 'submitted_co'].includes(c.stage));
+  pipelineSummary.push({ stage: 'active_co', count: activeCos.length, total_value: activeCos.reduce((s, c) => s + (c.estimate_amount || 0), 0) });
+
+  const byEstimator = members.filter(m => m.role === 'estimator').map(m => {
+    const l = bids.filter(b => b.estimator_id === m._id && !CLOSED.includes(b.stage));
+    return { id: m._id, name: m.name, initials: m.initials, bid_count: l.length, total_value: l.reduce((s, b) => s + (b.estimate_amount || 0), 0) };
+  }).sort((a, b) => b.bid_count - a.bid_count);
+
+  const bySalesperson = members.filter(m => m.role === 'sales').map(m => {
+    const l = bids.filter(b => b.salesperson_id === m._id);
+    const overdue = l.filter(b => b.next_followup_date && b.next_followup_date < todayStr && !CLOSED.includes(b.stage)).length;
+    return { id: m._id, name: m.name, initials: m.initials, bid_count: l.filter(b => !CLOSED.includes(b.stage)).length, overdue_followups: overdue };
+  }).sort((a, b) => b.overdue_followups - a.overdue_followups || b.bid_count - a.bid_count);
+
+  const newThisWeek = bids.filter(b => b.created_at >= weekAgo).sort((a, b) => (b.created_at || '').localeCompare(a.created_at || '')).map(shapeBid);
+  const submittedThisWeek = bids.filter(b => b.date_submitted && b.date_submitted >= twoWeeksAgo && b.date_submitted <= todayStr).map(shapeBid);
+  const awardedThisWeek = bids.filter(b => b.stage === 'awarded' && b.award_date >= weekAgo && b.award_date <= todayStr).sort((a, b) => (a.award_date || '').localeCompare(b.award_date || '')).map(shapeBid);
+  const notAwardedThisWeek = bids.filter(b => b.stage === 'not_awarded' && b.updated_at >= weekAgo).map(shapeBid);
+  const upcomingDueDates = bids.filter(b => ['opportunity', 'active_bid', 'submitted'].includes(b.stage) && b.due_date >= todayStr && b.due_date <= weekAhead).sort((a, b) => (a.due_date || '').localeCompare(b.due_date || '')).map(shapeBid);
+  const overdueFollowups = bids.filter(b => b.stage === 'submitted' && b.next_followup_date && b.next_followup_date < todayStr).sort((a, b) => (a.next_followup_date || '').localeCompare(b.next_followup_date || '')).map(shapeBid);
+
+  const coDueSoon = activeCos.filter(c => c.due_date >= todayStr && c.due_date <= weekAhead).sort((a, b) => (a.due_date || '').localeCompare(b.due_date || '')).map(shapeCo);
+  const coOverdueFollowups = cos.filter(c => c.stage === 'submitted_co' && c.next_followup_date && c.next_followup_date < todayStr).sort((a, b) => (a.next_followup_date || '').localeCompare(b.next_followup_date || '')).map(shapeCo);
+
+  const reminders = await M.Reminder.find({ dismissed: { $ne: 1 }, remind_on: { $gte: todayStr, $lte: twoWeeksAhead } }).sort({ remind_on: 1 }).lean();
+  const upcomingReminders = reminders.map(r => {
+    if (r.parent_type === 'bid') { const b = bids.find(x => x._id === r.parent_id); return b ? { bid_id: b._id, project_name: pName[b.project_id], bid_number: b.bid_number, rid: r._id, note: r.note, remind_on: r.remind_on } : null; }
+    const c = cos.find(x => x._id === r.parent_id); if (!c) return null;
+    return { bid_id: c._id, project_name: `${c.co_number} — ${c.name}`, bid_number: null, rid: r._id, note: r.note, remind_on: r.remind_on };
+  }).filter(Boolean);
+
+  return {
+    generatedAt: new Date().toISOString(), weekRange: { from: weekAgo, to: todayStr },
+    pipelineSummary, byEstimator, bySalesperson,
+    newThisWeek, submittedThisWeek, awardedThisWeek, notAwardedThisWeek,
+    upcomingDueDates, coDueSoon, upcomingReminders,
+    overdueFollowups, coOverdueFollowups,   // always last — rendered at the bottom
+  };
+}
+
 async function getDashboard() {
   const M = getModels();
   const [bids, cos, jobs, subs, companies, projects] = await Promise.all([
@@ -1342,4 +1432,5 @@ module.exports = {
   createChangeOrder, submitCO, approveCO, notApproveCO, voidCO, reopenCO,
   _norm, resolveCompanyByName, ensureBidCustomer, teamMap,
   addReminder, dismissReminder, deleteReminder, getRemindersFor, getDueReminders, markReminderEmailed,
+  getDigest,
 };

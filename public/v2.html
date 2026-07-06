@@ -162,6 +162,7 @@
 
       <div class="nav-section-label">PIPELINE</div>
       <a class="nav-item" data-page="dashboard" href="#dashboard" onclick="navigate('dashboard');return false"><span class="nav-icon">⬛</span> Dashboard</a>
+      <a class="nav-item" data-page="digest" href="#digest" onclick="navigate('digest');return false"><span class="nav-icon">📊</span> Weekly Digest</a>
       <div class="nav-section-label">BIDS</div>
       <a class="nav-item" data-page="opportunities" href="#opportunities" onclick="navigate('opportunities');return false"><span class="nav-icon">🔵</span> Opportunities</a>
       <a class="nav-item" data-page="active-bids" href="#active-bids" onclick="navigate('active-bids');return false"><span class="nav-icon">🟡</span> Active Bids</a>
@@ -239,6 +240,7 @@ function navigate(page) {
   if (page === 'submitted-cos') { VIEW = { name: 'colist', arg: 'submitted_co' }; return renderCoList('submitted_co'); }
   if (page === 'search') { VIEW = { name: 'search' }; return renderSearchResults(); }
   if (page === 'contacts') { VIEW = { name: 'contacts' }; return renderContacts(); }
+  if (page === 'digest') { VIEW = { name: 'digest' }; return renderDigest(); }
   VIEW = { name: 'projects' }; return load();
 }
 
@@ -246,6 +248,7 @@ async function rerenderView() {
   switch (VIEW.name) {
     case 'search':    return renderSearchResults();
     case 'contacts':  return renderContacts();
+    case 'digest':    return renderDigest();
     case 'projects':  return load();
     case 'project':   return renderProjectPage(VIEW.arg);
     case 'bidlist':   return renderBidList(VIEW.arg);
@@ -369,6 +372,84 @@ async function renderSearchResults() {
     <div class="page-header"><div><div class="page-title">🔍 Search Results</div><div class="page-subtitle">${total} result${total !== 1 ? 's' : ''} for "<strong>${esc(q)}</strong>"</div></div></div>
     ${BID_STAGE_ORDER.map(bidSection).join('')}
     ${CO_STAGE_ORDER.map(coSection).join('')}`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WEEKLY DIGEST — replaces the Monday status meeting. Overdue follow-ups
+// (bids AND change orders) intentionally render LAST, per an explicit past
+// ask: don't bury the good news under the bad news at the top.
+// ═══════════════════════════════════════════════════════════════════════════
+async function renderDigest() {
+  setActiveNav('digest');
+  const main = document.getElementById('main');
+  main.innerHTML = '<div style="padding:30px;color:var(--text-muted)">Generating digest…</div>';
+  let d;
+  try { d = await api('GET', '/api/v2/digest'); }
+  catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
+
+  const STAGE_LABEL = { opportunity: 'Opportunities', active_bid: 'Active Bids', submitted: 'Submitted', active_co: 'Active Change Orders' };
+  const pipelineRows = d.pipelineSummary.map(s => `
+    <tr><td style="padding:6px 0">${STAGE_LABEL[s.stage] || s.stage}</td>
+      <td style="text-align:center;font-weight:700">${s.count}</td>
+      <td style="text-align:right" class="amount">${s.total_value ? fmt$(s.total_value) : '—'}</td></tr>`).join('');
+
+  const section = (icon, title, count, bodyHtml, color) => `
+    <div class="card" style="margin-bottom:14px">
+      <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px">
+        <div style="font-weight:700;font-size:14px">${icon} ${title}</div>
+        ${count != null ? `<span class="badge" style="background:${color || '#e2e8f0'};color:#fff">${count}</span>` : ''}
+      </div>
+      <div style="padding:${bodyHtml ? '0' : '16px'}">${bodyHtml || '<div style="padding:16px;color:var(--text-muted);font-size:13px">None</div>'}</div>
+    </div>`;
+
+  const bidRow = (b, showFU) => `
+    <div class="proj-row" style="cursor:default">
+      <div style="flex:1;min-width:0">
+        <div class="proj-name">${esc(b.project_name)}${b.bid_number ? ` <span style="color:var(--text-muted);font-weight:400;font-size:12px">#${esc(b.bid_number)}</span>` : ''}</div>
+        <div class="proj-meta">
+          ${b.customer ? esc(b.customer) : ''}
+          ${b.estimator_initials ? `<span class="proj-meta-sep">·</span> Est ${esc(b.estimator_initials)}` : ''}
+          ${b.salesperson_initials ? ` Sales ${esc(b.salesperson_initials)}` : ''}
+          ${showFU && b.next_followup_date ? `<span class="proj-meta-sep">·</span> <span class="${b.next_followup_date < today ? 'overdue-txt' : ''}">F/U ${fmtD(b.next_followup_date)}</span>` : ''}
+          ${!showFU && b.estimate_due_date ? `<span class="proj-meta-sep">·</span> Due ${fmtD(b.estimate_due_date)}` : ''}
+        </div>
+      </div>
+      <div style="text-align:right;flex-shrink:0">${b.estimate_amount ? `<span class="amount" style="font-size:13px">${fmt$(b.estimate_amount)}</span>` : ''}</div>
+    </div>`;
+  const rows = (list, showFU) => list.length ? list.map(b => bidRow(b, showFU)).join('') : null;
+
+  const peopleTable = (rows, cols) => rows.length ? `<table style="width:100%;font-size:13px">
+    <thead><tr>${cols.map(c => `<th style="text-align:${c.right ? 'right' : 'left'};padding:6px 12px;color:var(--text-muted);font-weight:600;font-size:11px">${c.label}</th>`).join('')}</tr></thead>
+    <tbody>${rows.map(r => `<tr style="border-top:1px solid var(--border)">${cols.map(c => `<td style="padding:6px 12px;text-align:${c.right ? 'right' : 'left'}${c.overdue && r[c.key] > 0 ? ';color:#dc2626;font-weight:700' : ''}">${c.fmt ? c.fmt(r[c.key]) : esc(String(r[c.key]))}</td>`).join('')}</tr>`).join('')}</tbody>
+  </table>` : null;
+
+  main.innerHTML = `
+    <div class="page-header">
+      <div><div class="page-title">📊 Weekly Digest</div><div class="page-subtitle">${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</div></div>
+      <button class="v2-btn outline" onclick="window.print()">🖨 Print</button>
+    </div>
+
+    ${section('📋', 'Pipeline Snapshot', null, `<table style="width:100%"><thead><tr><th style="text-align:left;padding:8px 16px;color:var(--text-muted);font-size:11px">Stage</th><th style="padding:8px 16px;color:var(--text-muted);font-size:11px">Count</th><th style="text-align:right;padding:8px 16px;color:var(--text-muted);font-size:11px">Value</th></tr></thead><tbody>${d.pipelineSummary.map(s => `<tr style="border-top:1px solid var(--border)"><td style="padding:8px 16px">${STAGE_LABEL[s.stage] || s.stage}</td><td style="text-align:center;font-weight:700">${s.count}</td><td style="text-align:right;padding:8px 16px" class="amount">${s.total_value ? fmt$(s.total_value) : '—'}</td></tr>`).join('')}</tbody></table>`)}
+
+    ${d.upcomingReminders.length ? section('⏰', 'Upcoming Reminders', d.upcomingReminders.length, d.upcomingReminders.map(r => `
+      <div class="proj-row"><div style="flex:1"><div class="proj-name">${esc(r.project_name)}${r.bid_number ? ` #${esc(r.bid_number)}` : ''}</div>
+      <div class="proj-meta">${fmtD(r.remind_on)}${r.note ? ' · ' + esc(r.note) : ''}</div></div></div>`).join(''), '#8b5cf6') : ''}
+
+    ${section('📅', 'Upcoming Due Dates (7 days)', d.upcomingDueDates.length + d.coDueSoon.length, rows([...d.upcomingDueDates, ...d.coDueSoon], false), '#2563eb')}
+
+    ${d.newThisWeek.length ? section('🆕', 'New This Week', d.newThisWeek.length, rows(d.newThisWeek, false), '#2563eb') : ''}
+    ${d.submittedThisWeek.length ? section('📤', 'Submitted (last 2 weeks)', d.submittedThisWeek.length, rows(d.submittedThisWeek, false), '#2563eb') : ''}
+    ${d.awardedThisWeek.length ? section('🎉', 'Awarded This Week', d.awardedThisWeek.length, rows(d.awardedThisWeek, false), '#16a34a') : ''}
+    ${d.notAwardedThisWeek.length ? section('✗', 'Not Awarded This Week', d.notAwardedThisWeek.length, rows(d.notAwardedThisWeek, false), '#dc2626') : ''}
+
+    ${section('👥', 'By Salesperson', null, peopleTable(d.bySalesperson, [
+      { key: 'name', label: 'Name' }, { key: 'bid_count', label: 'Active Bids', right: true },
+      { key: 'overdue_followups', label: 'Overdue F/U', right: true, overdue: true },
+    ]))}
+
+    ${section('⚠️', 'Overdue Follow-ups — Bids', d.overdueFollowups.length, rows(d.overdueFollowups, true), '#dc2626')}
+    ${d.coOverdueFollowups.length ? section('⚠️', 'Overdue Follow-ups — Change Orders', d.coOverdueFollowups.length, rows(d.coOverdueFollowups, true), '#dc2626') : ''}
+  `;
 }
 
 const BID_LIST_META = {

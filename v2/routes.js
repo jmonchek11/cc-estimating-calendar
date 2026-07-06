@@ -55,6 +55,11 @@ router.get('/api/v2/search', async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+router.get('/api/v2/digest', async (req, res) => {
+  try { res.json(await v2db.getDigest()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.get('/api/v2/health', async (req, res) => {
   try { res.json(await v2db.getDataHealth()); }
   catch (e) { res.status(500).json({ error: e.message }); }

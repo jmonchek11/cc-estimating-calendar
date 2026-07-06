@@ -773,10 +773,12 @@ cron.schedule('5 7 * * *', async () => {
 }, { timezone: 'America/New_York' });
 
 // Monday 6 AM ET — weekly digest to all users with email on file
+// Reads v2's data (v1's own getDigest is retired here to avoid sending two
+// separate digest emails as v2 becomes the system of record).
 cron.schedule('0 6 * * 1', async () => {
   console.log('[cron] running weekly digest');
   try {
-    const [digest, users] = await Promise.all([db.getDigest(), db.getActiveUserEmails()]);
+    const [digest, users] = await Promise.all([v2db.getDigest(), db.getActiveUserEmails()]);
     if (!users.length) return console.log('[cron] no users with email — skipping digest');
     const { subject, html } = mailer.emailDigest(digest);
     await mailer.sendMail({ to: users.map(u => u.email), subject, html });
