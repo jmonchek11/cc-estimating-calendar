@@ -27,6 +27,11 @@ router.get('/api/v2/projects', async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+router.get('/api/v2/jobs-picker', async (req, res) => {
+  try { res.json(await v2db.getJobsPicker()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.get('/api/v2/projects/:id', async (req, res) => {
   try {
     const detail = await v2db.getProjectDetail(req.params.id);
@@ -90,7 +95,7 @@ router.get('/api/v2/meta', async (req, res) => {
       // so m.id is directly comparable to v2's bid.estimator_id/salesperson_id
       // ("mine only" etc) — no cross-database name bridging needed anymore.
       const m = await maindb.getMember(req.session.userId);
-      if (m) current_user = { id: m.id, name: m.name, is_admin: !!m.is_admin };
+      if (m) current_user = { id: m.id, name: m.name, is_admin: !!m.is_admin, role: m.role };
     } catch { /* ignore — current_user stays null */ }
     res.json({ ...meta, current_user });
   } catch (e) { res.status(500).json({ error: e.message }); }

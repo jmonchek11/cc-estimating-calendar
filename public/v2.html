@@ -423,7 +423,7 @@ async function renderSettings() {
   } catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
 
   const isAdmin = !!CURRENT_USER?.is_admin;
-  const roleLabel = { estimator: 'Estimator', sales: 'Salesperson' };
+  const roleLabel = { estimator: 'Estimator', sales: 'Salesperson', oversight: 'Admin / Oversight' };
 
   const teamRows = team.map(m => `
     <div class="proj-row" style="${m.active ? '' : 'opacity:.5'}">
@@ -480,7 +480,7 @@ function actNewTeamMember() {
   showForm('+ Add Team Member', [
     { id: 'name', label: 'Name', type: 'text', required: true },
     { id: 'initials', label: 'Initials', type: 'text', required: true, placeholder: 'JD' },
-    { id: 'role', label: 'Role', type: 'select', required: true, options: [{ value: 'estimator', label: 'Estimator' }, { value: 'sales', label: 'Salesperson' }] },
+    { id: 'role', label: 'Role', type: 'select', required: true, options: [{ value: 'estimator', label: 'Estimator' }, { value: 'sales', label: 'Salesperson' }, { value: 'oversight', label: 'Admin / Oversight (no bids — sees global view by default)' }] },
     { id: 'email', label: 'Email', type: 'text', required: true, placeholder: 'Needed for login + notifications' },
     { id: 'temp_password', label: 'Temporary Password', type: 'text', placeholder: 'They\'ll be asked to change it on first login' },
   ], data => api('POST', '/api/v2/team', data), 'Create', 'green');
@@ -490,7 +490,7 @@ function actEditTeamMember(id) {
   showForm('✏️ Edit Team Member', [
     { id: 'name', label: 'Name', type: 'text', required: true, value: m?.name },
     { id: 'initials', label: 'Initials', type: 'text', required: true, value: m?.initials },
-    { id: 'role', label: 'Role', type: 'select', required: true, value: m?.role, options: [{ value: 'estimator', label: 'Estimator' }, { value: 'sales', label: 'Salesperson' }] },
+    { id: 'role', label: 'Role', type: 'select', required: true, value: m?.role, options: [{ value: 'estimator', label: 'Estimator' }, { value: 'sales', label: 'Salesperson' }, { value: 'oversight', label: 'Admin / Oversight (no bids — sees global view by default)' }] },
     { id: 'email', label: 'Email', type: 'text', value: m?.email },
     { id: 'active', label: 'Active', type: 'select', required: true, value: m?.active ? '1' : '0', options: [{ value: '1', label: 'Active' }, { value: '0', label: 'Inactive' }] },
     { id: 'is_admin', label: 'Admin', type: 'select', required: true, value: m?.is_admin ? '1' : '0', options: [{ value: '1', label: 'Yes — full access incl. Data Health merges' }, { value: '0', label: 'No' }] },
@@ -778,7 +778,12 @@ const CO_LIST_META = {
 let LIST_STATE = {};    // stageKey -> raw rows from the API
 let FILTER_STATE = {};  // stageKey -> { q, person, mine, sort }
 
-function filterState(key) { return (FILTER_STATE[key] = FILTER_STATE[key] || { q: '', person: '', mine: !!CURRENT_USER, sort: 'due' }); }
+// Admin/Oversight users have no bids of their own — "mine only" would just
+// show them nothing, so they default to the global view like everyone else
+// would if they weren't logged in, while estimators/salespeople still get
+// "mine" as the default.
+function defaultMine() { return !!CURRENT_USER && CURRENT_USER.role !== 'oversight'; }
+function filterState(key) { return (FILTER_STATE[key] = FILTER_STATE[key] || { q: '', person: '', mine: defaultMine(), sort: 'due' }); }
 
 function personOpts() {
   return META.team.map(t => [`${t.role === 'sales' ? 'sal' : 'est'}:${t.id}`, `${t.name} (${t.initials})`]);
@@ -802,7 +807,7 @@ function filterBarHtml(key, sortOpts) {
 }
 
 function clearListFilters(key) {
-  FILTER_STATE[key] = { q: '', person: '', mine: !!CURRENT_USER, sort: filterState(key).sort === 'followup' ? 'followup' : 'due' };
+  FILTER_STATE[key] = { q: '', person: '', mine: defaultMine(), sort: filterState(key).sort === 'followup' ? 'followup' : 'due' };
   if (VIEW.name === 'bidlist') renderBidList(VIEW.arg); else renderCoList(VIEW.arg);
 }
 
@@ -1027,7 +1032,7 @@ function renderProjectsBody() {
 }
 
 // ── Dashboard page (v2 data) ──
-let DASH_MINE = true;   // "My View" is the default; toggle switches to global
+let DASH_MINE = null;   // "My View" is the default (except Admin/Oversight, who default to global); toggle switches it
 function setDashboardView(mine) { DASH_MINE = mine; renderDashboard(); }
 
 async function renderDashboard() {
@@ -1038,6 +1043,7 @@ async function renderDashboard() {
   let d, calItems;
   try {
     await ensureMeta();
+    if (DASH_MINE === null) DASH_MINE = defaultMine();
     const mine = DASH_MINE && CURRENT_USER;
     [d, calItems] = await Promise.all([api('GET', '/api/v2/dashboard' + (mine ? '?mine_only=true' : '')), fetchCalendarItems()]);
   } catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
@@ -1913,50 +1919,60 @@ function actSetPM(jobId) {
 // jobs (usually one, but legacy + bid-backed duplicates can leave more than
 // one until merged). Falls through to the same actAddCO() form once a job
 // is chosen — no duplicated form logic.
+// One fuzzy search box across BOTH project name and job # — a PM's change-
+// order request rarely uses the exact project name shown in the app, but
+// it's very often the job # (or close to it), so matching either field in
+// one box gets the coordinator straight to the right job without needing
+// to know the project naming convention.
+let NCO_JOBS = [];
 async function actNewChangeOrder() {
-  // ALL_PROJECTS is only populated by visiting the Projects page — this
-  // button lives on the Change Orders page, so fetch fresh rather than
-  // trust a cache that may never have been filled this session.
-  const projects = await api('GET', '/api/v2/projects');
-  ALL_PROJECTS = projects.map(p => ({ id: p.id, name: p.name }));
+  NCO_JOBS = await api('GET', '/api/v2/jobs-picker');
 
   document.getElementById('v2-form-overlay')?.remove();
   const ov = document.createElement('div');
   ov.className = 'v2-overlay'; ov.id = 'v2-form-overlay';
   ov.onclick = e => { if (e.target === ov) ov.remove(); };
   ov.innerHTML = `
-    <div class="v2-modal" style="max-width:420px">
+    <div class="v2-modal" style="max-width:460px">
       <div class="v2-modal-hd">+ New Change Order<button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">✕</button></div>
       <div class="v2-modal-bd">
-        <div class="v2-field"><label>Project</label>
-          <select id="vf-nco-project">
-            <option value="">— pick a project —</option>
-            ${projectOpts().map(o => `<option value="${o.value}">${esc(o.label)}</option>`).join('')}
-          </select>
+        <div class="v2-field"><label>Project name or Job #</label>
+          <div class="v2-combo">
+            <div class="v2-combo-box">
+              <input id="vf-nco-jobsearch" class="v2-combo-input" type="text" autocomplete="off" placeholder="Type whatever the PM called it — name or job #…">
+            </div>
+            <div class="v2-combo-menu" id="cc-nco-jobsearch-menu"></div>
+          </div>
         </div>
-        <div id="nco-job-area"></div>
       </div>
     </div>`;
   document.body.appendChild(ov);
 
-  document.getElementById('vf-nco-project').onchange = async (e) => {
-    const pid = e.target.value;
-    const jobArea = document.getElementById('nco-job-area');
-    if (!pid) { jobArea.innerHTML = ''; return; }
-    jobArea.innerHTML = '<div style="font-size:12px;color:var(--text-muted)">Loading jobs…</div>';
-    try {
-      const proj = await api('GET', `/api/v2/projects/${pid}`);
-      if (!proj.jobs.length) {
-        jobArea.innerHTML = `<div class="v2-modal-err" style="display:block;padding:0;margin-top:8px">This project has no job yet — a change order always needs an existing job. Jobs are created when a bid here is awarded, or add one via "+ Legacy Job" on the Projects page.</div>`;
-        return;
-      }
-      jobArea.innerHTML = `<div class="v2-field"><label>Job</label>
-          <select id="vf-nco-job">
-            ${proj.jobs.map(j => `<option value="${j.id}">${j.job_number ? 'Job ' + esc(j.job_number) : 'Job # pending (from accounting)'}</option>`).join('')}
-          </select></div>
-        <button class="v2-btn blue" style="margin-top:4px" onclick="document.getElementById('v2-form-overlay').remove();actAddCO(document.getElementById('vf-nco-job').value)">Next → Change Order Details</button>`;
-    } catch (err) { jobArea.innerHTML = `<div class="v2-modal-err" style="display:block;padding:0;margin-top:8px">${esc(err.message)}</div>`; }
+  const input = document.getElementById('vf-nco-jobsearch');
+  const menu = document.getElementById('cc-nco-jobsearch-menu');
+  const renderMenu = () => {
+    const raw = input.value.trim();
+    if (!raw) { menu.style.display = 'none'; return; }
+    const scored = NCO_JOBS.map(j => {
+      const scores = [_projMatchScore(raw, j.project_name), j.job_number ? _projMatchScore(raw, j.job_number) : null].filter(s => s !== null);
+      return scores.length ? { j, score: Math.min(...scores) } : null;
+    }).filter(Boolean).sort((a, b) => a.score - b.score).slice(0, 8);
+    menu.innerHTML = scored.length
+      ? scored.map(({ j }) => `<div class="v2-combo-opt" onmousedown="event.preventDefault();ncoPickJob(${j.id})">${esc(j.project_name)} ${j.job_number ? `<span style="color:var(--text-muted)">— Job ${esc(j.job_number)}</span>` : `<span style="color:#d97706">— Job # pending</span>`}</div>`).join('')
+      : `<div class="v2-combo-empty">No matching project or job # — a change order needs an existing job (created at bid award, or via "+ Legacy Job")</div>`;
+    const box = input.closest('.v2-combo-box');
+    const rect = box.getBoundingClientRect();
+    menu.style.left = rect.left + 'px'; menu.style.width = rect.width + 'px'; menu.style.top = (rect.bottom + 3) + 'px';
+    menu.style.display = 'block';
   };
+  input.addEventListener('input', renderMenu);
+  input.addEventListener('focus', renderMenu);
+  input.addEventListener('blur', () => setTimeout(() => { menu.style.display = 'none'; }, 150));
+  setTimeout(() => input.focus(), 30);
+}
+function ncoPickJob(jobId) {
+  document.getElementById('v2-form-overlay')?.remove();
+  actAddCO(jobId);
 }
 
 function actAddCO(jobId) {
@@ -2141,6 +2157,16 @@ async function showHealth() {
 
     ${card('Data integrity check', Object.values(h.orphans).reduce((s,n)=>s+n,0), 'references pointing at deleted records — should always be zero; a non-zero count here is a bug to investigate, not something to auto-fix',
       Object.values(h.orphans).some(n=>n>0) ? Object.entries(h.orphans).filter(([,n])=>n>0).map(([k,n]) => `<div style="font-size:13px;padding:2px 0;color:#dc2626">• ${k}: ${n}</div>`).join('') : '<div style="color:#16a34a;font-size:13px">All clean 🎉</div>', '#0f766e')}
+
+    ${card('Jobs awaiting a job # from accounting', h.jobsAwaitingNumber.length, 'nothing to fix here directly — this is just visibility so someone can follow up with accounting on the specific ones',
+      h.jobsAwaitingNumber.length ? h.jobsAwaitingNumber.map(j => `
+        <div class="proj-row" onclick="renderProjectPage(${j.project_id})">
+          <div style="flex:1;min-width:0">
+            <div class="proj-name">${esc(j.project)}</div>
+            <div class="proj-meta">${j.pm ? `PM ${esc(j.pm)}` : '<span style="color:#dc2626">no PM assigned</span>'}${j.cos ? `<span class="proj-meta-sep">·</span> ${j.cos} CO${j.cos!==1?'s':''}` : ''}</div>
+          </div>
+          <span style="font-size:11px;color:var(--text-muted);flex-shrink:0">since ${fmtD(j.created_at.slice(0,10))}</span>
+        </div>`).join('') : '<div style="color:#16a34a;font-size:13px">None</div>', '#0891b2')}
 
     ${card('Projects with no bids', h.noBidProjects.length, 'LEGACY = job + COs, no base bid (expected — just rename) · EMPTY = nothing attached (safe to delete)',
       h.noBidProjects.length ? noBidList(h.noBidProjects) : '<div style="color:#16a34a;font-size:13px">None</div>', '#0891b2')}

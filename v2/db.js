@@ -26,6 +26,20 @@ function teamMap(members) {
 }
 
 // ── Projects list with hierarchy rollups ──────────────────────────────────────
+// Flat job list for the New Change Order picker — a CO always attaches to an
+// existing job, and the coordinator entering it usually only has whatever
+// name/job # the PM used in their request, not the exact Project name shown
+// in the app. Returning every job (project + job # together) lets the
+// frontend fuzzy-match on either field in one search box instead of forcing
+// a "pick the exact project first" step.
+async function getJobsPicker() {
+  const M = getModels();
+  const [jobs, projects] = await Promise.all([M.Job.find().lean(), M.Project.find().lean()]);
+  const pName = {}; projects.forEach(p => pName[p._id] = p.name);
+  return jobs.map(j => ({ id: j._id, project_id: j.project_id, project_name: pName[j.project_id] || '?', job_number: j.job_number || null }))
+    .sort((a, b) => a.project_name.localeCompare(b.project_name));
+}
+
 async function getProjects() {
   const M = getModels();
   const [projects, bids, jobs, cos, bidCustomers, companies] = await Promise.all([
@@ -1316,11 +1330,13 @@ async function getDashboard(userId, mineOnly) {
 
 async function getDataHealth() {
   const M = getModels();
-  const [projects, bids, jobs, cos, companies, bidCustomers, contacts, submissions, reminders] = await Promise.all([
+  const [projects, bids, jobs, cos, companies, bidCustomers, contacts, submissions, reminders, members] = await Promise.all([
     M.Project.find().lean(), M.Bid.find().lean(), M.Job.find().lean(),
     M.ChangeOrder.find().lean(), M.Company.find().lean(), M.BidCustomer.find().lean(),
     M.Contact.find({ active: 1 }).lean(), M.BidSubmission.find().lean(), M.Reminder.find().lean(),
+    M.TeamMember.find().lean(),
   ]);
+  const tmName = {}; members.forEach(m => tmName[m._id] = m.name);
   const ignoredPairs = await M.IgnoredPair.find().lean();
   const ignoreSet = (kind) => new Set(ignoredPairs.filter(x => x.kind === kind).map(x => Math.min(x.a, x.b) + ':' + Math.max(x.a, x.b)));
   const overrides = (await M.CleanupOverride.find().sort({ _id: -1 }).lean()).map(o => ({ id: o._id, type: o.type, desc: _describeOverride(o) }));
@@ -1350,8 +1366,14 @@ async function getDataHealth() {
     const jobN = (jobsByProj[p._id] || []).length, coN = projCo(p);
     return { id: p._id, name: p.name, jobs: jobN, cos: coN, empty: jobN === 0 && coN === 0 };
   }).sort((a, b) => (a.empty === b.empty ? b.cos - a.cos : a.empty ? -1 : 1));
-  // jobs with no job # (awaiting accounting)
-  const jobsNoNumber = jobs.filter(j => !j.job_number).length;
+  // jobs with no job # (awaiting accounting) — full list, not just a count,
+  // so an admin can actually follow up on the specific ones (who's the PM,
+  // how long it's been waiting) instead of just knowing a number.
+  const jobsAwaitingNumber = jobs.filter(j => !j.job_number).map(j => ({
+    id: j._id, project_id: j.project_id, project: pNameForDup[j.project_id] || '?',
+    pm: j.pm_id ? (tmName[j.pm_id] || '?') : null, cos: (cosByJob[j._id] || []).length, created_at: j.created_at,
+  })).sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
+  const jobsNoNumber = jobsAwaitingNumber.length;
 
   // Exact-duplicate change orders — same CO # created twice under one job
   // (same double-click/double-submit risk as duplicate bids). Voided COs are
@@ -1442,7 +1464,7 @@ async function getDataHealth() {
   return {
     counts: { projects: projects.length, bids: bids.length, jobs: jobs.length, change_orders: cos.length, companies: companies.length },
     dupProjects, dupCompanies, dupBids, dupCOs, dupJobs, dupContacts, emptyCompanies, orphans,
-    noBidProjects, jobsNoNumber, missing, overrides,
+    noBidProjects, jobsNoNumber, jobsAwaitingNumber, missing, overrides,
   };
 }
 
@@ -1721,7 +1743,7 @@ async function applyCleanupOverrides() {
 }
 
 module.exports = {
-  getProjects, getProjectDetail, getMeta, getDashboard, getBidList, getCoList, getSearchResults, getDataHealth, mergeProjects, mergeCompanies, mergeJobs,
+  getProjects, getJobsPicker, getProjectDetail, getMeta, getDashboard, getBidList, getCoList, getSearchResults, getDataHealth, mergeProjects, mergeCompanies, mergeJobs,
   dismissDuplicates, deleteEmptyProject, applyCleanupOverrides, removeOverride,
   recomputeBidHeadline, recomputeBidFollowup, nextId,
   createOpportunity, createDirectBid, startBid, submitBid, addSubmission, addBidCustomers, adminUpdate,
