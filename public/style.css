@@ -56,7 +56,7 @@ body {
 
 /* ── SIDEBAR ── */
 .sidebar-header {
-  padding: 20px 16px 16px;
+  padding: 20px 6px 16px;
   border-bottom: 1px solid #1e293b;
   margin-bottom: 8px;
 }
@@ -72,7 +72,7 @@ body {
 .logo-sub { color: var(--sidebar-text); font-size: 11px; }
 
 .nav-section-label {
-  padding: 16px 16px 4px;
+  padding: 11px 16px 4px;
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -84,7 +84,7 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 9px 16px;
+  padding: 7px 16px;
   color: var(--sidebar-text);
   text-decoration: none;
   font-size: 13px;
