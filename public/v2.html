@@ -712,17 +712,22 @@ async function renderDigest() {
   </table>` : null;
 
   const ps = d.pipelineSnapshot;
-  const pipelineTable = `<table style="width:100%">
-    <thead><tr><th style="text-align:left;padding:8px 16px;color:var(--text-muted);font-size:11px">Stage</th><th style="padding:8px 16px;color:var(--text-muted);font-size:11px">Count</th><th style="text-align:right;padding:8px 16px;color:var(--text-muted);font-size:11px">Value</th></tr></thead>
-    <tbody>
-      <tr style="border-top:1px solid var(--border)"><td style="padding:8px 16px">Opportunities</td><td style="text-align:center;font-weight:700">${ps.opportunities}</td><td style="padding:8px 16px"></td></tr>
-      <tr style="border-top:1px solid var(--border)"><td style="padding:8px 16px">Active Bids</td><td style="text-align:center;font-weight:700">${ps.activeBids}</td><td style="padding:8px 16px"></td></tr>
-      <tr style="border-top:1px solid var(--border)"><td style="padding:8px 16px">Active Change Orders</td><td style="text-align:center;font-weight:700">${ps.activeCos}</td><td style="padding:8px 16px"></td></tr>
-      <tr style="border-top:2px solid var(--border)"><td style="padding:8px 16px;font-weight:600">Submitted Bids — 30 days</td><td style="text-align:center;font-weight:700">${ps.submittedBids.last30.count}</td><td style="text-align:right;padding:8px 16px" class="amount">${fmt$(ps.submittedBids.last30.value)}</td></tr>
-      <tr style="border-top:1px solid var(--border)"><td style="padding:8px 16px;font-weight:600">Submitted Bids — YTD</td><td style="text-align:center;font-weight:700">${ps.submittedBids.ytd.count}</td><td style="text-align:right;padding:8px 16px" class="amount">${fmt$(ps.submittedBids.ytd.value)}</td></tr>
-      <tr style="border-top:2px solid var(--border)"><td style="padding:8px 16px;font-weight:600">Submitted Change Orders — 30 days</td><td style="text-align:center;font-weight:700">${ps.submittedCos.last30.count}</td><td style="text-align:right;padding:8px 16px" class="amount">${fmt$(ps.submittedCos.last30.value)}</td></tr>
-      <tr style="border-top:1px solid var(--border)"><td style="padding:8px 16px;font-weight:600">Submitted Change Orders — YTD</td><td style="text-align:center;font-weight:700">${ps.submittedCos.ytd.count}</td><td style="text-align:right;padding:8px 16px" class="amount">${fmt$(ps.submittedCos.ytd.value)}</td></tr>
-    </tbody></table>`;
+  const pStat = (label, value, sub, color, onclick) => `
+    <div class="stat-card" style="border-top:3px solid ${color};${onclick ? 'cursor:pointer' : ''}"${onclick ? ` onclick="${onclick}"` : ''}>
+      <div class="stat-label">${label}</div>
+      <div class="stat-value" style="color:${color}">${value}</div>
+      <div class="stat-sub">${sub || ''}</div>
+    </div>`;
+  const pipelineBubbles = `
+    <div class="stat-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;padding:14px 16px">
+      ${pStat('Opportunities', ps.opportunities, '', '#3b82f6', "renderBidList('opportunity')")}
+      ${pStat('Active Bids', ps.activeBids, '', '#f59e0b', "renderBidList('active_bid')")}
+      ${pStat('Active Change Orders', ps.activeCos, '', '#f97316', "renderCoList('active_co')")}
+      ${pStat('Submitted Bids — 30d', ps.submittedBids.last30.count, fmt$(ps.submittedBids.last30.value), '#2563eb', "renderBidList('submitted')")}
+      ${pStat('Submitted Bids — YTD', ps.submittedBids.ytd.count, fmt$(ps.submittedBids.ytd.value), '#2563eb', "renderBidList('submitted')")}
+      ${pStat('Submitted COs — 30d', ps.submittedCos.last30.count, fmt$(ps.submittedCos.last30.value), '#d97706', "renderCoList('submitted_co')")}
+      ${pStat('Submitted COs — YTD', ps.submittedCos.ytd.count, fmt$(ps.submittedCos.ytd.value), '#d97706', "renderCoList('submitted_co')")}
+    </div>`;
 
   const submittedGroupsHtml = d.submittedByEstimator.map(g => `
     <div style="padding:8px 16px;background:#f8fafc;font-weight:700;font-size:12px;color:#2563eb;border-top:1px solid var(--border)">${esc(g.name)} (${g.bids.length})</div>
@@ -736,7 +741,7 @@ async function renderDigest() {
       <button class="v2-btn outline" onclick="window.print()">🖨 Print</button>
     </div>
 
-    ${section('📋', 'Pipeline Snapshot', null, pipelineTable)}
+    ${section('📋', 'Pipeline Snapshot', null, pipelineBubbles)}
 
     ${d.upcomingReminders.length ? section('⏰', 'Upcoming Reminders', d.upcomingReminders.length, d.upcomingReminders.map(r => `
       <div class="proj-row" ${r.project_id ? `onclick="${r.kind === 'bid' ? `openBidFlyout(${r.project_id},${r.bid_id})` : `openCoFlyout(${r.project_id},${r.bid_id})`}"` : ''}><div style="flex:1"><div class="proj-name">${esc(r.project_name)}${r.bid_number ? ` #${esc(r.bid_number)}` : ''}</div>
