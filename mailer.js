@@ -167,21 +167,19 @@ function emailReminder(bid, reminder, recipientName) {
 function emailDigest(digest) {
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 
-  // Pipeline summary
-  const stageOrder = ['opportunity', 'active_bid', 'active_co', 'follow_up'];
-  const stageLabels = { opportunity: 'Opportunities', active_bid: 'Active Bids', active_co: 'Change Orders', follow_up: 'Follow-ups' };
-  const pipelineMap = {};
-  (digest.pipelineSummary || []).forEach(s => pipelineMap[s.stage] = s);
-  const pipelineRows = stageOrder.map(s => {
-    const d = pipelineMap[s];
-    if (!d) return '';
-    const amt = fmtCurrency(d.total_value);
-    return `<tr>
-      <td>${stageLabels[s]}</td>
-      <td style="text-align:center;font-weight:700">${d.count}</td>
-      <td style="text-align:right;color:#166534">${amt || '—'}</td>
-    </tr>`;
-  }).join('');
+  // Pipeline snapshot — counts only for opportunities/active bids/active COs
+  // (nothing's been priced/committed yet); $ values only make sense once
+  // something's actually been submitted, shown as both a 30-day window and
+  // year-to-date.
+  const ps = digest.pipelineSnapshot || {};
+  const pipelineRows = `
+    <tr><td>Opportunities</td><td style="text-align:center;font-weight:700">${ps.opportunities || 0}</td><td></td></tr>
+    <tr><td>Active Bids</td><td style="text-align:center;font-weight:700">${ps.activeBids || 0}</td><td></td></tr>
+    <tr><td>Active Change Orders</td><td style="text-align:center;font-weight:700">${ps.activeCos || 0}</td><td></td></tr>
+    <tr><td>Submitted Bids — 30d</td><td style="text-align:center;font-weight:700">${ps.submittedBids?.last30?.count || 0}</td><td style="text-align:right;color:#166534">${fmtCurrency(ps.submittedBids?.last30?.value) || '—'}</td></tr>
+    <tr><td>Submitted Bids — YTD</td><td style="text-align:center;font-weight:700">${ps.submittedBids?.ytd?.count || 0}</td><td style="text-align:right;color:#166534">${fmtCurrency(ps.submittedBids?.ytd?.value) || '—'}</td></tr>
+    <tr><td>Submitted COs — 30d</td><td style="text-align:center;font-weight:700">${ps.submittedCos?.last30?.count || 0}</td><td style="text-align:right;color:#166534">${fmtCurrency(ps.submittedCos?.last30?.value) || '—'}</td></tr>
+    <tr><td>Submitted COs — YTD</td><td style="text-align:center;font-weight:700">${ps.submittedCos?.ytd?.count || 0}</td><td style="text-align:right;color:#166534">${fmtCurrency(ps.submittedCos?.ytd?.value) || '—'}</td></tr>`;
 
   function bidListRows(bids, showAmt = false) {
     if (!bids || !bids.length) return `<p style="color:#94a3b8;font-size:13px;margin:6px 0">None this week</p>`;
@@ -247,10 +245,22 @@ function emailDigest(digest) {
         ${dueDateRows(digest.upcomingDueDates)}
       </div>
 
-      ${(digest.newThisWeek || []).length ? `
+      ${(digest.newOpportunities || []).length ? `
       <div class="section">
-        <div class="section-title">🆕 New Bids This Week (${digest.newThisWeek.length})</div>
-        ${bidListRows(digest.newThisWeek)}
+        <div class="section-title">🆕 New Opportunities This Week (${digest.newOpportunities.length})</div>
+        ${bidListRows(digest.newOpportunities)}
+      </div>` : ''}
+
+      ${(digest.newActiveBids || []).length ? `
+      <div class="section">
+        <div class="section-title">🆕 New Active Bids This Week (${digest.newActiveBids.length})</div>
+        ${bidListRows(digest.newActiveBids)}
+      </div>` : ''}
+
+      ${(digest.newActiveCos || []).length ? `
+      <div class="section">
+        <div class="section-title">🆕 New Change Orders This Week (${digest.newActiveCos.length})</div>
+        ${bidListRows(digest.newActiveCos)}
       </div>` : ''}
 
       <div class="section">

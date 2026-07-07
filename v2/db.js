@@ -1145,8 +1145,10 @@ async function getDigest() {
   const todayStr = today();
   const weekAgo = addDays(todayStr, -7);
   const twoWeeksAgo = addDays(todayStr, -14);
-  const weekAhead = addDays(todayStr, 7);
+  const thirtyAgo = addDays(todayStr, -30);
+  const monthAhead = addDays(todayStr, 30);
   const twoWeeksAhead = addDays(todayStr, 14);
+  const yearStart = todayStr.slice(0, 4) + '-01-01';
   const CLOSED = ['awarded', 'not_awarded', 'closed'];
 
   const [bids, cos, jobs, projects, companies, members, bidCustomers] = await Promise.all([
@@ -1160,11 +1162,12 @@ async function getDigest() {
   ]);
   const pName = {}; projects.forEach(p => pName[p._id] = p.name);
   const coName = {}; companies.forEach(c => coName[c._id] = c.name);
+  const jobProj = {}; jobs.forEach(j => jobProj[j._id] = j.project_id);
   const tm = teamMap(members);
   const custByBid = {}; bidCustomers.forEach(bc => (custByBid[bc.bid_id] = custByBid[bc.bid_id] || []).push(coName[bc.company_id]));
 
   const shapeBid = (b) => ({
-    id: b._id, project_name: pName[b.project_id] || '—', bid_number: b.bid_number, stage: b.stage,
+    id: b._id, project_id: b.project_id, project_name: pName[b.project_id] || '—', bid_number: b.bid_number, stage: b.stage,
     customer: [...new Set((custByBid[b._id] || []).filter(Boolean))].join(', '),
     estimator_initials: tm[b.estimator_id]?.initials || null,
     salesperson_initials: tm[b.salesperson_id]?.initials || null,
@@ -1173,18 +1176,35 @@ async function getDigest() {
   const shapeCo = (c) => {
     const job = jobs.find(j => j._id === c.job_id);
     return {
-      id: c._id, project_name: `${c.co_number} — ${c.name}`, bid_number: job ? pName[job.project_id] : null,
+      id: c._id, project_id: job ? job.project_id : null, project_name: `${c.co_number} — ${c.name}`, bid_number: job ? pName[job.project_id] : null,
       estimator_initials: tm[c.estimator_id]?.initials || null,
       estimate_amount: c.estimate_amount, estimate_due_date: c.due_date, next_followup_date: c.next_followup_date,
     };
   };
 
-  const pipelineSummary = ['opportunity', 'active_bid', 'submitted'].map(stage => {
-    const l = bids.filter(b => b.stage === stage);
-    return { stage, count: l.length, total_value: l.reduce((s, b) => s + (b.estimate_amount || 0), 0) };
-  });
+  // Pipeline snapshot: opportunities/active bids/active COs are current
+  // pipeline counts (no $ — nothing's been priced/committed yet). Submitted
+  // bids & COs are the only rows worth a $ value, shown as both a 30-day
+  // window and year-to-date since "currently submitted" isn't the same
+  // question as "how much did we submit."
   const activeCos = cos.filter(c => ['active_co', 'submitted_co'].includes(c.stage));
-  pipelineSummary.push({ stage: 'active_co', count: activeCos.length, total_value: activeCos.reduce((s, c) => s + (c.estimate_amount || 0), 0) });
+  const submittedBids30 = bids.filter(b => b.date_submitted && b.date_submitted >= thirtyAgo && b.date_submitted <= todayStr);
+  const submittedBidsYTD = bids.filter(b => b.date_submitted && b.date_submitted >= yearStart && b.date_submitted <= todayStr);
+  const submittedCos30 = cos.filter(c => c.date_submitted && c.date_submitted >= thirtyAgo && c.date_submitted <= todayStr);
+  const submittedCosYTD = cos.filter(c => c.date_submitted && c.date_submitted >= yearStart && c.date_submitted <= todayStr);
+  const pipelineSnapshot = {
+    opportunities: bids.filter(b => b.stage === 'opportunity').length,
+    activeBids: bids.filter(b => b.stage === 'active_bid').length,
+    activeCos: activeCos.length,
+    submittedBids: {
+      last30: { count: submittedBids30.length, value: submittedBids30.reduce((s, b) => s + (b.estimate_amount || 0), 0) },
+      ytd: { count: submittedBidsYTD.length, value: submittedBidsYTD.reduce((s, b) => s + (b.estimate_amount || 0), 0) },
+    },
+    submittedCos: {
+      last30: { count: submittedCos30.length, value: submittedCos30.reduce((s, c) => s + (c.estimate_amount || 0), 0) },
+      ytd: { count: submittedCosYTD.length, value: submittedCosYTD.reduce((s, c) => s + (c.estimate_amount || 0), 0) },
+    },
+  };
 
   const byEstimator = members.filter(m => m.role === 'estimator').map(m => {
     const l = bids.filter(b => b.estimator_id === m._id && !CLOSED.includes(b.stage));
@@ -1197,68 +1217,109 @@ async function getDigest() {
     return { id: m._id, name: m.name, initials: m.initials, bid_count: l.filter(b => !CLOSED.includes(b.stage)).length, overdue_followups: overdue };
   }).sort((a, b) => b.overdue_followups - a.overdue_followups || b.bid_count - a.bid_count);
 
-  const newThisWeek = bids.filter(b => b.created_at >= weekAgo).sort((a, b) => (b.created_at || '').localeCompare(a.created_at || '')).map(shapeBid);
-  const submittedThisWeek = bids.filter(b => b.date_submitted && b.date_submitted >= twoWeeksAgo && b.date_submitted <= todayStr).map(shapeBid);
+  // New this week — split by type so the reader doesn't have to eyeball stage.
+  const newBidsThisWeek = bids.filter(b => b.created_at >= weekAgo);
+  const newOpportunities = newBidsThisWeek.filter(b => b.stage === 'opportunity').sort((a, b) => (b.created_at || '').localeCompare(a.created_at || '')).map(shapeBid);
+  const newActiveBids = newBidsThisWeek.filter(b => b.stage === 'active_bid').sort((a, b) => (b.created_at || '').localeCompare(a.created_at || '')).map(shapeBid);
+  const newActiveCos = cos.filter(c => c.created_at >= weekAgo).sort((a, b) => (b.created_at || '').localeCompare(a.created_at || '')).map(shapeCo);
+
+  // Submitted last 2 weeks, grouped by estimator (flat chronological list was
+  // hard to scan across a big team — grouping mirrors "By Estimator" above).
+  const submittedLast2Weeks = bids.filter(b => b.date_submitted && b.date_submitted >= twoWeeksAgo && b.date_submitted <= todayStr);
+  const submittedByEstimator = members.filter(m => m.role === 'estimator').map(m => ({
+    id: m._id, name: m.name, initials: m.initials,
+    bids: submittedLast2Weeks.filter(b => b.estimator_id === m._id).sort((a, b) => (b.date_submitted || '').localeCompare(a.date_submitted || '')).map(shapeBid),
+  })).filter(g => g.bids.length).sort((a, b) => b.bids.length - a.bids.length);
+  const submittedNoEstimator = submittedLast2Weeks.filter(b => !b.estimator_id).map(shapeBid);
+
   const awardedThisWeek = bids.filter(b => b.stage === 'awarded' && b.award_date >= weekAgo && b.award_date <= todayStr).sort((a, b) => (a.award_date || '').localeCompare(b.award_date || '')).map(shapeBid);
   const notAwardedThisWeek = bids.filter(b => b.stage === 'not_awarded' && b.updated_at >= weekAgo).map(shapeBid);
-  const upcomingDueDates = bids.filter(b => ['opportunity', 'active_bid', 'submitted'].includes(b.stage) && b.due_date >= todayStr && b.due_date <= weekAhead).sort((a, b) => (a.due_date || '').localeCompare(b.due_date || '')).map(shapeBid);
+  const upcomingDueDates = bids.filter(b => ['opportunity', 'active_bid', 'submitted'].includes(b.stage) && b.due_date >= todayStr && b.due_date <= monthAhead).sort((a, b) => (a.due_date || '').localeCompare(b.due_date || '')).map(shapeBid);
   const overdueFollowups = bids.filter(b => b.stage === 'submitted' && b.next_followup_date && b.next_followup_date < todayStr).sort((a, b) => (a.next_followup_date || '').localeCompare(b.next_followup_date || '')).map(shapeBid);
 
-  const coDueSoon = activeCos.filter(c => c.due_date >= todayStr && c.due_date <= weekAhead).sort((a, b) => (a.due_date || '').localeCompare(b.due_date || '')).map(shapeCo);
+  const coDueSoon = activeCos.filter(c => c.due_date >= todayStr && c.due_date <= monthAhead).sort((a, b) => (a.due_date || '').localeCompare(b.due_date || '')).map(shapeCo);
   const coOverdueFollowups = cos.filter(c => c.stage === 'submitted_co' && c.next_followup_date && c.next_followup_date < todayStr).sort((a, b) => (a.next_followup_date || '').localeCompare(b.next_followup_date || '')).map(shapeCo);
 
   const reminders = await M.Reminder.find({ dismissed: { $ne: 1 }, remind_on: { $gte: todayStr, $lte: twoWeeksAhead } }).sort({ remind_on: 1 }).lean();
   const upcomingReminders = reminders.map(r => {
-    if (r.parent_type === 'bid') { const b = bids.find(x => x._id === r.parent_id); return b ? { bid_id: b._id, project_name: pName[b.project_id], bid_number: b.bid_number, rid: r._id, note: r.note, remind_on: r.remind_on } : null; }
+    if (r.parent_type === 'bid') { const b = bids.find(x => x._id === r.parent_id); return b ? { kind: 'bid', bid_id: b._id, project_id: b.project_id, project_name: pName[b.project_id], bid_number: b.bid_number, rid: r._id, note: r.note, remind_on: r.remind_on } : null; }
     const c = cos.find(x => x._id === r.parent_id); if (!c) return null;
-    return { bid_id: c._id, project_name: `${c.co_number} — ${c.name}`, bid_number: null, rid: r._id, note: r.note, remind_on: r.remind_on };
+    return { kind: 'co', bid_id: c._id, project_id: jobProj[c.job_id] || null, project_name: `${c.co_number} — ${c.name}`, bid_number: null, rid: r._id, note: r.note, remind_on: r.remind_on };
   }).filter(Boolean);
 
   return {
     generatedAt: new Date().toISOString(), weekRange: { from: weekAgo, to: todayStr },
-    pipelineSummary, byEstimator, bySalesperson,
-    newThisWeek, submittedThisWeek, awardedThisWeek, notAwardedThisWeek,
+    pipelineSnapshot, byEstimator, bySalesperson,
+    newOpportunities, newActiveBids, newActiveCos,
+    submittedByEstimator, submittedNoEstimator,
+    awardedThisWeek, notAwardedThisWeek,
     upcomingDueDates, coDueSoon, upcomingReminders,
     overdueFollowups, coOverdueFollowups,   // always last — rendered at the bottom
   };
 }
 
-async function getDashboard() {
+// mineOnly/userId: "My View" (default in the UI) filters every bubble/list to
+// bids/COs/jobs owned by that person — estimator_id or salesperson_id for
+// bids, estimator_id for COs, pm_id (falling back to the winning bid's
+// estimator/salesperson, since pm_id is often left blank at award time) for
+// jobs still awaiting a job #.
+async function getDashboard(userId, mineOnly) {
   const M = getModels();
   const [bids, cos, jobs, subs, companies, projects] = await Promise.all([
     M.Bid.find().lean(), M.ChangeOrder.find().lean(), M.Job.find().lean(),
     M.BidSubmission.find().lean(), M.Company.find().lean(), M.Project.find().lean(),
   ]);
+  const uid = mineOnly && userId ? Number(userId) : null;
   const today = new Date().toISOString().split('T')[0];
+  const yearStart = today.slice(0, 4) + '-01-01';
   const ago = (n) => new Date(Date.now() - n * 86400000).toISOString().split('T')[0];
   const ahead = (n) => new Date(Date.now() + n * 86400000).toISOString().split('T')[0];
   const pName = {}; projects.forEach(p => pName[p._id] = p.name);
   const coName = {}; companies.forEach(c => coName[c._id] = c.name);
+  const bidById = {}; bids.forEach(b => bidById[b._id] = b);
 
-  const stageOf = (st) => { const l = bids.filter(b => b.stage === st && !b.superseded); return { stage: st, count: l.length, value: l.reduce((s, b) => s + (b.estimate_amount || 0), 0) }; };
-  const pipeline = ['opportunity', 'active_bid', 'submitted'].map(stageOf);
-  const activeCos = cos.filter(c => ['active_co', 'submitted_co'].includes(c.stage));
+  const isMyBid = (b) => !uid || b.estimator_id === uid || b.salesperson_id === uid;
+  const isMyCo = (c) => !uid || c.estimator_id === uid;
+  const jobOwner = (j) => j.pm_id || bidById[j.winning_bid_id]?.estimator_id || bidById[j.winning_bid_id]?.salesperson_id || null;
+  const isMyJob = (j) => !uid || jobOwner(j) === uid;
 
-  const awarded = bids.filter(b => b.stage === 'awarded' && b.award_date && b.award_date >= ago(30)).sort((a, b) => (b.award_date || '').localeCompare(a.award_date || ''));
-  const overdueSubs = subs.filter(s => s.is_current && s.outcome === 'pending' && s.next_followup_date && s.next_followup_date < today);
-  const overdueCos = cos.filter(c => c.stage === 'submitted_co' && c.next_followup_date && c.next_followup_date < today);
-  const dueSoon = bids.filter(b => ['active_bid', 'submitted'].includes(b.stage) && !b.superseded && b.due_date && b.due_date >= today && b.due_date <= ahead(14)).sort((a, b) => (a.due_date || '').localeCompare(b.due_date || ''));
+  const myBids = bids.filter(isMyBid), myCos = cos.filter(isMyCo);
+  const stageCount = (st) => myBids.filter(b => b.stage === st && !b.superseded).length;
+  const pipeline = {
+    opportunity: stageCount('opportunity'),
+    active_bid: stageCount('active_bid'),
+  };
+  const activeCos = myCos.filter(c => ['active_co', 'submitted_co'].includes(c.stage));
+
+  const submittedYTD = myBids.filter(b => b.date_submitted && b.date_submitted >= yearStart && b.date_submitted <= today);
+  const awardedYTD = myBids.filter(b => b.stage === 'awarded' && b.award_date && b.award_date >= yearStart && b.award_date <= today);
+  const awardedMissingDate = myBids.filter(b => b.stage === 'awarded' && !b.award_date).length;
+
+  const overdueBids = subs.filter(s => s.is_current && s.outcome === 'pending' && s.next_followup_date && s.next_followup_date < today && (!uid || bidById[s.bid_id]?.salesperson_id === uid));
+  const overdueCos = myCos.filter(c => c.stage === 'submitted_co' && c.next_followup_date && c.next_followup_date < today);
+  const dueSoon = myBids.filter(b => ['active_bid', 'submitted'].includes(b.stage) && !b.superseded && b.due_date && b.due_date >= today && b.due_date <= ahead(14)).sort((a, b) => (a.due_date || '').localeCompare(b.due_date || ''));
+
+  const myJobsPending = jobs.filter(j => !j.job_number).filter(isMyJob);
 
   return {
+    mineOnly: !!uid,
     pipeline,
-    activeCo: { count: activeCos.length, value: activeCos.reduce((s, c) => s + (c.estimate_amount || 0), 0) },
-    awarded30: { count: awarded.length, value: awarded.reduce((s, b) => s + (b.estimate_amount || 0), 0), list: awarded.slice(0, 8).map(b => ({ id: b._id, bid_number: b.bid_number, project: pName[b.project_id], amount: b.estimate_amount, award_date: b.award_date, company: b.awarded_company_id ? coName[b.awarded_company_id] : null })) },
-    overdueCount: overdueSubs.length + overdueCos.length,
-    dueSoon: dueSoon.slice(0, 15).map(b => ({ id: b._id, bid_number: b.bid_number, project: pName[b.project_id], due_date: b.due_date, stage: b.stage })),
-    jobsPending: jobs.filter(j => !j.job_number).length,
+    activeCoCount: activeCos.length,
+    submittedYTD: { count: submittedYTD.length },
+    awardedYTD: { count: awardedYTD.length, value: awardedYTD.reduce((s, b) => s + (b.estimate_amount || 0), 0), missingAwardDate: awardedMissingDate,
+      list: awardedYTD.slice(0, 8).sort((a,b)=>(b.award_date||'').localeCompare(a.award_date||'')).map(b => ({ id: b._id, project_id: b.project_id, bid_number: b.bid_number, project: pName[b.project_id], amount: b.estimate_amount, award_date: b.award_date, company: b.awarded_company_id ? coName[b.awarded_company_id] : null })) },
+    overdueBidCount: overdueBids.length, overdueCoCount: overdueCos.length,
+    dueSoon: dueSoon.slice(0, 15).map(b => ({ id: b._id, project_id: b.project_id, bid_number: b.bid_number, project: pName[b.project_id], due_date: b.due_date, stage: b.stage })),
+    jobsPending: myJobsPending.length,
   };
 }
 
 async function getDataHealth() {
   const M = getModels();
-  const [projects, bids, jobs, cos, companies, bidCustomers] = await Promise.all([
+  const [projects, bids, jobs, cos, companies, bidCustomers, contacts, submissions, reminders] = await Promise.all([
     M.Project.find().lean(), M.Bid.find().lean(), M.Job.find().lean(),
     M.ChangeOrder.find().lean(), M.Company.find().lean(), M.BidCustomer.find().lean(),
+    M.Contact.find({ active: 1 }).lean(), M.BidSubmission.find().lean(), M.Reminder.find().lean(),
   ]);
   const ignoredPairs = await M.IgnoredPair.find().lean();
   const ignoreSet = (kind) => new Set(ignoredPairs.filter(x => x.kind === kind).map(x => Math.min(x.a, x.b) + ':' + Math.max(x.a, x.b)));
@@ -1292,6 +1353,80 @@ async function getDataHealth() {
   // jobs with no job # (awaiting accounting)
   const jobsNoNumber = jobs.filter(j => !j.job_number).length;
 
+  // Exact-duplicate change orders — same CO # created twice under one job
+  // (same double-click/double-submit risk as duplicate bids). Voided COs are
+  // excluded — a void is an intentional retirement, not a live duplicate.
+  const cosByJobNum = {};
+  cos.forEach(c => { if (!c.co_number || c.stage === 'voided') return; (cosByJobNum[c.job_id + '|' + c.co_number] = cosByJobNum[c.job_id + '|' + c.co_number] || []).push(c); });
+  const jobById2 = {}; jobs.forEach(j => jobById2[j._id] = j);
+  const dupCOs = Object.values(cosByJobNum).filter(g => g.length > 1).map(g => {
+    const job = jobById2[g[0].job_id];
+    return {
+      job_id: g[0].job_id, project: job ? (pNameForDup[job.project_id] || '?') : '?', job_number: job?.job_number || null,
+      co_number: g[0].co_number,
+      cos: g.map(c => ({ id: c._id, stage: c.stage, name: c.name, estimate_amount: c.estimate_amount, created_at: c.created_at })),
+    };
+  });
+
+  // Duplicate jobs (same job # under one project) — the per-project hierarchy
+  // view already surfaces + merges these one project at a time; this is the
+  // same check run across ALL projects so it's visible without hunting.
+  const jobsByProjNum = {};
+  jobs.forEach(j => { if (!j.job_number) return; (jobsByProjNum[j.project_id + '|' + j.job_number] = jobsByProjNum[j.project_id + '|' + j.job_number] || []).push(j); });
+  const dupJobs = Object.values(jobsByProjNum).filter(g => g.length > 1).map(g => ({
+    project_id: g[0].project_id, project: pNameForDup[g[0].project_id] || '?', job_number: g[0].job_number,
+    jobs: g.map(j => ({ id: j._id, winning_bid_id: j.winning_bid_id, cos: (cosByJob[j._id] || []).length })),
+  }));
+
+  // Duplicate contacts — same (normalized, fuzzy-matched) name at the SAME
+  // company. Scoped per-company on purpose: two different real people
+  // coincidentally named "John Smith" at two different companies are not a
+  // duplicate. Confirmed happening in practice as a side effect of the
+  // duplicate-bid bug (adding customers/contacts to both copies before the
+  // duplicate bid was noticed).
+  const companyName = {}; companies.forEach(c => companyName[c._id] = c.name);
+  const contactsByCompany = {};
+  contacts.forEach(c => { if (!c.company_id) return; (contactsByCompany[c.company_id] = contactsByCompany[c.company_id] || []).push(c); });
+  let dupContacts = [];
+  for (const [companyId, list] of Object.entries(contactsByCompany)) {
+    const items = list.map(c => ({ id: c._id, name: [c.first_name, c.last_name].filter(Boolean).join(' ') || '(no name)', key: _norm([c.first_name, c.last_name].filter(Boolean).join(' ')), phone: c.phone, email: c.email }));
+    const groups = _clusterSimilar(items, ignoreSet('contact'));
+    groups.forEach(g => dupContacts.push({ company_id: Number(companyId), company: companyName[companyId] || '?', contacts: g }));
+  }
+
+  // Companies with zero activity anywhere (no bids ever bid to them, no
+  // contacts, never awarded) — safe to delete outright, same idea as
+  // "Projects with no bids."
+  const companyIdsWithActivity = new Set([
+    ...bidCustomers.map(bc => bc.company_id),
+    ...contacts.map(c => c.company_id).filter(Boolean),
+    ...submissions.map(s => s.company_id),
+    ...bids.filter(b => b.awarded_company_id).map(b => b.awarded_company_id),
+    ...jobs.filter(j => j.awarded_company_id).map(j => j.awarded_company_id),
+  ]);
+  const emptyCompanies = companies.filter(c => !companyIdsWithActivity.has(c._id)).map(c => ({ id: c._id, name: c.name }));
+
+  // FK integrity — counts of any reference pointing at a record that no
+  // longer exists. Should always be zero; if not, it's a symptom of a bug
+  // elsewhere, not something to silently paper over, so this just reports
+  // counts rather than offering a one-click "fix."
+  const projectIds = new Set(projects.map(p => p._id));
+  const bidIds = new Set(bids.map(b => b._id));
+  const companyIds = new Set(companies.map(c => c._id));
+  const jobIds = new Set(jobs.map(j => j._id));
+  const coIds = new Set(cos.map(c => c._id));
+  const orphans = {
+    bidCustomersBadBid: bidCustomers.filter(bc => !bidIds.has(bc.bid_id)).length,
+    bidCustomersBadCompany: bidCustomers.filter(bc => !companyIds.has(bc.company_id)).length,
+    contactsBadCompany: contacts.filter(c => c.company_id && !companyIds.has(c.company_id)).length,
+    submissionsBadBid: submissions.filter(s => !bidIds.has(s.bid_id)).length,
+    submissionsBadCompany: submissions.filter(s => !companyIds.has(s.company_id)).length,
+    changeOrdersBadJob: cos.filter(c => !jobIds.has(c.job_id)).length,
+    jobsBadProject: jobs.filter(j => !projectIds.has(j.project_id)).length,
+    bidsBadProject: bids.filter(b => !projectIds.has(b.project_id)).length,
+    remindersBadParent: reminders.filter(r => r.parent_type === 'bid' ? !bidIds.has(r.parent_id) : r.parent_type === 'change_order' ? !coIds.has(r.parent_id) : false).length,
+  };
+
   // Bids missing data the stage REQUIRES. Opportunities require none of these
   // (bid #, customer, estimator are collected at Start Bid), so they're excluded.
   const needsData = bids.filter(b => ['active_bid', 'submitted'].includes(b.stage) && !b.superseded);
@@ -1306,7 +1441,8 @@ async function getDataHealth() {
 
   return {
     counts: { projects: projects.length, bids: bids.length, jobs: jobs.length, change_orders: cos.length, companies: companies.length },
-    dupProjects, dupCompanies, dupBids, noBidProjects, jobsNoNumber, missing, overrides,
+    dupProjects, dupCompanies, dupBids, dupCOs, dupJobs, dupContacts, emptyCompanies, orphans,
+    noBidProjects, jobsNoNumber, missing, overrides,
   };
 }
 
@@ -1395,6 +1531,58 @@ async function mergeCompanies(survivorId, mergeIds) {
   return { survivor: sid, merged: ids.length };
 }
 
+// ── Merge duplicate contacts — repoints any BidCustomer.contact_ids arrays
+// that reference a merged id to the survivor (deduping in case a bid somehow
+// ended up referencing both), then deletes the merged rows.
+async function mergeContacts(survivorId, mergeIds) {
+  const M = getModels();
+  const sid = Number(survivorId);
+  const ids = (mergeIds || []).map(Number).filter(x => x && x !== sid);
+  if (!ids.length) throw new Error('Nothing to merge');
+  const survivor = await M.Contact.findById(sid).lean();
+  if (!survivor) throw new Error('Survivor contact not found');
+  const bcRows = await M.BidCustomer.find({ contact_ids: { $in: ids } }).lean();
+  for (const bc of bcRows) {
+    const newIds = [...new Set(bc.contact_ids.map(cid => ids.includes(cid) ? sid : cid))];
+    await M.BidCustomer.updateOne({ _id: bc._id }, { $set: { contact_ids: newIds } });
+  }
+  await M.Contact.deleteMany({ _id: { $in: ids } });
+  return { survivor: sid, merged: ids.length };
+}
+
+// Delete a company with zero activity anywhere (Data Health "Empty
+// companies"). Re-verifies at delete time (not just trusting the health
+// snapshot) so a company that picked up activity in between can't be
+// silently deleted out from under real data.
+async function deleteCompany(id) {
+  const M = getModels();
+  const cid = Number(id);
+  const company = await M.Company.findById(cid).lean();
+  if (!company) throw new Error('Company not found');
+  const [hasBidCustomer, hasContact, hasSubmission, hasAwardedBid, hasAwardedJob] = await Promise.all([
+    M.BidCustomer.exists({ company_id: cid }), M.Contact.exists({ company_id: cid }),
+    M.BidSubmission.exists({ company_id: cid }), M.Bid.exists({ awarded_company_id: cid }), M.Job.exists({ awarded_company_id: cid }),
+  ]);
+  if (hasBidCustomer || hasContact || hasSubmission || hasAwardedBid || hasAwardedJob) throw new Error('This company has activity — no longer empty, refresh Data Health.');
+  await M.Company.deleteOne({ _id: cid });
+  return { deleted: cid };
+}
+
+// Delete a duplicate change order (Data Health "Duplicate change orders" —
+// same CO # created twice under one job, same double-click risk as
+// duplicate bids). Only allowed at active_co — once it's been submitted,
+// that's real progress, not a clean accident to undo.
+async function deleteChangeOrder(id) {
+  const M = getModels();
+  const co = await M.ChangeOrder.findById(Number(id)).lean();
+  if (!co) throw new Error('Change order not found');
+  if (co.stage !== 'active_co') throw new Error(`Can't delete — this CO is already ${co.stage}, that's real progress.`);
+  await M.Followup.deleteMany({ parent_type: 'change_order', parent_id: co._id });
+  await M.Reminder.deleteMany({ parent_type: 'change_order', parent_id: co._id });
+  await M.ChangeOrder.deleteOne({ _id: co._id });
+  return { deleted: co._id };
+}
+
 // ── Merge duplicate jobs: move change orders to the survivor, carry over any
 // fields it's missing (winning bid / company / PM / award date), delete the rest.
 // Live-only fix for old-import artifacts (the job#-grouped importer prevents new
@@ -1430,11 +1618,17 @@ async function dismissDuplicates(kind, ids) {
     const a = Math.min(list[i], list[j]), b = Math.max(list[i], list[j]);
     if (!(await M.IgnoredPair.findOne({ kind, a, b }))) await M.IgnoredPair.create({ _id: await nextId('ignored_pairs'), kind, a, b });
   }
-  // stable keys for replay
-  let keys;
-  if (kind === 'project') { keys = []; for (const id of list) { const k = await _projKey(M, id); if (k) keys.push(k); } }
-  else { const cs = await M.Company.find({ _id: { $in: list } }).lean(); keys = cs.map(c => _norm(c.name)); }
-  await _recordOverride({ type: 'not_dup', kind, keys: [...new Set(keys)] });
+  // Stable keys for replay-on-reimport — only meaningful for projects/
+  // companies, which the importer rebuilds. Contacts are never touched by
+  // any import/rebuild, so the IgnoredPair rows above (keyed by their own
+  // stable ids) are sufficient on their own; recording a CleanupOverride
+  // for them would be storing a key that's never replayed against anything.
+  if (kind === 'project' || kind === 'company') {
+    let keys;
+    if (kind === 'project') { keys = []; for (const id of list) { const k = await _projKey(M, id); if (k) keys.push(k); } }
+    else { const cs = await M.Company.find({ _id: { $in: list } }).lean(); keys = cs.map(c => _norm(c.name)); }
+    await _recordOverride({ type: 'not_dup', kind, keys: [...new Set(keys)] });
+  }
   return { dismissed: list.length };
 }
 
@@ -1455,13 +1649,17 @@ async function deleteEmptyProject(id) {
 // Delete a truly-duplicate bid (Data Health "Duplicate bids" card — same
 // bid # created twice under the same project by mistake, e.g. a double
 // submit). Blocked on anything that represents real activity rather than a
-// clean accident: a submission, or a terminal (decided) stage.
+// clean accident: a submission, or a decided (awarded/not_awarded) stage.
+// NOTE: "closed" is NOT automatically blocked — closed is reachable straight
+// from opportunity/active_bid with no submission ever happening (e.g. bids
+// manually closed as "not pursuing" before the Excel import), so a closed
+// duplicate with no submission is still a clean accident, not real history.
 async function deleteBid(id) {
   const M = getModels();
   const bid = await M.Bid.findById(Number(id)).lean();
   if (!bid) throw new Error('Bid not found');
-  const TERMINAL = ['awarded', 'not_awarded', 'closed'];
-  if (TERMINAL.includes(bid.stage)) throw new Error(`Can't delete — this bid is already ${bid.stage}, that's real history.`);
+  const DECIDED = ['awarded', 'not_awarded'];
+  if (DECIDED.includes(bid.stage)) throw new Error(`Can't delete — this bid is already ${bid.stage}, that's real history.`);
   if (await M.BidSubmission.exists({ bid_id: bid._id })) throw new Error("Can't delete — this bid already has a submission. Close it instead if it's no longer needed.");
   await M.BidCustomer.deleteMany({ bid_id: bid._id });
   await M.Reminder.deleteMany({ parent_type: 'bid', parent_id: bid._id });
@@ -1537,4 +1735,5 @@ module.exports = {
   getDigest,
   getTeamV2, createTeamMemberV2, updateTeamMemberV2, updateSettingsV2, getSettings,
   removeBidCustomer, createCompanyV2, deleteBid,
+  mergeContacts, deleteCompany, deleteChangeOrder,
 };

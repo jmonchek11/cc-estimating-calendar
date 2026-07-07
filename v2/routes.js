@@ -36,7 +36,7 @@ router.get('/api/v2/projects/:id', async (req, res) => {
 });
 
 router.get('/api/v2/dashboard', async (req, res) => {
-  try { res.json(await v2db.getDashboard()); }
+  try { res.json(await v2db.getDashboard(req.session.userId, req.query.mine_only === 'true')); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -124,6 +124,9 @@ router.post('/api/v2/admin/merge-jobs',       requireAdmin, t(req => v2db.mergeJ
 router.post('/api/v2/admin/dismiss-duplicate', requireAdmin, t(req => v2db.dismissDuplicates(req.body.kind, req.body.ids)));
 router.delete('/api/v2/admin/project/:id',     requireAdmin, t(req => v2db.deleteEmptyProject(req.params.id)));
 router.delete('/api/v2/admin/bid/:id',         requireAdmin, t(req => v2db.deleteBid(req.params.id)));
+router.post('/api/v2/admin/merge-contacts',    requireAdmin, t(req => v2db.mergeContacts(req.body.survivor_id, req.body.merge_ids)));
+router.delete('/api/v2/admin/company/:id',     requireAdmin, t(req => v2db.deleteCompany(req.params.id)));
+router.delete('/api/v2/admin/change-order/:id', requireAdmin, t(req => v2db.deleteChangeOrder(req.params.id)));
 router.delete('/api/v2/admin/override/:id',    requireAdmin, t(req => v2db.removeOverride(req.params.id)));
 router.post('/api/v2/bids/:id/close',         t(req => v2db.closeBid(req.params.id, req.body)));
 router.post('/api/v2/bids/:id/submissions',   t(req => v2db.addSubmission(req.params.id, req.body)));

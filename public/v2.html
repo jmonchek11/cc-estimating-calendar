@@ -673,14 +673,8 @@ async function renderDigest() {
   const main = document.getElementById('main');
   main.innerHTML = '<div style="padding:30px;color:var(--text-muted)">Generating digest…</div>';
   let d;
-  try { d = await api('GET', '/api/v2/digest'); }
+  try { await ensureMeta(); d = await api('GET', '/api/v2/digest'); }
   catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
-
-  const STAGE_LABEL = { opportunity: 'Opportunities', active_bid: 'Active Bids', submitted: 'Submitted', active_co: 'Active Change Orders' };
-  const pipelineRows = d.pipelineSummary.map(s => `
-    <tr><td style="padding:6px 0">${STAGE_LABEL[s.stage] || s.stage}</td>
-      <td style="text-align:center;font-weight:700">${s.count}</td>
-      <td style="text-align:right" class="amount">${s.total_value ? fmt$(s.total_value) : '—'}</td></tr>`).join('');
 
   const section = (icon, title, count, bodyHtml, color) => `
     <div class="card" style="margin-bottom:14px">
@@ -691,8 +685,11 @@ async function renderDigest() {
       <div style="padding:${bodyHtml ? '0' : '16px'}">${bodyHtml || '<div style="padding:16px;color:var(--text-muted);font-size:13px">None</div>'}</div>
     </div>`;
 
+  // Bids/COs both have {id, project_id}; a CO's id is only unambiguous
+  // combined with its kind, so pass which flyout opener to use.
+  const openFor = (b) => b.stage !== undefined ? `openBidFlyout(${b.project_id},${b.id})` : `openCoFlyout(${b.project_id},${b.id})`;
   const bidRow = (b, showFU) => `
-    <div class="proj-row" style="cursor:default">
+    <div class="proj-row" onclick="${openFor(b)}">
       <div style="flex:1;min-width:0">
         <div class="proj-name">${esc(b.project_name)}${b.bid_number ? ` <span style="color:var(--text-muted);font-weight:400;font-size:12px">#${esc(b.bid_number)}</span>` : ''}</div>
         <div class="proj-meta">
@@ -712,22 +709,45 @@ async function renderDigest() {
     <tbody>${rows.map(r => `<tr style="border-top:1px solid var(--border)">${cols.map(c => `<td style="padding:6px 12px;text-align:${c.right ? 'right' : 'left'}${c.overdue && r[c.key] > 0 ? ';color:#dc2626;font-weight:700' : ''}">${c.fmt ? c.fmt(r[c.key]) : esc(String(r[c.key]))}</td>`).join('')}</tr>`).join('')}</tbody>
   </table>` : null;
 
+  const ps = d.pipelineSnapshot;
+  const pipelineTable = `<table style="width:100%">
+    <thead><tr><th style="text-align:left;padding:8px 16px;color:var(--text-muted);font-size:11px">Stage</th><th style="padding:8px 16px;color:var(--text-muted);font-size:11px">Count</th><th style="text-align:right;padding:8px 16px;color:var(--text-muted);font-size:11px">Value</th></tr></thead>
+    <tbody>
+      <tr style="border-top:1px solid var(--border)"><td style="padding:8px 16px">Opportunities</td><td style="text-align:center;font-weight:700">${ps.opportunities}</td><td style="padding:8px 16px"></td></tr>
+      <tr style="border-top:1px solid var(--border)"><td style="padding:8px 16px">Active Bids</td><td style="text-align:center;font-weight:700">${ps.activeBids}</td><td style="padding:8px 16px"></td></tr>
+      <tr style="border-top:1px solid var(--border)"><td style="padding:8px 16px">Active Change Orders</td><td style="text-align:center;font-weight:700">${ps.activeCos}</td><td style="padding:8px 16px"></td></tr>
+      <tr style="border-top:2px solid var(--border)"><td style="padding:8px 16px;font-weight:600">Submitted Bids — 30 days</td><td style="text-align:center;font-weight:700">${ps.submittedBids.last30.count}</td><td style="text-align:right;padding:8px 16px" class="amount">${fmt$(ps.submittedBids.last30.value)}</td></tr>
+      <tr style="border-top:1px solid var(--border)"><td style="padding:8px 16px;font-weight:600">Submitted Bids — YTD</td><td style="text-align:center;font-weight:700">${ps.submittedBids.ytd.count}</td><td style="text-align:right;padding:8px 16px" class="amount">${fmt$(ps.submittedBids.ytd.value)}</td></tr>
+      <tr style="border-top:2px solid var(--border)"><td style="padding:8px 16px;font-weight:600">Submitted Change Orders — 30 days</td><td style="text-align:center;font-weight:700">${ps.submittedCos.last30.count}</td><td style="text-align:right;padding:8px 16px" class="amount">${fmt$(ps.submittedCos.last30.value)}</td></tr>
+      <tr style="border-top:1px solid var(--border)"><td style="padding:8px 16px;font-weight:600">Submitted Change Orders — YTD</td><td style="text-align:center;font-weight:700">${ps.submittedCos.ytd.count}</td><td style="text-align:right;padding:8px 16px" class="amount">${fmt$(ps.submittedCos.ytd.value)}</td></tr>
+    </tbody></table>`;
+
+  const submittedGroupsHtml = d.submittedByEstimator.map(g => `
+    <div style="padding:8px 16px;background:#f8fafc;font-weight:700;font-size:12px;color:#2563eb;border-top:1px solid var(--border)">${esc(g.name)} (${g.bids.length})</div>
+    ${g.bids.map(b => bidRow(b, false)).join('')}`).join('')
+    + (d.submittedNoEstimator.length ? `<div style="padding:8px 16px;background:#f8fafc;font-weight:700;font-size:12px;color:var(--text-muted);border-top:1px solid var(--border)">No estimator (${d.submittedNoEstimator.length})</div>${d.submittedNoEstimator.map(b => bidRow(b, false)).join('')}` : '');
+  const submittedCount = d.submittedByEstimator.reduce((s,g)=>s+g.bids.length,0) + d.submittedNoEstimator.length;
+
   main.innerHTML = `
     <div class="page-header">
       <div><div class="page-title">📊 Weekly Digest</div><div class="page-subtitle">${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</div></div>
       <button class="v2-btn outline" onclick="window.print()">🖨 Print</button>
     </div>
 
-    ${section('📋', 'Pipeline Snapshot', null, `<table style="width:100%"><thead><tr><th style="text-align:left;padding:8px 16px;color:var(--text-muted);font-size:11px">Stage</th><th style="padding:8px 16px;color:var(--text-muted);font-size:11px">Count</th><th style="text-align:right;padding:8px 16px;color:var(--text-muted);font-size:11px">Value</th></tr></thead><tbody>${d.pipelineSummary.map(s => `<tr style="border-top:1px solid var(--border)"><td style="padding:8px 16px">${STAGE_LABEL[s.stage] || s.stage}</td><td style="text-align:center;font-weight:700">${s.count}</td><td style="text-align:right;padding:8px 16px" class="amount">${s.total_value ? fmt$(s.total_value) : '—'}</td></tr>`).join('')}</tbody></table>`)}
+    ${section('📋', 'Pipeline Snapshot', null, pipelineTable)}
 
     ${d.upcomingReminders.length ? section('⏰', 'Upcoming Reminders', d.upcomingReminders.length, d.upcomingReminders.map(r => `
-      <div class="proj-row"><div style="flex:1"><div class="proj-name">${esc(r.project_name)}${r.bid_number ? ` #${esc(r.bid_number)}` : ''}</div>
+      <div class="proj-row" ${r.project_id ? `onclick="${r.kind === 'bid' ? `openBidFlyout(${r.project_id},${r.bid_id})` : `openCoFlyout(${r.project_id},${r.bid_id})`}"` : ''}><div style="flex:1"><div class="proj-name">${esc(r.project_name)}${r.bid_number ? ` #${esc(r.bid_number)}` : ''}</div>
       <div class="proj-meta">${fmtD(r.remind_on)}${r.note ? ' · ' + esc(r.note) : ''}</div></div></div>`).join(''), '#8b5cf6') : ''}
 
-    ${section('📅', 'Upcoming Due Dates (7 days)', d.upcomingDueDates.length + d.coDueSoon.length, rows([...d.upcomingDueDates, ...d.coDueSoon], false), '#2563eb')}
+    ${section('📅', 'Upcoming Due Dates (30 days)', d.upcomingDueDates.length + d.coDueSoon.length, rows([...d.upcomingDueDates, ...d.coDueSoon], false), '#2563eb')}
 
-    ${d.newThisWeek.length ? section('🆕', 'New This Week', d.newThisWeek.length, rows(d.newThisWeek, false), '#2563eb') : ''}
-    ${d.submittedThisWeek.length ? section('📤', 'Submitted (last 2 weeks)', d.submittedThisWeek.length, rows(d.submittedThisWeek, false), '#2563eb') : ''}
+    ${d.newOpportunities.length ? section('🆕', 'New Opportunities This Week', d.newOpportunities.length, rows(d.newOpportunities, false), '#3b82f6') : ''}
+    ${d.newActiveBids.length ? section('🆕', 'New Active Bids This Week', d.newActiveBids.length, rows(d.newActiveBids, false), '#f59e0b') : ''}
+    ${d.newActiveCos.length ? section('🆕', 'New Change Orders This Week', d.newActiveCos.length, rows(d.newActiveCos, false), '#f97316') : ''}
+
+    ${section('📤', 'Submitted (last 2 weeks) — by Estimator', submittedCount, submittedCount ? submittedGroupsHtml : null, '#2563eb')}
+
     ${d.awardedThisWeek.length ? section('🎉', 'Awarded This Week', d.awardedThisWeek.length, rows(d.awardedThisWeek, false), '#16a34a') : ''}
     ${d.notAwardedThisWeek.length ? section('✗', 'Not Awarded This Week', d.notAwardedThisWeek.length, rows(d.notAwardedThisWeek, false), '#dc2626') : ''}
 
@@ -758,7 +778,7 @@ const CO_LIST_META = {
 let LIST_STATE = {};    // stageKey -> raw rows from the API
 let FILTER_STATE = {};  // stageKey -> { q, person, mine, sort }
 
-function filterState(key) { return (FILTER_STATE[key] = FILTER_STATE[key] || { q: '', person: '', mine: false, sort: 'due' }); }
+function filterState(key) { return (FILTER_STATE[key] = FILTER_STATE[key] || { q: '', person: '', mine: !!CURRENT_USER, sort: 'due' }); }
 
 function personOpts() {
   return META.team.map(t => [`${t.role === 'sales' ? 'sal' : 'est'}:${t.id}`, `${t.name} (${t.initials})`]);
@@ -782,7 +802,7 @@ function filterBarHtml(key, sortOpts) {
 }
 
 function clearListFilters(key) {
-  FILTER_STATE[key] = { q: '', person: '', mine: false, sort: filterState(key).sort === 'followup' ? 'followup' : 'due' };
+  FILTER_STATE[key] = { q: '', person: '', mine: !!CURRENT_USER, sort: filterState(key).sort === 'followup' ? 'followup' : 'due' };
   if (VIEW.name === 'bidlist') renderBidList(VIEW.arg); else renderCoList(VIEW.arg);
 }
 
@@ -924,22 +944,24 @@ function renderCoListBody(stage) {
 }
 
 // ── Projects page ──
+let PROJECTS_RAW = [];
+let PROJ_FILTER = { q: '', sort: 'name' };
+
 async function load() {
   setActiveNav('projects');
   const main = document.getElementById('main');
   main.innerHTML = '<div style="padding:30px;color:var(--text-muted)">Loading…</div>';
-  let projects;
   try {
     const r = await fetch('/api/v2/projects');
     if (r.status === 401) { window.location.href = '/legacy?returnTo=' + encodeURIComponent(location.pathname + location.hash); return; }
-    projects = await r.json();
-    ALL_PROJECTS = projects.map(p => ({ id: p.id, name: p.name }));
+    PROJECTS_RAW = await r.json();
+    ALL_PROJECTS = PROJECTS_RAW.map(p => ({ id: p.id, name: p.name }));
     await ensureMeta();
   } catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
 
   main.innerHTML = `
     <div class="page-header">
-      <div><div class="page-title">🏗️ Projects</div><div class="page-subtitle">${projects.length} projects · Project → Bids → Job → Change Orders</div></div>
+      <div><div class="page-title">🏗️ Projects</div><div class="page-subtitle" id="proj-count">${PROJECTS_RAW.length} projects · Project → Bids → Job → Change Orders</div></div>
       <div style="display:flex;gap:8px">
         <button class="v2-btn green" style="padding:8px 14px;font-size:12px" onclick="actNewBid()">+ New Bid</button>
         <button class="v2-btn blue" style="padding:8px 14px;font-size:12px" onclick="actNewOpportunity()">+ New Opportunity</button>
@@ -947,7 +969,41 @@ async function load() {
         <button class="v2-btn amber" style="padding:8px 14px;font-size:12px" onclick="actImportJIS()">📄 Import Bid (JIS)</button>
       </div>
     </div>
-    <div class="card" style="padding:0">${projects.map(p => `
+    <div class="card" style="padding:0">
+      <div class="v2-filterbar">
+        <input type="text" id="proj-q" placeholder="Search project name, customer, job #…" value="${esc(PROJ_FILTER.q)}" oninput="onProjFilterChange()">
+        <select id="proj-sort" onchange="onProjFilterChange()">
+          <option value="name" ${PROJ_FILTER.sort==='name'?'selected':''}>Sort: Name</option>
+          <option value="bids" ${PROJ_FILTER.sort==='bids'?'selected':''}>Sort: # of bids</option>
+          <option value="pipeline" ${PROJ_FILTER.sort==='pipeline'?'selected':''}>Sort: Pipeline value</option>
+          <option value="won" ${PROJ_FILTER.sort==='won'?'selected':''}>Sort: Won value</option>
+        </select>
+        <span class="clear-link" onclick="PROJ_FILTER={q:'',sort:'name'};load()">Clear</span>
+      </div>
+      <div id="proj-body"></div>
+    </div>`;
+  renderProjectsBody();
+}
+
+function onProjFilterChange() {
+  PROJ_FILTER.q = document.getElementById('proj-q')?.value || '';
+  PROJ_FILTER.sort = document.getElementById('proj-sort')?.value || PROJ_FILTER.sort;
+  renderProjectsBody();
+}
+
+function renderProjectsBody() {
+  const q = PROJ_FILTER.q.trim().toLowerCase();
+  let projects = !q ? PROJECTS_RAW : PROJECTS_RAW.filter(p =>
+    p.name.toLowerCase().includes(q) || p.customers.some(c => c.toLowerCase().includes(q)) || p.job_numbers.some(j => j.toLowerCase().includes(q)));
+  const sorters = {
+    name: (a, b) => a.name.localeCompare(b.name),
+    bids: (a, b) => b.bid_count - a.bid_count,
+    pipeline: (a, b) => (b.pipeline_value||0) - (a.pipeline_value||0),
+    won: (a, b) => (b.won_value||0) - (a.won_value||0),
+  };
+  projects = [...projects].sort(sorters[PROJ_FILTER.sort] || sorters.name);
+  document.getElementById('proj-count').textContent = `${projects.length} of ${PROJECTS_RAW.length} projects · Project → Bids → Job → Change Orders`;
+  document.getElementById('proj-body').innerHTML = projects.length ? projects.map(p => `
       <div class="proj-row" onclick="renderProjectPage(${p.id})">
         <div style="flex:1;min-width:0">
           <div class="proj-name">${esc(p.name)}</div>
@@ -967,57 +1023,75 @@ async function load() {
           ${p.active_count ? `<span class="badge badge-bid">${p.active_count} active</span>` : ''}
           <span style="color:var(--text-muted)">›</span>
         </div>
-      </div>`).join('')}</div>`;
+      </div>`).join('') : '<div style="padding:24px;text-align:center;color:var(--text-muted)">No matches</div>';
 }
 
 // ── Dashboard page (v2 data) ──
+let DASH_MINE = true;   // "My View" is the default; toggle switches to global
+function setDashboardView(mine) { DASH_MINE = mine; renderDashboard(); }
+
 async function renderDashboard() {
   VIEW = { name: 'dashboard' };
   setActiveNav('dashboard');
   const main = document.getElementById('main');
   main.innerHTML = '<div style="padding:30px;color:var(--text-muted)">Loading…</div>';
   let d, calItems;
-  try { await ensureMeta(); [d, calItems] = await Promise.all([api('GET', '/api/v2/dashboard'), fetchCalendarItems()]); }
-  catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
+  try {
+    await ensureMeta();
+    const mine = DASH_MINE && CURRENT_USER;
+    [d, calItems] = await Promise.all([api('GET', '/api/v2/dashboard' + (mine ? '?mine_only=true' : '')), fetchCalendarItems()]);
+  } catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
 
-  const stat = (label, value, sub, color) => `
-    <div class="stat-card" style="${color ? `border-top:3px solid ${color}` : ''}">
+  const stat = (label, value, sub, color, onclick) => `
+    <div class="stat-card" style="${color ? `border-top:3px solid ${color}` : ''}${onclick ? ';cursor:pointer' : ''}"${onclick ? ` onclick="${onclick}"` : ''}>
       <div class="stat-label">${label}</div>
       <div class="stat-value"${color ? ` style="color:${color}"` : ''}>${value}</div>
       <div class="stat-sub">${sub || ''}</div>
     </div>`;
-  const p = {}; d.pipeline.forEach(s => p[s.stage] = s);
 
   main.innerHTML = `
-    <div class="page-header"><div><div class="page-title">⬛ Dashboard</div><div class="page-subtitle">Live pipeline on the new data model</div></div></div>
+    <div class="page-header">
+      <div><div class="page-title">⬛ Dashboard</div><div class="page-subtitle">Live pipeline on the new data model</div></div>
+      ${CURRENT_USER ? `<div style="display:flex;gap:6px">
+        <button class="v2-btn ${DASH_MINE ? 'blue' : 'outline'}" style="padding:7px 14px;font-size:12px" onclick="setDashboardView(true)">My View</button>
+        <button class="v2-btn ${!DASH_MINE ? 'blue' : 'outline'}" style="padding:7px 14px;font-size:12px" onclick="setDashboardView(false)">All</button>
+      </div>` : ''}
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
+      <button class="v2-btn green" style="padding:8px 14px;font-size:12px" onclick="actNewBid()">+ New Bid</button>
+      <button class="v2-btn blue" style="padding:8px 14px;font-size:12px" onclick="actNewOpportunity()">+ New Opportunity</button>
+      <button class="v2-btn outline" style="padding:8px 14px;font-size:12px" onclick="actNewLegacyJob()">+ Legacy Job</button>
+      <button class="v2-btn amber" style="padding:8px 14px;font-size:12px" onclick="actImportJIS()">📄 Import Bid (JIS)</button>
+      <button class="v2-btn outline" style="padding:8px 14px;font-size:12px" onclick="actNewChangeOrder()">+ New Change Order</button>
+    </div>
     <div class="stat-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px">
-      ${stat('Opportunities', p.opportunity?.count||0, fmt$(p.opportunity?.value), '#3b82f6')}
-      ${stat('Active Bids', p.active_bid?.count||0, fmt$(p.active_bid?.value), '#f59e0b')}
-      ${stat('Submitted', p.submitted?.count||0, fmt$(p.submitted?.value), '#2563eb')}
-      ${stat('Active Change Orders', d.activeCo.count, fmt$(d.activeCo.value), '#f97316')}
-      ${stat('Awarded (30d)', d.awarded30.count, fmt$(d.awarded30.value), '#16a34a')}
-      ${stat('Overdue Follow-ups', d.overdueCount, 'across submissions + COs', d.overdueCount ? '#dc2626' : '#16a34a')}
-      ${stat('Jobs awaiting Job #', d.jobsPending, 'from accounting', '#0891b2')}
+      ${stat('Opportunities', d.pipeline.opportunity, '', '#3b82f6', "renderBidList('opportunity')")}
+      ${stat('Active Bids', d.pipeline.active_bid, '', '#f59e0b', "renderBidList('active_bid')")}
+      ${stat('Submitted (YTD)', d.submittedYTD.count, '', '#2563eb', "renderBidList('submitted')")}
+      ${stat('Active Change Orders', d.activeCoCount, '', '#f97316', "renderCoList('active_co')")}
+      ${stat('Awarded (YTD)', d.awardedYTD.count, fmt$(d.awardedYTD.value) + (d.awardedYTD.missingAwardDate ? ` · ${d.awardedYTD.missingAwardDate} missing award date` : ''), '#16a34a')}
+      ${stat('Overdue Follow-ups', d.overdueBidCount + d.overdueCoCount, `${d.overdueBidCount} bid · ${d.overdueCoCount} CO`, (d.overdueBidCount+d.overdueCoCount) ? '#dc2626' : '#16a34a')}
+      ${stat('Jobs awaiting Job #', d.jobsPending, DASH_MINE ? 'assigned to you' : 'from accounting', '#0891b2')}
     </div>
     <div class="dashboard-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
       <div class="card">
         <div class="section-title">📅 Upcoming Due Dates — next 14 days</div>
         ${d.dueSoon.length ? d.dueSoon.map(b => {
           const dot = b.due_date <= today ? '#dc2626' : '#16a34a';
-          return `<div class="proj-row" style="cursor:default;padding:8px 0">
+          return `<div class="proj-row" onclick="openBidFlyout(${b.project_id},${b.id})">
             <div style="flex:1"><strong style="font-size:13px">${esc(b.project || '—')}</strong>
               <span style="color:var(--text-muted);font-size:12px">${b.bid_number ? '#'+esc(b.bid_number) : ''} · ${STAGE[b.stage]}</span></div>
             <span style="font-size:12px;font-weight:700;color:${dot}">Due ${fmtD(b.due_date)}</span>
           </div>`; }).join('') : '<div class="text-muted" style="font-size:13px;padding:6px 0">Nothing due in the next 14 days</div>'}
       </div>
       <div class="card">
-        <div class="section-title" style="color:var(--success)">✅ Awarded — last 30 days</div>
-        ${d.awarded30.list.length ? d.awarded30.list.map(b => `
-          <div class="proj-row" style="cursor:default;padding:8px 0">
+        <div class="section-title" style="color:var(--success)">✅ Awarded — YTD</div>
+        ${d.awardedYTD.list.length ? d.awardedYTD.list.map(b => `
+          <div class="proj-row" onclick="openBidFlyout(${b.project_id},${b.id})">
             <div style="flex:1"><strong style="font-size:13px">${esc(b.project || '—')}</strong>
               <span style="color:var(--text-muted);font-size:12px">${b.company ? '· '+esc(b.company) : ''}</span></div>
             <span class="amount" style="font-size:12px">${fmt$(b.amount)}</span>
-          </div>`).join('') : '<div class="text-muted" style="font-size:13px;padding:6px 0">No awards in the last 30 days</div>'}
+          </div>`).join('') : '<div class="text-muted" style="font-size:13px;padding:6px 0">No awards yet this year</div>'}
       </div>
     </div>
     <div class="card" style="margin-top:18px;padding:16px">
@@ -2017,6 +2091,57 @@ async function showHealth() {
           </div>` : ''}
         </div>`).join('') : '<div style="color:#16a34a;font-size:13px">None 🎉</div>', '#dc2626')}
 
+    ${card('Duplicate change orders', h.dupCOs.length, 'same RFC/CO # under one job — often genuinely different COs that collided on a label, not accidents. Rename the collision away, or delete one only if it truly is a double-submit (active COs only)',
+      h.dupCOs.length ? h.dupCOs.map((g, gi) => `
+        <div style="padding:8px 0;border-bottom:1px solid #f1f5f9">
+          <div style="font-size:13px;font-weight:600">CO ${esc(g.co_number)} — ${esc(g.project)}${g.job_number ? ` · Job ${esc(g.job_number)}` : ''}</div>
+          ${g.cos.map(c => `
+            <div style="font-size:12px;color:var(--text-muted);margin-left:8px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+              <span>• #${c.id} · ${esc(c.name || '(no description)')} · ${STAGE[c.stage] || c.stage}${c.estimate_amount ? ` · ${fmt$(c.estimate_amount)}` : ''} · created ${fmtD(c.created_at.slice(0,10))}</span>
+              ${admin ? `<a href="#" onclick="event.preventDefault();renameCO(${c.id})" style="font-size:11px">✏️ renumber</a>` : ''}
+              ${admin && c.stage === 'active_co' ? `<a href="#" onclick="event.preventDefault();doDeleteCO(${c.id})" style="font-size:11px;color:#dc2626">🗑 delete</a>` : ''}
+            </div>`).join('')}
+        </div>`).join('') : '<div style="color:#16a34a;font-size:13px">None 🎉</div>', '#ea580c')}
+
+    ${card('Duplicate contacts', h.dupContacts.length, 'same person entered twice at one company (often from a duplicate-bid accident) — pick which to keep',
+      h.dupContacts.length ? h.dupContacts.map((g, gi) => `
+        <div style="padding:8px 0;border-bottom:1px solid #f1f5f9">
+          <div style="font-size:13px;font-weight:600">${esc(g.company)}</div>
+          ${g.contacts.map(c => `<div style="font-size:12px;color:var(--text-muted);margin-left:8px">• #${c.id} ${esc(c.name)}${c.phone ? ` · ${esc(c.phone)}` : ''}${c.email ? ` · ${esc(c.email)}` : ''}</div>`).join('')}
+          ${admin ? `<div style="display:flex;gap:6px;align-items:center;margin-top:5px;flex-wrap:wrap">
+            <span style="font-size:11px;color:var(--text-muted)">keep:</span>
+            <select id="dupcontact-keep-${gi}" style="font-size:12px;padding:3px 6px;border:1px solid var(--border);border-radius:5px">
+              ${g.contacts.map(c => `<option value="${c.id}">#${c.id} ${esc(c.name)}</option>`).join('')}
+            </select>
+            <button class="v2-btn amber" onclick="doMergeDupContacts(${gi})">Merge ${g.contacts.length}→1</button>
+            <button class="v2-btn outline" onclick="doDismissContacts(${gi})">Not a dup</button>
+          </div>` : ''}
+        </div>`).join('') : '<div style="color:#16a34a;font-size:13px">None 🎉</div>', '#9333ea')}
+
+    ${card('Duplicate jobs', h.dupJobs.length, 'same job # created twice under one project — merges COs onto the survivor',
+      h.dupJobs.length ? h.dupJobs.map((g, gi) => `
+        <div style="padding:8px 0;border-bottom:1px solid #f1f5f9">
+          <div style="font-size:13px;font-weight:600">Job ${esc(g.job_number)} — ${esc(g.project)}</div>
+          ${g.jobs.map(j => `<div style="font-size:12px;color:var(--text-muted);margin-left:8px">• #${j.id} · ${j.cos} CO${j.cos!==1?'s':''}${j.winning_bid_id ? ` · linked to bid #${j.winning_bid_id}` : ''}</div>`).join('')}
+          ${admin ? `<div style="display:flex;gap:6px;align-items:center;margin-top:5px;flex-wrap:wrap">
+            <span style="font-size:11px;color:var(--text-muted)">keep:</span>
+            <select id="dupjob-keep-${gi}" style="font-size:12px;padding:3px 6px;border:1px solid var(--border);border-radius:5px">
+              ${g.jobs.map(j => `<option value="${j.id}">#${j.id} (${j.cos} CO${j.cos!==1?'s':''})</option>`).join('')}
+            </select>
+            <button class="v2-btn blue" onclick="doMergeDupJobs(${gi})">Merge ${g.jobs.length}→1</button>
+          </div>` : ''}
+        </div>`).join('') : '<div style="color:#16a34a;font-size:13px">None 🎉</div>', '#2563eb')}
+
+    ${card('Empty companies', h.emptyCompanies.length, 'never bid to, no contacts, never awarded — safe to delete',
+      h.emptyCompanies.length ? h.emptyCompanies.map(c => `
+        <div style="font-size:13px;padding:3px 0;display:flex;align-items:center;gap:8px">
+          <span style="flex:1">• ${esc(c.name)}</span>
+          ${admin ? `<a href="#" onclick="event.preventDefault();doDeleteEmptyCompany(${c.id})" style="font-size:11px;color:#dc2626">🗑 delete</a>` : ''}
+        </div>`).join('') : '<div style="color:#16a34a;font-size:13px">None</div>', '#64748b')}
+
+    ${card('Data integrity check', Object.values(h.orphans).reduce((s,n)=>s+n,0), 'references pointing at deleted records — should always be zero; a non-zero count here is a bug to investigate, not something to auto-fix',
+      Object.values(h.orphans).some(n=>n>0) ? Object.entries(h.orphans).filter(([,n])=>n>0).map(([k,n]) => `<div style="font-size:13px;padding:2px 0;color:#dc2626">• ${k}: ${n}</div>`).join('') : '<div style="color:#16a34a;font-size:13px">All clean 🎉</div>', '#0f766e')}
+
     ${card('Projects with no bids', h.noBidProjects.length, 'LEGACY = job + COs, no base bid (expected — just rename) · EMPTY = nothing attached (safe to delete)',
       h.noBidProjects.length ? noBidList(h.noBidProjects) : '<div style="color:#16a34a;font-size:13px">None</div>', '#0891b2')}
 
@@ -2073,6 +2198,73 @@ async function doDeleteDupBids(gi) {
   }
   if (errors.length) alert('Some deletions failed:\n' + errors.join('\n'));
   await showHealth();
+}
+
+// Renumber a change order's RFC/CO # (used to resolve a label collision that
+// isn't actually a duplicate — the far more common case in real data).
+async function renameCO(id) {
+  const next = prompt('New RFC/CO #:');
+  if (next == null || !next.trim()) return;
+  try {
+    await api('PATCH', `/api/v2/admin/change_order/${id}`, { co_number: next.trim() });
+    await showHealth();
+  } catch (e) { alert('Renumber failed: ' + e.message); }
+}
+
+// Delete a duplicate change order — only offered for active_co stage (see card copy).
+async function doDeleteCO(id) {
+  if (!confirm(`Delete change order #${id}? Only do this if it's truly a double-submit, not a genuine second CO that collided on a number.\n\nThis cannot be undone.`)) return;
+  try {
+    await api('DELETE', `/api/v2/admin/change-order/${id}`);
+    await showHealth();
+  } catch (e) { alert('Delete failed: ' + e.message); }
+}
+
+// Merge a duplicate-contacts group into the chosen survivor.
+async function doMergeDupContacts(gi) {
+  const group = HEALTH.dupContacts[gi];
+  if (!group) return;
+  const keepId = Number(document.getElementById(`dupcontact-keep-${gi}`).value);
+  const mergeIds = group.contacts.map(c => c.id).filter(id => id !== keepId);
+  if (!mergeIds.length) return;
+  if (!confirm(`Merge ${mergeIds.length} contact(s) into #${keepId}?\n\nThis cannot be undone.`)) return;
+  try {
+    await api('POST', '/api/v2/admin/merge-contacts', { survivor_id: keepId, merge_ids: mergeIds });
+    await showHealth();
+  } catch (e) { alert('Merge failed: ' + e.message); }
+}
+
+// Mark a duplicate-contacts group as "not a duplicate" so it never re-clusters
+async function doDismissContacts(gi) {
+  const group = HEALTH.dupContacts[gi];
+  if (!group) return;
+  try {
+    await api('POST', '/api/v2/admin/dismiss-duplicate', { kind: 'contact', ids: group.contacts.map(c => c.id) });
+    await showHealth();
+  } catch (e) { alert(e.message); }
+}
+
+// Merge a duplicate-jobs group into the chosen survivor.
+async function doMergeDupJobs(gi) {
+  const group = HEALTH.dupJobs[gi];
+  if (!group) return;
+  const keepId = Number(document.getElementById(`dupjob-keep-${gi}`).value);
+  const mergeIds = group.jobs.map(j => j.id).filter(id => id !== keepId);
+  if (!mergeIds.length) return;
+  if (!confirm(`Merge ${mergeIds.length} job(s) into #${keepId}? Their change orders move to the survivor.\n\nThis cannot be undone.`)) return;
+  try {
+    await api('POST', '/api/v2/admin/merge-jobs', { survivor_id: keepId, merge_ids: mergeIds });
+    await showHealth();
+  } catch (e) { alert('Merge failed: ' + e.message); }
+}
+
+// Delete a company with zero activity anywhere.
+async function doDeleteEmptyCompany(id) {
+  if (!confirm('Delete this company? (Only allowed when it has no bids, contacts, or awards attached.)')) return;
+  try {
+    await api('DELETE', `/api/v2/admin/company/${id}`);
+    await showHealth();
+  } catch (e) { alert('Delete failed: ' + e.message); }
 }
 
 // Inline rename (project or company) via the admin edit route
@@ -2159,33 +2351,26 @@ function renderContactsBody() {
 
   document.getElementById('ct-count').textContent = `${out.length} of ${rows.length} contacts`;
 
-  // Group by company, sorted A-Z; "No Company" (nothing on file) always last.
-  const groups = {};
-  out.forEach(c => { const key = c.company?.name || '￿'; (groups[key] = groups[key] || []).push(c); });
-  const sortedKeys = Object.keys(groups).sort((a, b) => a.localeCompare(b));
+  // Flat, sortable table (v1's layout) — company grouping is left to the
+  // search/filter above instead of visually clustering rows.
+  out = [...out].sort((a, b) => a.full_name.localeCompare(b.full_name));
 
-  const contactRow = (c) => `
-    <div class="proj-row" onclick="openContactProfile(${c.id})">
-      <div style="flex:1;min-width:0">
-        <div class="proj-name">${esc(c.full_name)}</div>
-        <div class="proj-meta">
-          ${c.phone ? esc(c.phone) : ''}${c.phone && c.email ? '<span class="proj-meta-sep">·</span>' : ''}${c.email ? esc(c.email) : ''}
-        </div>
-      </div>
-    </div>`;
-
-  document.getElementById('ct-body').innerHTML = out.length ? sortedKeys.map(key => {
-    const isNoCompany = key === '￿';
-    const contacts = groups[key];
-    const companyId = contacts[0].company?.id;
-    return `<div style="border-top:1px solid var(--border)">
-      <div style="padding:8px 16px;background:#f8fafc;font-weight:700;font-size:12px;color:${isNoCompany ? 'var(--text-muted)' : '#2563eb'};${!isNoCompany ? 'cursor:pointer' : ''}"
-        ${!isNoCompany ? `onclick="openCompanyProfile(${companyId})"` : ''}>
-        ${isNoCompany ? 'No Company' : '🏢 ' + esc(key)} <span style="font-weight:400;color:var(--text-muted)">(${contacts.length})</span>
-      </div>
-      ${contacts.map(contactRow).join('')}
-    </div>`;
-  }).join('') : '<div style="padding:24px;text-align:center;color:var(--text-muted)">No matches</div>';
+  document.getElementById('ct-body').innerHTML = out.length ? `
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="border-bottom:1px solid var(--border)">
+        <th style="text-align:left;padding:8px 16px;color:var(--text-muted);font-weight:600;font-size:11px">Name</th>
+        <th style="text-align:left;padding:8px 16px;color:var(--text-muted);font-weight:600;font-size:11px">Company</th>
+        <th style="text-align:left;padding:8px 16px;color:var(--text-muted);font-weight:600;font-size:11px">Phone</th>
+        <th style="text-align:left;padding:8px 16px;color:var(--text-muted);font-weight:600;font-size:11px">Email</th>
+      </tr></thead>
+      <tbody>${out.map(c => `
+        <tr style="border-bottom:1px solid #f1f5f9">
+          <td style="padding:8px 16px"><a href="#" onclick="event.preventDefault();openContactProfile(${c.id})" style="font-weight:600;color:inherit;text-decoration:none">${esc(c.full_name)}</a></td>
+          <td style="padding:8px 16px">${c.company ? `<a href="#" onclick="event.preventDefault();openCompanyProfile(${c.company.id})" style="color:#2563eb;text-decoration:none">${esc(c.company.name)}</a>` : '<span style="color:var(--text-muted)">—</span>'}</td>
+          <td style="padding:8px 16px">${c.phone ? esc(c.phone) : '<span style="color:var(--text-muted)">—</span>'}</td>
+          <td style="padding:8px 16px">${c.email ? `<a href="mailto:${esc(c.email)}" style="color:#2563eb">${esc(c.email)}</a>` : '<span style="color:var(--text-muted)">—</span>'}</td>
+        </tr>`).join('')}</tbody>
+    </table>` : '<div style="padding:24px;text-align:center;color:var(--text-muted)">No matches</div>';
 }
 
 function actNewCompany() {
