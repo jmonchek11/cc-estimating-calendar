@@ -106,7 +106,8 @@ body {
   border-radius: 0 2px 2px 0;
 }
 
-.nav-icon { font-size: 14px; width: 18px; text-align: center; flex-shrink: 0; }
+.nav-icon { width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.nav-icon svg { width: 17px; height: 17px; }
 
 .nav-badge {
   margin-left: auto;
@@ -1320,9 +1321,13 @@ textarea.form-input { resize: vertical; min-height: 60px; }
 .sidebar-search-icon {
   position: absolute;
   left: 8px;
-  font-size: 12px;
+  display: flex;
   pointer-events: none;
   opacity: 0.45;
+}
+.sidebar-search-icon svg {
+  width: 13px;
+  height: 13px;
   z-index: 1;
 }
 .sidebar-search-input {
