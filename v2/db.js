@@ -1060,16 +1060,34 @@ function _lev(a, b) {
 }
 // Cluster items ({id,name,key,...}) that are the same/typo/prefix of each other.
 // `ignore` is a Set of "minId:maxId" pairs that must never be clustered together.
-function _clusterSimilar(items, ignore) {
+// `opts.firstWordMatch` additionally clusters when one whole normalized name
+// IS the first word of the other (e.g. "Gilbane, Inc" normalizes to the bare
+// word "gilbane", which is the first word of "Gilbane Building Company"'s
+// "gilbane building" — at 7 chars the plain prefix/typo checks below, which
+// require 8-10 chars to avoid false positives, miss it). Deliberately
+// requires the SHORTER side to be nothing but that one word — a name with
+// its own extra words (e.g. "Philadelphia Museum of Art" vs "Philadelphia
+// Parking Authority") won't match just because they share a common opening
+// word. Opt-in only for company matching: turning this on for contacts
+// would false-positive on any two people who share a first name.
+function _clusterSimilar(items, ignore, opts = {}) {
   const parent = items.map((_, i) => i);
   const find = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
   const union = (a, b) => { parent[find(a)] = find(b); };
+  const words = (k) => (k || '').split(' ').filter(Boolean);
+  const bareVsFirstWord = (shortWords, longWords) =>
+    shortWords.length === 1 && shortWords[0].length >= 5 && longWords.length > 1 && longWords[0] === shortWords[0];
   for (let i = 0; i < items.length; i++) for (let j = i + 1; j < items.length; j++) {
     const a = items[i].key, b = items[j].key; if (!a || !b) continue;
     const same = a === b;
     const prefix = a.length >= 10 && b.length >= 10 && (a.startsWith(b) || b.startsWith(a));
     const typo = a.length >= 8 && b.length >= 8 && Math.abs(a.length - b.length) <= 2 && _lev(a, b) <= 1;
-    if (!(same || prefix || typo)) continue;
+    let wordMatch = false;
+    if (opts.firstWordMatch) {
+      const wa = words(a), wb = words(b);
+      wordMatch = bareVsFirstWord(wa, wb) || bareVsFirstWord(wb, wa);
+    }
+    if (!(same || prefix || typo || wordMatch)) continue;
     if (ignore && ignore.has(Math.min(items[i].id, items[j].id) + ':' + Math.max(items[i].id, items[j].id))) continue;
     union(i, j);
   }
@@ -1388,7 +1406,7 @@ async function getDataHealth() {
 
   // near-duplicate projects / companies (merge candidates; honors "not a duplicate")
   const dupProjects = _clusterSimilar(projects.map(p => ({ id: p._id, name: p.name, key: _norm(p.name), bids: (bidsByProj[p._id] || []).length, cos: projCo(p) })), ignoreSet('project'));
-  const dupCompanies = _clusterSimilar(companies.map(c => ({ id: c._id, name: c.name, key: _norm(c.name) })), ignoreSet('company'));
+  const dupCompanies = _clusterSimilar(companies.map(c => ({ id: c._id, name: c.name, key: _norm(c.name) })), ignoreSet('company'), { firstWordMatch: true });
   // Exact-duplicate bids — same bid # created twice under the same project
   // (e.g. a double-click or double-submit). Project-merge doesn't touch this
   // since it operates one level up; this is its own class of mistake.
