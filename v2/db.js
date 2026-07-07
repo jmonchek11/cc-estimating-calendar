@@ -626,6 +626,23 @@ async function updateOpportunity(id, data) {
 // Controls, Distribution, Data, Nurse Call, Security, etc.) taken off by a
 // different estimator than the bid's primary one. Open to any user, not
 // admin-gated, same trust level as adding a customer.
+// Change just the due date — used by the calendar's drag-and-drop (drag a
+// chip to a different day). Deliberately a single-field, non-admin action
+// (like adding a customer or logging a follow-up) rather than the full
+// admin edit form, since correcting a due date is routine day-to-day work.
+async function updateBidDueDate(id, due_date) {
+  const M = getModels();
+  const bid = await loadBid(id);
+  await M.Bid.updateOne({ _id: bid._id }, { $set: { due_date: due_date || null, updated_at: ts() } });
+  return { bid_id: bid._id, due_date: due_date || null };
+}
+async function updateCoDueDate(id, due_date) {
+  const M = getModels();
+  const co = await loadCO(id);
+  await M.ChangeOrder.updateOne({ _id: co._id }, { $set: { due_date: due_date || null, updated_at: ts() } });
+  return { co_id: co._id, due_date: due_date || null };
+}
+
 async function addSubEstimator(bidId, { estimator_id, scope }) {
   const M = getModels();
   const bid = await loadBid(bidId);
@@ -1865,5 +1882,6 @@ module.exports = {
   getDigest,
   getTeamV2, createTeamMemberV2, updateTeamMemberV2, updateSettingsV2, getSettings,
   removeBidCustomer, createCompanyV2, deleteBid, addSubEstimator, removeSubEstimator,
+  updateBidDueDate, updateCoDueDate,
   mergeContacts, deleteCompany, deleteChangeOrder,
 };

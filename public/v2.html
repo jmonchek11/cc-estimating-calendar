@@ -621,7 +621,11 @@ function buildCalendarGrid(year, month, items, filter) {
     const chips = shown.map(({ item, type }) => {
       if (type === 'due') {
         const c = estimatorColor(item.estimator?.id);
-        return `<div class="cal-chip" style="background:${c}a6;border-left-color:${c}">
+        // Only due-date chips are draggable — a due date is what dropping on
+        // another day changes; follow-up dates aren't touched by this.
+        return `<div class="cal-chip" draggable="true"
+            ondragstart="calDragStart(event,'${item.kind}',${item.id},'${escJs(item.title)}')"
+            style="background:${c}a6;border-left-color:${c};cursor:grab">
           <span class="cal-chip-txt">${esc(item.title)}</span>
           ${item.estimator ? `<span class="cal-chip-ini" style="color:#fff">${esc(item.estimator.initials)}</span>` : ''}
         </div>`;
@@ -630,7 +634,8 @@ function buildCalendarGrid(year, month, items, filter) {
     }).join('');
 
     cells += `<div class="cal-day${isToday ? ' cal-day-today' : ''}${dayItems.length ? ' cal-day-clickable' : ''}"
-      ${dayItems.length ? `onclick="openCalDayModal('${ds}')"` : ''}>
+      ${dayItems.length ? `onclick="openCalDayModal('${ds}')"` : ''}
+      ondragover="event.preventDefault()" ondrop="calDrop(event,'${ds}')">
       <div class="cal-day-num${isToday ? ' cal-day-num-today' : ''}">${d}</div>
       <div class="cal-day-chips">${chips}
         ${extra > 0 ? `<button class="cal-chip-more" onclick="event.stopPropagation();openCalDayModal('${ds}')">+${extra} more</button>` : ''}
@@ -640,6 +645,29 @@ function buildCalendarGrid(year, month, items, filter) {
   const rem = (startDOW + daysInMonth) % 7;
   if (rem) for (let i = rem; i < 7; i++) cells += '<div class="cal-day-empty"></div>';
   return `<div class="cal-hdr">${headers}</div><div class="cal-grid">${cells}</div>`;
+}
+
+// Drag a due-date chip to a different day to change its due date. Always
+// confirms before committing since it's easy to miss the day you actually
+// dropped on.
+let CAL_DRAG = null;
+function calDragStart(ev, kind, id, title) {
+  CAL_DRAG = { kind, id, title };
+  ev.dataTransfer.effectAllowed = 'move';
+  ev.dataTransfer.setData('text/plain', ''); // Firefox requires data to be set for drag to start
+}
+async function calDrop(ev, dateStr) {
+  ev.preventDefault();
+  const drag = CAL_DRAG;
+  CAL_DRAG = null;
+  if (!drag) return;
+  const label = new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+  if (!confirm(`Change the due date for "${drag.title}" to ${label}?`)) return;
+  try {
+    const url = drag.kind === 'bid' ? `/api/v2/bids/${drag.id}/due-date` : `/api/v2/change-orders/${drag.id}/due-date`;
+    await api('PATCH', url, { due_date: dateStr });
+    if (VIEW.name === 'calendar') await renderCalendar(); else if (VIEW.name === 'dashboard') await renderDashboard();
+  } catch (e) { alert('Failed to change due date: ' + e.message); }
 }
 
 function openCalDayModal(dateStr) {
@@ -699,10 +727,12 @@ async function renderDigest() {
           ${b.salesperson_initials ? `<span class="proj-meta-sep">·</span> ${b.stage === undefined ? 'PM' : 'Sales'} ${esc(b.salesperson_initials)}` : ''}
           ${b.estimator_initials ? ` Est ${esc(b.estimator_initials)}` : ''}
           ${showFU && b.next_followup_date ? `<span class="proj-meta-sep">·</span> <span class="${b.next_followup_date < today ? 'overdue-txt' : ''}">F/U ${fmtD(b.next_followup_date)}</span>` : ''}
-          ${!showFU && b.estimate_due_date ? `<span class="proj-meta-sep">·</span> Due ${fmtD(b.estimate_due_date)}` : ''}
         </div>
       </div>
-      <div style="text-align:right;flex-shrink:0">${b.estimate_amount ? `<span class="amount" style="font-size:13px">${fmt$(b.estimate_amount)}</span>` : ''}</div>
+      <div style="text-align:right;flex-shrink:0">
+        ${b.estimate_amount ? `<span class="amount" style="font-size:13px">${fmt$(b.estimate_amount)}</span>` : ''}
+        ${!showFU && b.estimate_due_date ? `<div style="font-size:12px;font-weight:700;color:${b.estimate_due_date < today ? '#dc2626' : 'var(--text-muted)'}">Due ${fmtD(b.estimate_due_date)}</div>` : ''}
+      </div>
     </div>`;
   const rows = (list, showFU) => list.length ? list.map(b => bidRow(b, showFU)).join('') : null;
 
@@ -937,9 +967,22 @@ function renderCoListBody(stage) {
   };
   rows = [...rows].sort(sorters[s.sort] || sorters.due);
 
+  // Right column matches the bid lists' convention exactly: due date badge
+  // while active, $ + follow-up date once submitted — so due dates land in
+  // the same visual spot (bold, right-aligned, red if overdue) everywhere
+  // they're shown across the app instead of drifting into the left-side
+  // meta text on some pages and the right column on others.
+  const right = (c) => {
+    if (stage === 'submitted_co') {
+      const overdue = c.next_followup_date && c.next_followup_date < today;
+      return `${c.estimate_amount ? `<span class="amount" style="font-size:13px">${fmt$(c.estimate_amount)}</span>` : ''}
+        ${c.next_followup_date ? `<div style="font-size:11px;${overdue ? 'color:#dc2626;font-weight:700' : 'color:var(--text-muted)'}">F/U ${fmtD(c.next_followup_date)}${overdue ? ' • OVERDUE' : ''}</div>` : ''}`;
+    }
+    return c.due_date ? `<span style="font-size:12px;font-weight:700;color:${c.due_date < today ? '#dc2626' : 'var(--text-muted)'}">Due ${fmtD(c.due_date)}</span>` : '';
+  };
+
   document.getElementById('cl-count-' + stage).textContent = `${rows.length} of ${LIST_STATE[stage].length} ${meta.sub}`;
   document.getElementById('cl-body-' + stage).innerHTML = rows.length ? rows.map(c => {
-      const overdue = c.next_followup_date && c.next_followup_date < today;
       return `<div class="proj-row" onclick="openCoFlyout(${c.project_id},${c.id})">
         <div style="flex:1;min-width:0">
           <div class="proj-name"><span style="color:#d97706">${esc(c.co_number)}</span> ${esc(c.name)} ${stageBadge(c.stage)}</div>
@@ -947,12 +990,10 @@ function renderCoListBody(stage) {
             ${esc(c.project)}${c.job_number ? ` <span class="proj-meta-sep">·</span> Job ${esc(c.job_number)}` : ''}
             ${c.salesperson ? `<span class="proj-meta-sep">·</span> PM ${ini(c.salesperson)}` : '<span class="proj-meta-sep">·</span> <span style="color:#dc2626">no PM assigned</span>'}
             ${c.estimator ? ` Est ${ini(c.estimator)}` : ''}
-            ${c.due_date ? `<span class="proj-meta-sep">·</span> Due ${fmtD(c.due_date)}` : ''}
           </div>
         </div>
         <div style="text-align:right;flex-shrink:0">
-          ${c.estimate_amount ? `<span class="amount" style="font-size:13px">${fmt$(c.estimate_amount)}</span>` : ''}
-          ${c.next_followup_date ? `<div style="font-size:11px;${overdue ? 'color:#dc2626;font-weight:700' : 'color:var(--text-muted)'}">F/U ${fmtD(c.next_followup_date)}${overdue ? ' • OVERDUE' : ''}</div>` : ''}
+          ${right(c)}
         </div>
       </div>`; }).join('') : '<div style="padding:24px;text-align:center;color:var(--text-muted)">No matches</div>';
 }
@@ -1241,6 +1282,7 @@ function bidNode(b) {
           ${b.drawing_stage ? `<span class="badge" style="background:#ede9fe;color:#5b21b6">${esc(b.drawing_stage)}</span>` : ''}
           ${b.estimate_amount ? `<span class="amount">${fmt$(b.estimate_amount)}</span>` : ''}
           ${(b.submissions || []).filter(s => s.is_current).length > 1 ? `<span class="badge" style="background:#dbeafe;color:#1e40af">${b.submissions.filter(s => s.is_current).length} customers</span>` : ''}
+          ${b.due_date ? `<span style="margin-left:auto;font-weight:700;font-size:12px;color:${b.due_date < today ? '#dc2626' : 'var(--text-muted)'}">Due ${fmtD(b.due_date)}</span>` : ''}
         </div>
         <div style="font-size:12px;color:var(--text-muted);margin-top:4px;line-height:1.6">
           ${!b.customers.length ? '<span style="color:#dc2626">no customer</span><br>' : ''}
@@ -1249,7 +1291,6 @@ function bidNode(b) {
           ${b.sub_estimators.map(s => `${ini(s)}<span style="font-size:10px">${esc(s.scope)}<a href="#" onclick="event.preventDefault();actRemoveSubEstimator(${b.id},${s.id},'${escJs(s.scope)}')" style="color:#dc2626;margin-left:2px">✕</a></span>`).join(' ')}
           ${!b.superseded && ['opportunity','active_bid','submitted'].includes(b.stage) ? ` <a href="#" onclick="event.preventDefault();actAddSubEstimator(${b.id})" style="font-size:11px;color:#2563eb">+ Sub-estimator</a>` : ''}
           ${b.salesperson ? ` Sales: ${ini(b.salesperson)}` : ''}
-          ${b.due_date ? ` · Due ${fmtD(b.due_date)}` : ''}
           ${b.jurisdiction ? ` · Local ${esc(b.jurisdiction)}` : ''}
           ${b.next_followup_date ? ` · Next F/U: <span class="${b.next_followup_date < today ? 'overdue-txt' : ''}">${fmtD(b.next_followup_date)}${b.next_followup_date < today ? ' — OVERDUE' : ''}</span>` : ''}
           ${b.close_reason ? `<br>Closed ${fmtD(b.closed_date)} by ${esc(b.closed_approved_by)} — ${esc(b.close_reason)}` : ''}
@@ -1370,10 +1411,10 @@ function coNode(co) {
           ${stageBadge(co.stage)}
           ${co.superseded ? '<span class="badge" style="background:#e2e8f0;color:#64748b">REVISED</span>' : ''}
           ${co.estimate_amount ? `<span class="amount">${fmt$(co.estimate_amount)}</span>` : ''}
+          ${co.due_date ? `<span style="margin-left:auto;font-weight:700;font-size:12px;color:${co.due_date < today ? '#dc2626' : 'var(--text-muted)'}">Due ${fmtD(co.due_date)}</span>` : ''}
         </div>
         <div style="font-size:12px;color:var(--text-muted);margin-top:2px">
           ${co.estimator ? `Est: ${ini(co.estimator)}` : ''}
-          ${co.due_date ? ` · Due ${fmtD(co.due_date)}` : ''}
           ${co.date_submitted ? ` · Submitted ${fmtD(co.date_submitted)} (${esc(co.approved_by)})` : ''}
           ${co.approval_date ? ` · <span style="color:#16a34a;font-weight:700">Approved ${fmtD(co.approval_date)}</span>` : ''}
           ${co.next_followup_date ? ` · Next F/U: <span class="${fuOverdue ? 'overdue-txt' : ''}">${fmtD(co.next_followup_date)}${fuOverdue ? ' — OVERDUE' : ''}</span>` : ''}

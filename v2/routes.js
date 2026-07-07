@@ -201,5 +201,7 @@ router.post('/api/v2/change-orders/:id/not-approved', t(req => v2db.notApproveCO
 router.post('/api/v2/change-orders/:id/void',         t(req => v2db.voidCO(req.params.id, req.body)));
 router.post('/api/v2/change-orders/:id/reopen',       t(req => v2db.reopenCO(req.params.id)));
 router.post('/api/v2/change-orders/:id/revise',       t(req => v2db.reviseCO(req.params.id, req.body)));
+router.patch('/api/v2/bids/:id/due-date',             t(req => v2db.updateBidDueDate(req.params.id, req.body.due_date)));
+router.patch('/api/v2/change-orders/:id/due-date',    t(req => v2db.updateCoDueDate(req.params.id, req.body.due_date)));
 
 module.exports = router;
