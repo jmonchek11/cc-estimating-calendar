@@ -118,6 +118,7 @@ const ChangeOrderSchema = new mongoose.Schema({
   name:           { type: String, required: true },              // description of the work
   stage:          { type: String, enum: CO_STAGES, required: true, default: 'active_co' },
   was_submitted:  { type: Number, default: 0 },                  // drives Reopen target (submitted_co vs active_co)
+  superseded:     { type: Number, default: 0 },                  // 1 = replaced by a revision (same idea as Bid.superseded)
 
   estimator_id:   { type: Number, default: null },
   due_date:       { type: String, default: null },

@@ -137,6 +137,8 @@ router.post('/api/v2/bids/:id/close',         t(req => v2db.closeBid(req.params.
 router.post('/api/v2/bids/:id/submissions',   t(req => v2db.addSubmission(req.params.id, req.body)));
 router.post('/api/v2/bids/:id/customers',     t(req => v2db.addBidCustomers(req.params.id, req.body)));
 router.patch('/api/v2/bids/:id/opportunity',  t(req => v2db.updateOpportunity(req.params.id, req.body)));
+router.post('/api/v2/bids/:id/sub-estimators',   t(req => v2db.addSubEstimator(req.params.id, req.body)));
+router.delete('/api/v2/bids/:id/sub-estimators', t(req => v2db.removeSubEstimator(req.params.id, req.body.estimator_id, req.body.scope)));
 router.delete('/api/v2/bid-customers/:id',    t(req => v2db.removeBidCustomer(req.params.id)));
 
 // Per-submission win/loss
@@ -198,5 +200,6 @@ router.post('/api/v2/change-orders/:id/approve',      t(req => v2db.approveCO(re
 router.post('/api/v2/change-orders/:id/not-approved', t(req => v2db.notApproveCO(req.params.id, req.body)));
 router.post('/api/v2/change-orders/:id/void',         t(req => v2db.voidCO(req.params.id, req.body)));
 router.post('/api/v2/change-orders/:id/reopen',       t(req => v2db.reopenCO(req.params.id)));
+router.post('/api/v2/change-orders/:id/revise',       t(req => v2db.reviseCO(req.params.id, req.body)));
 
 module.exports = router;

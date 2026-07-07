@@ -64,7 +64,7 @@ async function getProjects() {
     const pJobs = jobs.filter(j => j.project_id === p._id);
     const pCos  = pJobs.flatMap(j => cosByJob[j._id] || []);
     const activeBids = pBids.filter(b => BID_ACTIVE_STAGES.includes(b.stage) && !b.superseded);
-    const activeCos  = pCos.filter(c => CO_ACTIVE_STAGES.includes(c.stage));
+    const activeCos  = pCos.filter(c => CO_ACTIVE_STAGES.includes(c.stage) && !c.superseded);
     const awarded    = pBids.find(b => b.stage === 'awarded');
 
     return {
@@ -193,6 +193,7 @@ async function getProjectDetail(projectId) {
     co_number: co.co_number,
     name: co.name,
     stage: co.stage,
+    superseded: !!co.superseded,
     estimator: tm[co.estimator_id] || null,
     due_date: co.due_date,
     start_date: co.start_date,
@@ -621,6 +622,26 @@ async function updateOpportunity(id, data) {
   return { bid_id: bid._id };
 }
 
+// Sub-estimators — breaking a large bid into systems (Fire Alarm, Lighting
+// Controls, Distribution, Data, Nurse Call, Security, etc.) taken off by a
+// different estimator than the bid's primary one. Open to any user, not
+// admin-gated, same trust level as adding a customer.
+async function addSubEstimator(bidId, { estimator_id, scope }) {
+  const M = getModels();
+  const bid = await loadBid(bidId);
+  const eid = Number(estimator_id);
+  const sys = String(scope || '').trim();
+  if (!eid || !sys) throw new Error('Estimator and system/scope are both required');
+  if ((bid.sub_estimators || []).some(s => s.estimator_id === eid && s.scope === sys)) throw new Error('That estimator is already assigned to this system');
+  await M.Bid.updateOne({ _id: bid._id }, { $push: { sub_estimators: { estimator_id: eid, scope: sys } }, $set: { updated_at: ts() } });
+  return { ok: true };
+}
+async function removeSubEstimator(bidId, estimatorId, scope) {
+  const M = getModels();
+  await M.Bid.updateOne({ _id: Number(bidId) }, { $pull: { sub_estimators: { estimator_id: Number(estimatorId), scope } }, $set: { updated_at: ts() } });
+  return { ok: true };
+}
+
 // Remove a customer mistakenly added to a bid. Blocked if a submission
 // already exists for that company on this bid, or if they're the awarded
 // company — those represent real activity, not a roster mistake, and
@@ -1044,6 +1065,32 @@ async function reopenCO(id) {
   return { co_id: co._id, stage: target };
 }
 
+// Revise a change order — scope/pricing changes on a CO happen constantly
+// (same idea as a bid revision/re-bid), so rather than editing history in
+// place, create a new CO under the same job carrying forward whatever
+// wasn't explicitly changed, and mark the old one superseded (hidden from
+// active lists, same as a superseded bid, but still visible — dimmed — in
+// the project hierarchy for history). Not allowed on an already-superseded
+// or voided CO (revise a voided CO by reopening it first).
+async function reviseCO(id, data) {
+  const M = getModels();
+  const co = await loadCO(id);
+  if (co.superseded) throw new Error('This CO has already been revised — find the newer version instead.');
+  if (co.stage === 'voided') throw new Error("Can't revise a voided CO — reopen it first if it's coming back.");
+  const newId = await nextId('change_orders');
+  await M.ChangeOrder.create({
+    _id: newId, job_id: co.job_id, stage: 'active_co',
+    co_number: data.co_number || co.co_number,
+    name: data.name || co.name,
+    due_date: data.due_date || co.due_date,
+    start_date: data.start_date || co.start_date,
+    estimator_id: data.estimator_id ? Number(data.estimator_id) : co.estimator_id,
+    notes: data.notes || null,
+  });
+  await M.ChangeOrder.updateOne({ _id: co._id }, { $set: { superseded: 1, next_followup_date: null, updated_at: ts() } });
+  return { co_id: newId, job_id: co.job_id };
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // DATA HEALTH — buckets the dataset's quality issues so cleanup is a punch-list
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1135,6 +1182,7 @@ async function getSearchResults(q) {
     }));
 
   const matchedCos = cos
+    .filter(c => !c.superseded)
     .filter(c => { const j = jobById[c.job_id]; return hit(c.co_number, c.name, j?.job_number, j ? pName[j.project_id] : null); })
     .map(c => {
       const job = jobById[c.job_id];
@@ -1166,6 +1214,7 @@ async function getBidList(stage) {
     id: b._id, project_id: b.project_id, project: pName[b.project_id] || '—',
     bid_number: b.bid_number, stage: b.stage, drawing_stage: b.drawing_stage,
     estimator: tm[b.estimator_id] || null, salesperson: tm[b.salesperson_id] || null,
+    sub_estimators: (b.sub_estimators || []).map(s => ({ ...(tm[s.estimator_id] || {}), scope: s.scope })),
     customers: [...new Set((custByBid[b._id] || []).filter(Boolean))],
     date_received: b.date_received, due_date: b.due_date,
     estimate_amount: b.estimate_amount, date_submitted: b.date_submitted, next_followup_date: b.next_followup_date,
@@ -1175,7 +1224,7 @@ async function getBidList(stage) {
 // ── Change order list for a stage ─────────────────────────────────────────────
 async function getCoList(stage) {
   const M = getModels();
-  const filter = stage ? { stage } : { stage: { $in: ['active_co', 'submitted_co'] } };
+  const filter = stage ? { stage, superseded: { $ne: 1 } } : { stage: { $in: ['active_co', 'submitted_co'] }, superseded: { $ne: 1 } };
   const cos = await M.ChangeOrder.find(filter).sort({ due_date: 1, _id: 1 }).lean();
   const [jobs, projects, members] = await Promise.all([M.Job.find().lean(), M.Project.find().lean(), M.TeamMember.find().lean()]);
   const jobById = {}; jobs.forEach(j => jobById[j._id] = j);
@@ -1219,7 +1268,7 @@ async function getDigest() {
 
   const [bids, cos, jobs, projects, companies, members, bidCustomers] = await Promise.all([
     M.Bid.find({ superseded: { $ne: 1 } }).lean(),
-    M.ChangeOrder.find().lean(),
+    M.ChangeOrder.find({ superseded: { $ne: 1 } }).lean(),
     M.Job.find().lean(),
     M.Project.find().lean(),
     M.Company.find().lean(),
@@ -1277,7 +1326,10 @@ async function getDigest() {
   };
 
   const byEstimator = members.filter(m => m.role === 'estimator').map(m => {
-    const l = bids.filter(b => b.estimator_id === m._id && !CLOSED.includes(b.stage));
+    // Counts a bid whether this estimator is the primary or a sub-estimator
+    // on a broken-out system (Fire Alarm, Lighting Controls, etc.) — either
+    // way it's real work on their plate.
+    const l = bids.filter(b => !CLOSED.includes(b.stage) && (b.estimator_id === m._id || (b.sub_estimators || []).some(s => s.estimator_id === m._id)));
     return { id: m._id, name: m.name, initials: m.initials, bid_count: l.length, total_value: l.reduce((s, b) => s + (b.estimate_amount || 0), 0) };
   }).sort((a, b) => b.bid_count - a.bid_count);
 
@@ -1348,7 +1400,7 @@ async function getDashboard(userId, mineOnly) {
   const coName = {}; companies.forEach(c => coName[c._id] = c.name);
   const bidById = {}; bids.forEach(b => bidById[b._id] = b);
 
-  const isMyBid = (b) => !uid || b.estimator_id === uid || b.salesperson_id === uid;
+  const isMyBid = (b) => !uid || b.estimator_id === uid || b.salesperson_id === uid || (b.sub_estimators || []).some(s => s.estimator_id === uid);
   const isMyCo = (c) => !uid || c.estimator_id === uid;
   const jobOwner = (j) => j.pm_id || bidById[j.winning_bid_id]?.estimator_id || bidById[j.winning_bid_id]?.salesperson_id || null;
   const isMyJob = (j) => !uid || jobOwner(j) === uid;
@@ -1359,14 +1411,14 @@ async function getDashboard(userId, mineOnly) {
     opportunity: stageCount('opportunity'),
     active_bid: stageCount('active_bid'),
   };
-  const activeCos = myCos.filter(c => ['active_co', 'submitted_co'].includes(c.stage));
+  const activeCos = myCos.filter(c => ['active_co', 'submitted_co'].includes(c.stage) && !c.superseded);
 
   const submittedYTD = myBids.filter(b => b.date_submitted && b.date_submitted >= yearStart && b.date_submitted <= today);
   const awardedYTD = myBids.filter(b => b.stage === 'awarded' && b.award_date && b.award_date >= yearStart && b.award_date <= today);
   const awardedMissingDate = myBids.filter(b => b.stage === 'awarded' && !b.award_date).length;
 
   const overdueBids = subs.filter(s => s.is_current && s.outcome === 'pending' && s.next_followup_date && s.next_followup_date < today && (!uid || bidById[s.bid_id]?.salesperson_id === uid));
-  const overdueCos = myCos.filter(c => c.stage === 'submitted_co' && c.next_followup_date && c.next_followup_date < today);
+  const overdueCos = myCos.filter(c => c.stage === 'submitted_co' && !c.superseded && c.next_followup_date && c.next_followup_date < today);
   const dueSoon = myBids.filter(b => ['active_bid', 'submitted'].includes(b.stage) && !b.superseded && b.due_date && b.due_date >= today && b.due_date <= ahead(14)).sort((a, b) => (a.due_date || '').localeCompare(b.due_date || ''));
 
   const myJobsPending = jobs.filter(j => !j.job_number).filter(isMyJob);
@@ -1435,7 +1487,7 @@ async function getDataHealth() {
   // (same double-click/double-submit risk as duplicate bids). Voided COs are
   // excluded — a void is an intentional retirement, not a live duplicate.
   const cosByJobNum = {};
-  cos.forEach(c => { if (!c.co_number || c.stage === 'voided') return; (cosByJobNum[c.job_id + '|' + c.co_number] = cosByJobNum[c.job_id + '|' + c.co_number] || []).push(c); });
+  cos.forEach(c => { if (!c.co_number || c.stage === 'voided' || c.superseded) return; (cosByJobNum[c.job_id + '|' + c.co_number] = cosByJobNum[c.job_id + '|' + c.co_number] || []).push(c); });
   const jobById2 = {}; jobs.forEach(j => jobById2[j._id] = j);
   const dupCOs = Object.values(cosByJobNum).filter(g => g.length > 1).map(g => {
     const job = jobById2[g[0].job_id];
@@ -1807,11 +1859,11 @@ module.exports = {
   addBidCustomerContact, removeBidCustomerContact,
   awardSubmission, notAwardSubmission, closeBid, logFollowupV2,
   createLegacyJob, updateJob,
-  createChangeOrder, submitCO, approveCO, notApproveCO, voidCO, reopenCO,
+  createChangeOrder, submitCO, approveCO, notApproveCO, voidCO, reopenCO, reviseCO,
   _norm, resolveCompanyByName, ensureBidCustomer, teamMap,
   addReminder, dismissReminder, deleteReminder, getRemindersFor, getDueReminders, markReminderEmailed,
   getDigest,
   getTeamV2, createTeamMemberV2, updateTeamMemberV2, updateSettingsV2, getSettings,
-  removeBidCustomer, createCompanyV2, deleteBid,
+  removeBidCustomer, createCompanyV2, deleteBid, addSubEstimator, removeSubEstimator,
   mergeContacts, deleteCompany, deleteChangeOrder,
 };

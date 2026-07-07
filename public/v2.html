@@ -747,7 +747,8 @@ async function renderDigest() {
       <div class="proj-row" ${r.project_id ? `onclick="${r.kind === 'bid' ? `openBidFlyout(${r.project_id},${r.bid_id})` : `openCoFlyout(${r.project_id},${r.bid_id})`}"` : ''}><div style="flex:1"><div class="proj-name">${esc(r.project_name)}${r.bid_number ? ` #${esc(r.bid_number)}` : ''}</div>
       <div class="proj-meta">${fmtD(r.remind_on)}${r.note ? ' · ' + esc(r.note) : ''}</div></div></div>`).join(''), '#8b5cf6') : ''}
 
-    ${section('📅', 'Upcoming Due Dates (30 days)', d.upcomingDueDates.length + d.coDueSoon.length, rows([...d.upcomingDueDates, ...d.coDueSoon], false), '#2563eb')}
+    ${section('📅', 'Upcoming Due Dates (30 days)', d.upcomingDueDates.length + d.coDueSoon.length,
+      rows([...d.upcomingDueDates, ...d.coDueSoon].sort((a, b) => (a.estimate_due_date || '9999').localeCompare(b.estimate_due_date || '9999')), false), '#2563eb')}
 
     ${d.newOpportunities.length ? section('🆕', 'New Opportunities This Week', d.newOpportunities.length, rows(d.newOpportunities, false), '#3b82f6') : ''}
     ${d.newActiveBids.length ? section('🆕', 'New Active Bids This Week', d.newActiveBids.length, rows(d.newActiveBids, false), '#f59e0b') : ''}
@@ -831,9 +832,9 @@ function applyPersonMine(rows, s) {
   let out = rows;
   if (s.person) {
     const [kind, id] = s.person.split(':'); const nid = Number(id);
-    out = out.filter(r => kind === 'sal' ? r.salesperson?.id === nid : r.estimator?.id === nid);
+    out = out.filter(r => kind === 'sal' ? r.salesperson?.id === nid : (r.estimator?.id === nid || (r.sub_estimators || []).some(se => se.id === nid)));
   }
-  if (s.mine && CURRENT_USER) out = out.filter(r => r.estimator?.id === CURRENT_USER.id || r.salesperson?.id === CURRENT_USER.id);
+  if (s.mine && CURRENT_USER) out = out.filter(r => r.estimator?.id === CURRENT_USER.id || r.salesperson?.id === CURRENT_USER.id || (r.sub_estimators || []).some(se => se.id === CURRENT_USER.id));
   return out;
 }
 function applyTextSearch(rows, q, getFields) {
@@ -1245,7 +1246,8 @@ function bidNode(b) {
           ${!b.customers.length ? '<span style="color:#dc2626">no customer</span><br>' : ''}
           ${b.awarded_company ? `Won by <strong style="color:#16a34a">${esc(b.awarded_company.name)}</strong> ${fmtD(b.award_date)}<br>` : ''}
           ${b.estimator ? `Est: ${ini(b.estimator)}` : ''}
-          ${b.sub_estimators.map(s => `${ini(s)}<span style="font-size:10px">${esc(s.scope)}</span>`).join(' ')}
+          ${b.sub_estimators.map(s => `${ini(s)}<span style="font-size:10px">${esc(s.scope)}<a href="#" onclick="event.preventDefault();actRemoveSubEstimator(${b.id},${s.id},'${escJs(s.scope)}')" style="color:#dc2626;margin-left:2px">✕</a></span>`).join(' ')}
+          ${!b.superseded && ['opportunity','active_bid','submitted'].includes(b.stage) ? ` <a href="#" onclick="event.preventDefault();actAddSubEstimator(${b.id})" style="font-size:11px;color:#2563eb">+ Sub-estimator</a>` : ''}
           ${b.salesperson ? ` Sales: ${ini(b.salesperson)}` : ''}
           ${b.due_date ? ` · Due ${fmtD(b.due_date)}` : ''}
           ${b.jurisdiction ? ` · Local ${esc(b.jurisdiction)}` : ''}
@@ -1360,12 +1362,13 @@ function jobNode(j, legacy = false) {
 function coNode(co) {
   const fuOverdue = co.next_followup_date && co.next_followup_date < today;
   return `
-    <div class="v2-co">
+    <div class="v2-co" ${co.superseded ? 'style="opacity:.6"' : ''}>
       <span class="badge badge-co" style="flex-shrink:0">CO</span>
       <div style="flex:1;min-width:0">
         <div style="font-weight:600;font-size:13px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           <span style="color:#d97706">${esc(co.co_number)}</span> ${esc(co.name)}
           ${stageBadge(co.stage)}
+          ${co.superseded ? '<span class="badge" style="background:#e2e8f0;color:#64748b">REVISED</span>' : ''}
           ${co.estimate_amount ? `<span class="amount">${fmt$(co.estimate_amount)}</span>` : ''}
         </div>
         <div style="font-size:12px;color:var(--text-muted);margin-top:2px">
@@ -1388,18 +1391,25 @@ const CO_EDITABLE_STAGES = ['active_co', 'submitted_co'];
 
 function coActions(co) {
   let workflow = '';
-  if (co.stage === 'active_co') {
+  if (co.superseded) {
+    // Historical record only — no workflow buttons, same treatment as a superseded bid.
+  } else if (co.stage === 'active_co') {
     workflow = `<button class="v2-btn green" onclick="actSubmitCO(${co.id})">Submit CO</button>
+                <button class="v2-btn outline" onclick="actReviseCO(${co.id})">↻ Revise</button>
                 <button class="v2-btn gray" onclick="actVoidCO(${co.id})">Void</button>`;
   } else if (co.stage === 'submitted_co') {
     workflow = `<button class="v2-btn blue" onclick="actLogFollowup('change_order',${co.id})">📝 Log Follow-up</button>
                 <button class="v2-btn green" onclick="actApproveCO(${co.id})">✓ Approved</button>
                 <button class="v2-btn red" onclick="actNotApprovedCO(${co.id})">✗ Not Approved</button>
+                <button class="v2-btn outline" onclick="actReviseCO(${co.id})">↻ Revise</button>
                 <button class="v2-btn gray" onclick="actVoidCO(${co.id})">Void</button>`;
   } else if (co.stage === 'voided' || co.stage === 'not_approved') {
     workflow = `<button class="v2-btn outline" onclick="actReopenCO(${co.id})">↩ Reopen</button>`;
+  } else if (co.stage === 'approved') {
+    // Pricing/scope sometimes changes after approval too — still revisable.
+    workflow = `<button class="v2-btn outline" onclick="actReviseCO(${co.id})">↻ Revise</button>`;
   }
-  const adminBtn = (CURRENT_USER?.is_admin && CO_EDITABLE_STAGES.includes(co.stage))
+  const adminBtn = (CURRENT_USER?.is_admin && CO_EDITABLE_STAGES.includes(co.stage) && !co.superseded)
     ? `<button class="v2-btn outline" onclick="actEditCO(${co.id})">✏️ Edit</button>` : '';
   const all = [workflow, adminBtn].filter(Boolean).join('');
   return all ? `<div class="v2-actions">${all}</div>` : '';
@@ -1506,7 +1516,13 @@ function comboRenderMenu(fid) {
   const raw = input.value.trim(), q = raw.toLowerCase();
   const chosen = new Set((COMBO_STATE[fid] || []).filter(s => s.id).map(s => s.id));
   const isProject = f.type === 'project';
-  const noun = isProject ? 'project' : 'customer';
+  // Fuzzy-match scoring/behavior is keyed on the field TYPE ('project' gets
+  // near-duplicate suggestions since typo'd project names are a real cost),
+  // but the displayed noun is separate — `f.noun` lets a 'project'-typed
+  // field used for something else (e.g. Company, which reuses 'project'
+  // purely for its fuzzy matching) say the right word instead of literally
+  // "project".
+  const noun = f.noun || (isProject ? 'project' : 'customer');
   let opts;
   if (isProject) {
     if (!raw) opts = [];
@@ -1516,13 +1532,13 @@ function comboRenderMenu(fid) {
   } else {
     opts = f.options.filter(o => !chosen.has(o.value) && (!q || o.label.toLowerCase().includes(q))).slice(0, 8);
   }
-  const warn = (isProject && opts.length) ? `<div class="v2-combo-warn">⚠️ Found similar project${opts.length > 1 ? 's' : ''} below — pick one if it's the same job</div>` : '';
+  const warn = (isProject && opts.length) ? `<div class="v2-combo-warn">⚠️ Found similar ${noun}${opts.length > 1 ? 's' : ''} below — pick one if it's the same one</div>` : '';
   let html = warn + opts.map(o => `<div class="v2-combo-opt" onmousedown="event.preventDefault();comboPick('${fid}',${o.value})">${esc(o.label)}</div>`).join('');
   const exact = f.options.some(o => o.label.toLowerCase() === q);
   const alreadyNew = (COMBO_STATE[fid] || []).some(s => !s.id && s.name.toLowerCase() === q);
   if (q && !exact && !alreadyNew && f.allowNew !== false)
-    html += `<div class="v2-combo-opt v2-combo-new" onmousedown="event.preventDefault();comboAddNew('${fid}')">➕ ${isProject ? `Create new project "${esc(raw)}"` : `Add "${esc(raw)}" as a new ${noun}`}</div>`;
-  const emptyMsg = isProject ? 'No similar projects found — keep typing to create a new one'
+    html += `<div class="v2-combo-opt v2-combo-new" onmousedown="event.preventDefault();comboAddNew('${fid}')">➕ Create new ${noun} "${esc(raw)}"</div>`;
+  const emptyMsg = isProject ? `No similar ${noun}s found — keep typing to create a new one`
     : f.allowNew === false ? 'No matches' : `No matches — keep typing to add a new ${noun}`;
   menu.innerHTML = html || `<div class="v2-combo-empty">${emptyMsg}</div>`;
   // Fixed positioning computed from the real on-screen box (see the CSS
@@ -1762,6 +1778,22 @@ function actAddCustomers(bidId) {
     { id: 'company_ids', label: 'Customer(s) to add', type: 'company', multi: true, required: true,
       newKey: 'new_companies', options: companyOpts().filter(o => !existing.has(o.value)) },
   ], data => api('POST', `/api/v2/bids/${bidId}/customers`, data), 'Add Customer(s)', 'green');
+}
+
+// Sub-estimators — break out a system (Fire Alarm, Lighting Controls,
+// Distribution, Data, Nurse Call, Security, etc.) to a different estimator
+// than the bid's primary one. That estimator then sees this bid on their
+// own "mine only" dashboard/lists too, same as if they were the primary.
+function actAddSubEstimator(bidId) {
+  showForm('+ Sub-estimator', [
+    { id: 'estimator_id', label: 'Estimator', type: 'select', required: true, options: teamOpts(['estimator']) },
+    { id: 'scope', label: 'System / Scope', type: 'text', required: true, placeholder: 'Fire Alarm, Lighting Controls, Distribution, Data, Nurse Call, Security…' },
+  ], data => api('POST', `/api/v2/bids/${bidId}/sub-estimators`, data), 'Add', 'blue');
+}
+async function actRemoveSubEstimator(bidId, estimatorId, scope) {
+  if (!confirm(`Remove this sub-estimator (${scope})?`)) return;
+  try { await api('DELETE', `/api/v2/bids/${bidId}/sub-estimators`, { estimator_id: estimatorId, scope }); await refresh(); }
+  catch (e) { alert('Failed: ' + e.message); }
 }
 
 // Additional submission while submitted: another customer, or best-and-final / scope change
@@ -2039,6 +2071,22 @@ function actVoidCO(coId) {
 async function actReopenCO(coId) {
   try { await api('POST', `/api/v2/change-orders/${coId}/reopen`); await refresh(); }
   catch (e) { alert(e.message); }
+}
+
+// Revise a CO — scope/pricing changed, same idea as a bid re-bid. Creates a
+// new CO under the same job (pre-filled from the current one, editable) and
+// marks this one REVISED/superseded — same pattern as adding a new bid
+// supersedes the prior one.
+function actReviseCO(coId) {
+  const co = findCO(coId) || {};
+  showForm('↻ Revise Change Order', [
+    { id: 'co_number', label: 'RFC / CO #', type: 'text', required: true, value: co.co_number },
+    { id: 'name', label: 'Description of Work', type: 'text', required: true, value: co.name },
+    { id: 'due_date', label: 'Due Date', type: 'date', value: co.due_date },
+    { id: 'start_date', label: 'Start Date', type: 'date', value: today },
+    { id: 'estimator_id', label: 'Estimator', type: 'select', options: teamOpts(['estimator']), value: co.estimator?.id },
+    { id: 'notes', label: 'What changed?', type: 'textarea', placeholder: 'Why this revision — scope/pricing change…' },
+  ], data => api('POST', `/api/v2/change-orders/${coId}/revise`, data), 'Create Revision', 'blue');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2442,7 +2490,7 @@ function actNewContact(prefillCompanyId) {
   showForm('+ New Contact', [
     { id: 'first_name', label: 'First Name', type: 'text' },
     { id: 'last_name', label: 'Last Name', type: 'text' },
-    { id: 'company_id', label: 'Company', type: 'project', multi: false, required: true, newKey: 'new_company',
+    { id: 'company_id', label: 'Company', type: 'project', noun: 'company', multi: false, required: true, newKey: 'new_company',
       options: META.companies.map(c => ({ value: c.id, label: c.name })), value: prefillCompanyId, placeholder: 'Type company name…' },
     { id: 'phone', label: 'Phone', type: 'text' },
     { id: 'email', label: 'Email', type: 'text' },
@@ -2460,7 +2508,7 @@ function actEditContact(id) {
   showForm('✏️ Edit Contact', [
     { id: 'first_name', label: 'First Name', type: 'text', value: c.first_name },
     { id: 'last_name', label: 'Last Name', type: 'text', value: c.last_name },
-    { id: 'company_id', label: 'Company', type: 'project', multi: false, required: true, newKey: 'new_company',
+    { id: 'company_id', label: 'Company', type: 'project', noun: 'company', multi: false, required: true, newKey: 'new_company',
       options: META.companies.map(co => ({ value: co.id, label: co.name })), value: c.company_id, placeholder: 'Type company name…' },
     { id: 'phone', label: 'Phone', type: 'text', value: c.phone },
     { id: 'email', label: 'Email', type: 'text', value: c.email },
