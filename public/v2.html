@@ -183,10 +183,12 @@
       <a class="nav-item" data-page="health" href="#health" onclick="navigate('health');return false"><span class="nav-icon">🩺</span> Data Health</a>
       <a class="nav-item" data-page="history" href="#history" id="nav-history" style="display:none" onclick="navigate('history');return false"><span class="nav-icon">🕓</span> History</a>
       <a class="nav-item" data-page="settings" href="#settings" onclick="navigate('settings');return false"><span class="nav-icon">⚙️</span> Settings</a>
-      <div id="sidebar-user" style="margin-top:auto;padding:10px 16px;font-size:11.5px;color:var(--text-muted)"></div>
-      <a class="nav-item" href="#" onclick="openOnlinePanel();return false"><span class="nav-icon">🟢</span> <span id="online-count-label">…</span></a>
-      <a class="nav-item" href="#" onclick="openIdeasModal();return false"><span class="nav-icon">💡</span> Ideas &amp; Issues</a>
-      <a class="nav-item" href="#" onclick="actLogout();return false"><span class="nav-icon">🚪</span> Sign out</a>
+      <div id="sidebar-user" style="margin-top:auto;padding:10px 16px 2px;font-size:11.5px;color:var(--text-muted)"></div>
+      <div style="display:flex;align-items:center;gap:10px;padding:6px 16px 12px">
+        <a href="#" onclick="openOnlinePanel();return false" title="Who's online" style="display:flex;align-items:center;gap:4px;color:var(--sidebar-text);text-decoration:none;font-size:12px;flex:1;min-width:0">🟢 <span id="online-count-label" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">…</span></a>
+        <a href="#" onclick="openIdeasModal();return false" title="Ideas & Issues" style="color:var(--sidebar-text);text-decoration:none;font-size:15px;flex-shrink:0">💡</a>
+        <a href="#" onclick="actLogout();return false" title="Sign out" style="color:var(--sidebar-text);text-decoration:none;font-size:15px;flex-shrink:0">🚪</a>
+      </div>
     </nav>
     <main id="main"><div style="padding:30px;color:var(--text-muted)">Loading…</div></main>
   </div>
@@ -618,10 +620,12 @@ function buildCalendarGrid(year, month, items, filter) {
     const ds = `${year}-${pad(month + 1)}-${pad(d)}`;
     const isToday = ds === today;
     const dayItems = CAL_DAY_MAP[ds] || [];
-    const shown = dayItems.slice(0, 3);
-    const extra = dayItems.length - 3;
 
-    const chips = shown.map(({ item, type }) => {
+    // Show every item, not just the first few — the row grows to fit
+    // whichever day that week is busiest (CSS grid rows auto-size to their
+    // tallest cell), so nothing gets stuck behind a "+N more" button where
+    // it can't be dragged.
+    const chips = dayItems.map(({ item, type }) => {
       if (type === 'due') {
         const c = estimatorColor(item.estimator?.id);
         // Only due-date chips are draggable — a due date is what dropping on
@@ -640,9 +644,7 @@ function buildCalendarGrid(year, month, items, filter) {
       ${dayItems.length ? `onclick="openCalDayModal('${ds}')"` : ''}
       ondragover="event.preventDefault()" ondrop="calDrop(event,'${ds}')">
       <div class="cal-day-num${isToday ? ' cal-day-num-today' : ''}">${d}</div>
-      <div class="cal-day-chips">${chips}
-        ${extra > 0 ? `<button class="cal-chip-more" onclick="event.stopPropagation();openCalDayModal('${ds}')">+${extra} more</button>` : ''}
-      </div>
+      <div class="cal-day-chips">${chips}</div>
     </div>`;
   }
   const rem = (startDOW + daysInMonth) % 7;

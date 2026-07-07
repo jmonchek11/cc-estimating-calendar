@@ -1417,7 +1417,7 @@ textarea.form-input { resize: vertical; min-height: 60px; }
   width: 22px; height: 22px; border-radius: 50%;
   background: var(--primary); color: #fff; font-size: 12px; font-weight: 700;
 }
-.cal-day-chips { display: flex; flex-direction: column; gap: 2px; flex: 1; overflow: hidden; }
+.cal-day-chips { display: flex; flex-direction: column; gap: 2px; flex: 1; }
 .cal-day-clickable { cursor: pointer; }
 .cal-chip {
   display: flex; align-items: center; gap: 3px; padding: 2px 5px;
@@ -1427,12 +1427,6 @@ textarea.form-input { resize: vertical; min-height: 60px; }
 .cal-chip-fu { border-left-color: #475569; background: #1e293b; opacity: 0.85; }
 .cal-chip-txt { font-size: 10px; color: #fff; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
 .cal-chip-ini { font-size: 9px; font-weight: 800; white-space: nowrap; flex-shrink: 0; }
-.cal-chip-more {
-  font-size: 10px; color: var(--primary); padding: 2px 5px; font-weight: 600;
-  background: rgba(37,99,235,0.1); border-radius: 3px; border: none;
-  cursor: pointer; font-family: inherit; width: 100%; text-align: left;
-}
-.cal-chip-more:hover { background: rgba(37,99,235,0.2); }
 .cal-modal-row {
   display: flex; align-items: center; gap: 12px; padding: 12px 20px;
   border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.15s;
