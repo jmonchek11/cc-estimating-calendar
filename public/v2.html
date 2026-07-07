@@ -183,7 +183,8 @@
       <a class="nav-item" data-page="health" href="#health" onclick="navigate('health');return false"><span class="nav-icon">🩺</span> Data Health</a>
       <a class="nav-item" data-page="settings" href="#settings" onclick="navigate('settings');return false"><span class="nav-icon">⚙️</span> Settings</a>
       <div id="sidebar-user" style="margin-top:auto;padding:10px 16px;font-size:11.5px;color:var(--text-muted)"></div>
-      <a class="nav-item" href="/legacy"><span class="nav-icon">↩</span> Old version (legacy)</a>
+      <a class="nav-item" href="#" onclick="openOnlinePanel();return false"><span class="nav-icon">🟢</span> <span id="online-count-label">…</span></a>
+      <a class="nav-item" href="#" onclick="openIdeasModal();return false"><span class="nav-icon">💡</span> Ideas &amp; Issues</a>
       <a class="nav-item" href="#" onclick="actLogout();return false"><span class="nav-icon">🚪</span> Sign out</a>
     </nav>
     <main id="main"><div style="padding:30px;color:var(--text-muted)">Loading…</div></main>
@@ -367,8 +368,8 @@ async function renderSearchResults() {
             <div class="proj-name">${esc(b.project)}${b.bid_number ? ` <span style="color:var(--text-muted);font-weight:400;font-size:12px">#${esc(b.bid_number)}</span>` : ''}</div>
             <div class="proj-meta">
               ${b.customers.length ? esc(b.customers.join(', ')) : '<span style="color:#dc2626">no customer</span>'}
-              ${b.estimator ? `<span class="proj-meta-sep">·</span> Est ${ini(b.estimator)}` : ''}
-              ${b.salesperson ? ` Sales ${ini(b.salesperson)}` : ''}
+              ${b.salesperson ? `<span class="proj-meta-sep">·</span> Sales ${ini(b.salesperson)}` : ''}
+              ${b.estimator ? ` Est ${ini(b.estimator)}` : ''}
             </div>
           </div>
           <div style="text-align:right;flex-shrink:0">${b.estimate_amount ? `<span class="amount" style="font-size:13px">${fmt$(b.estimate_amount)}</span>` : ''}</div>
@@ -388,7 +389,8 @@ async function renderSearchResults() {
             <div class="proj-name"><span style="color:#d97706">${esc(c.co_number)}</span> ${esc(c.name)}</div>
             <div class="proj-meta">
               ${esc(c.project)}${c.job_number ? ` <span class="proj-meta-sep">·</span> Job ${esc(c.job_number)}` : ''}
-              ${c.estimator ? `<span class="proj-meta-sep">·</span> Est ${ini(c.estimator)}` : ''}
+              ${c.salesperson ? `<span class="proj-meta-sep">·</span> PM ${ini(c.salesperson)}` : ''}
+              ${c.estimator ? ` Est ${ini(c.estimator)}` : ''}
             </div>
           </div>
           <div style="text-align:right;flex-shrink:0">${c.estimate_amount ? `<span class="amount" style="font-size:13px">${fmt$(c.estimate_amount)}</span>` : ''}</div>
@@ -536,7 +538,7 @@ async function fetchCalendarItems() {
   ]);
   return [
     ...[...opp, ...active, ...sub].map(b => ({ kind: 'bid', id: b.id, project_id: b.project_id, title: b.project, label: b.bid_number, due_date: b.due_date, next_followup_date: b.next_followup_date, estimator: b.estimator, salesperson: b.salesperson, customer: (b.customers || []).join(', '), stage: b.stage })),
-    ...[...activeCo, ...subCo].map(c => ({ kind: 'co', id: c.id, project_id: c.project_id, title: `${c.co_number} — ${c.name}`, label: c.project, due_date: c.due_date, next_followup_date: c.next_followup_date, estimator: c.estimator, salesperson: null, customer: null, stage: c.stage })),
+    ...[...activeCo, ...subCo].map(c => ({ kind: 'co', id: c.id, project_id: c.project_id, title: `${c.co_number} — ${c.name}`, label: c.project, due_date: c.due_date, next_followup_date: c.next_followup_date, estimator: c.estimator, salesperson: c.salesperson, customer: null, stage: c.stage })),
   ];
 }
 function calendarLegendHtml() {
@@ -694,8 +696,8 @@ async function renderDigest() {
         <div class="proj-name">${esc(b.project_name)}${b.bid_number ? ` <span style="color:var(--text-muted);font-weight:400;font-size:12px">#${esc(b.bid_number)}</span>` : ''}</div>
         <div class="proj-meta">
           ${b.customer ? esc(b.customer) : ''}
-          ${b.estimator_initials ? `<span class="proj-meta-sep">·</span> Est ${esc(b.estimator_initials)}` : ''}
-          ${b.salesperson_initials ? ` Sales ${esc(b.salesperson_initials)}` : ''}
+          ${b.salesperson_initials ? `<span class="proj-meta-sep">·</span> ${b.stage === undefined ? 'PM' : 'Sales'} ${esc(b.salesperson_initials)}` : ''}
+          ${b.estimator_initials ? ` Est ${esc(b.estimator_initials)}` : ''}
           ${showFU && b.next_followup_date ? `<span class="proj-meta-sep">·</span> <span class="${b.next_followup_date < today ? 'overdue-txt' : ''}">F/U ${fmtD(b.next_followup_date)}</span>` : ''}
           ${!showFU && b.estimate_due_date ? `<span class="proj-meta-sep">·</span> Due ${fmtD(b.estimate_due_date)}` : ''}
         </div>
@@ -937,7 +939,8 @@ function renderCoListBody(stage) {
           <div class="proj-name"><span style="color:#d97706">${esc(c.co_number)}</span> ${esc(c.name)} ${stageBadge(c.stage)}</div>
           <div class="proj-meta">
             ${esc(c.project)}${c.job_number ? ` <span class="proj-meta-sep">·</span> Job ${esc(c.job_number)}` : ''}
-            ${c.estimator ? `<span class="proj-meta-sep">·</span> Est ${ini(c.estimator)}` : ''}
+            ${c.salesperson ? `<span class="proj-meta-sep">·</span> PM ${ini(c.salesperson)}` : '<span class="proj-meta-sep">·</span> <span style="color:#dc2626">no PM assigned</span>'}
+            ${c.estimator ? ` Est ${ini(c.estimator)}` : ''}
             ${c.due_date ? `<span class="proj-meta-sep">·</span> Due ${fmtD(c.due_date)}` : ''}
           </div>
         </div>
@@ -1178,7 +1181,7 @@ async function renderFlyout(fresh) {
     for (const j of d.jobs) { const c = j.change_orders.find(x => x.id === FLYOUT.id); if (c) { co = c; job = j; break; } }
     if (!co) { closeFlyout(); return; }
     title = `${esc(co.co_number)}`; sub = `${esc(d.name)}${job.job_number ? ' · Job ' + esc(job.job_number) : ''}`;
-    body = `<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">🏭 ${job.job_number ? 'Job ' + esc(job.job_number) : 'Job'}</div>` + coNode(co);
+    body = `<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">🏭 ${job.job_number ? 'Job ' + esc(job.job_number) : 'Job'}${job.pm ? ` · PM ${ini(job.pm)} ${esc(job.pm.name)}` : ' · <span style="color:#dc2626">no PM assigned</span>'}</div>` + coNode(co);
   }
   panel.querySelector('.fly-head').outerHTML = `
     <div class="fly-head">
@@ -2734,10 +2737,149 @@ async function actLogout() {
   window.location.href = '/legacy?returnTo=' + encodeURIComponent('/');
 }
 
+// ── Online presence — reuses v1's /api/heartbeat + /api/online (global,
+// not v2-specific) so anyone signed in shows up regardless of which
+// frontend they're using. ────────────────────────────────────────────────
+let _onlinePollTimer = null;
+function startOnlinePolling() {
+  if (_onlinePollTimer) return;
+  const tick = async () => {
+    try {
+      await fetch('/api/heartbeat', { method: 'POST' });
+      const users = await (await fetch('/api/online')).json();
+      const label = document.getElementById('online-count-label');
+      if (label) label.textContent = `${users.length} online`;
+    } catch { /* transient — next tick will retry */ }
+  };
+  tick();
+  _onlinePollTimer = setInterval(tick, 60_000);
+}
+function timeAgo(dateStr) {
+  if (!dateStr) return '';
+  const mins = Math.round((Date.now() - new Date(dateStr).getTime()) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins === 1) return '1 min ago';
+  if (mins < 60) return `${mins} min ago`;
+  const hrs = Math.round(mins / 60);
+  return `${hrs} hr${hrs !== 1 ? 's' : ''} ago`;
+}
+async function openOnlinePanel() {
+  let users;
+  try { users = await api('GET', '/api/online'); } catch (e) { alert(e.message); return; }
+  document.getElementById('v2-form-overlay')?.remove();
+  const ov = document.createElement('div');
+  ov.className = 'v2-overlay'; ov.id = 'v2-form-overlay';
+  ov.onclick = e => { if (e.target === ov) ov.remove(); };
+  ov.innerHTML = `
+    <div class="v2-modal" style="max-width:340px">
+      <div class="v2-modal-hd">🟢 Who's Online<button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">✕</button></div>
+      <div class="v2-modal-bd">
+        ${users.length ? users.map(u => `
+          <div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border)">
+            <span class="initials-pill">${esc(u.initials)}</span>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:13px;font-weight:600">${esc(u.name)}</div>
+              <div style="font-size:11px;color:var(--text-muted);text-transform:capitalize">${esc(u.role || '')}</div>
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);flex-shrink:0">${timeAgo(u.last_seen)}</div>
+          </div>`).join('')
+        : '<div style="font-size:13px;color:var(--text-muted);padding:8px 0">No one else is online right now.</div>'}
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+}
+
+// ── Ideas / Issues — reuses v1's /api/ideas (global) ─────────────────────
+const IDEA_PAGE_NAMES = {
+  dashboard: 'Dashboard', digest: 'Weekly Digest', calendar: 'Calendar',
+  opportunities: 'Opportunities', 'active-bids': 'Active Bids', 'submitted-bids': 'Submitted Bids',
+  'active-cos': 'Active Change Orders', 'submitted-cos': 'Submitted Change Orders',
+  projects: 'Projects', contacts: 'Contacts', health: 'Data Health', settings: 'Settings',
+};
+async function openIdeasModal() {
+  const isAdmin = !!CURRENT_USER?.is_admin;
+  let ideas = [];
+  if (isAdmin) { try { ideas = await api('GET', '/api/ideas'); } catch { ideas = []; } }
+  const statusLabel = s => ({ new: 'New', reviewed: 'Reviewed', done: 'Done', wontfix: "Won't Fix" }[s] || s);
+  const typeIcon = t => t === 'issue' ? '🐛' : '💡';
+
+  const adminInbox = isAdmin ? `
+    <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px">
+      <div style="font-size:13px;font-weight:700;margin-bottom:8px">📥 Submitted (${ideas.length})</div>
+      ${ideas.length ? ideas.map(i => `
+        <div style="padding:8px 0;border-bottom:1px solid #f1f5f9">
+          <div style="display:flex;align-items:flex-start;gap:8px">
+            <span style="font-size:16px;flex-shrink:0">${typeIcon(i.type)}</span>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:13px;font-weight:600">${esc(i.title)}</div>
+              ${i.body ? `<div style="font-size:12px;color:var(--text-muted);margin-top:2px">${esc(i.body)}</div>` : ''}
+              <div style="font-size:11px;color:var(--text-muted);margin-top:4px">
+                ${i.submitted_by_name ? esc(i.submitted_by_name) : 'Anonymous'} · ${fmtD((i.created_at || '').slice(0, 10))}
+                ${i.page ? ` · <span style="background:#f1f5f9;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:600">${esc(IDEA_PAGE_NAMES[i.page] || i.page)}</span>` : ''}
+              </div>
+            </div>
+            <select style="font-size:11px;border-radius:4px;padding:2px 4px;border:1px solid var(--border);cursor:pointer;flex-shrink:0" onchange="updateIdeaStatus(${i.id}, this.value)">
+              ${['new', 'reviewed', 'done', 'wontfix'].map(s => `<option value="${s}" ${i.status === s ? 'selected' : ''}>${statusLabel(s)}</option>`).join('')}
+            </select>
+          </div>
+        </div>`).join('') : '<div style="font-size:13px;color:var(--text-muted)">No submissions yet.</div>'}
+    </div>` : '';
+
+  document.getElementById('v2-form-overlay')?.remove();
+  const ov = document.createElement('div');
+  ov.className = 'v2-overlay'; ov.id = 'v2-form-overlay';
+  ov.onclick = e => { if (e.target === ov) ov.remove(); };
+  const currentPage = (location.hash || '#dashboard').replace('#', '').split('/')[0];
+  ov.innerHTML = `
+    <div class="v2-modal" style="max-width:480px;max-height:85vh;overflow-y:auto">
+      <div class="v2-modal-hd">💡 Ideas &amp; Issues<button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">✕</button></div>
+      <div class="v2-modal-bd">
+        <p style="font-size:13px;color:var(--text-muted);margin:0 0 12px">Have an idea to improve the app, or spotted something broken? Send it straight to the admin.</p>
+        <div class="v2-field"><label>Type</label>
+          <div style="display:flex;gap:14px">
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="idea-type" value="idea" checked> 💡 Idea / Enhancement</label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="idea-type" value="issue"> 🐛 Bug / Issue</label>
+          </div>
+        </div>
+        <div class="v2-field"><label>Related to</label>
+          <select id="idea-page">
+            ${Object.entries(IDEA_PAGE_NAMES).map(([v, l]) => `<option value="${v}" ${currentPage === v ? 'selected' : ''}>${l}</option>`).join('')}
+            <option value="general" ${!IDEA_PAGE_NAMES[currentPage] ? 'selected' : ''}>General / Not page-specific</option>
+          </select>
+        </div>
+        <div class="v2-field"><label>Title <span class="req">*</span></label><input id="idea-title" type="text" placeholder="One line summary…"></div>
+        <div class="v2-field"><label>Details</label><textarea id="idea-body" rows="3" placeholder="Any extra context, steps to reproduce, etc."></textarea></div>
+        <div style="display:flex;justify-content:flex-end;margin-top:6px"><button class="v2-btn blue" onclick="submitIdea()">Submit</button></div>
+        ${adminInbox}
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+}
+async function submitIdea() {
+  const title = document.getElementById('idea-title')?.value.trim();
+  if (!title) { document.getElementById('idea-title')?.focus(); return; }
+  const type = document.querySelector('input[name="idea-type"]:checked')?.value || 'idea';
+  const body = document.getElementById('idea-body')?.value.trim() || '';
+  const page = document.getElementById('idea-page')?.value || null;
+  try {
+    await api('POST', '/api/ideas', { type, title, body, page });
+    document.getElementById('v2-form-overlay')?.remove();
+    const toast = document.createElement('div');
+    toast.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#166534;color:white;padding:10px 20px;border-radius:8px;font-size:13px;font-weight:600;z-index:9999';
+    toast.textContent = '✓ Submitted — thanks!';
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 3000);
+  } catch (e) { alert('Failed: ' + e.message); }
+}
+async function updateIdeaStatus(id, status) {
+  try { await api('PUT', `/api/ideas/${id}`, { status }); } catch (e) { alert(e.message); }
+}
+
 async function bootstrap() {
   try { await ensureMeta(); } catch { /* not logged in — ensureMeta already redirected, or a real error will surface per-page */ }
   const userEl = document.getElementById('sidebar-user');
   if (userEl && CURRENT_USER) userEl.textContent = CURRENT_USER.name + (CURRENT_USER.is_admin ? ' (admin)' : '');
+  if (CURRENT_USER) startOnlinePolling();
   navigate('dashboard');
 }
 bootstrap();

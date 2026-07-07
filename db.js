@@ -934,7 +934,7 @@ async function heartbeat(userId) {
 async function getOnlineUsers() {
   const cutoff = new Date(Date.now() - 5 * 60 * 1000); // 5 min window
   const users = await TeamMember.find({ active: 1, last_seen: { $gte: cutoff } }).lean();
-  return users.map(formatMember);
+  return users.map(u => ({ ...formatMember(u), last_seen: u.last_seen }));
 }
 
 // ── Ideas / feedback ──────────────────────────────────────────────────────────

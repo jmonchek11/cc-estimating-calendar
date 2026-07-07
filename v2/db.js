@@ -1096,7 +1096,8 @@ async function getSearchResults(q) {
         id: c._id, co_number: c.co_number, name: c.name, stage: c.stage,
         project: job ? (pName[job.project_id] || '—') : '—', project_id: job ? job.project_id : null,
         job_number: job ? job.job_number : null,
-        estimator: tm[c.estimator_id] || null, due_date: c.due_date,
+        estimator: tm[c.estimator_id] || null, salesperson: job?.pm_id ? (tm[job.pm_id] || null) : null,
+        due_date: c.due_date,
         estimate_amount: c.estimate_amount, next_followup_date: c.next_followup_date,
       };
     });
@@ -1140,7 +1141,12 @@ async function getCoList(stage) {
       id: c._id, co_number: c.co_number, name: c.name, stage: c.stage,
       project: job ? (pName[job.project_id] || '—') : '—', project_id: job ? job.project_id : null,
       job_number: job ? job.job_number : null,
-      estimator: tm[c.estimator_id] || null, due_date: c.due_date,
+      estimator: tm[c.estimator_id] || null,
+      // The job's PM owns CO follow-up (same role a bid's salesperson plays
+      // for bid follow-up) — surfaced under the same key so the frontend can
+      // treat "who follows up" consistently across bids and COs.
+      salesperson: job?.pm_id ? (tm[job.pm_id] || null) : null,
+      due_date: c.due_date,
       estimate_amount: c.estimate_amount, date_submitted: c.date_submitted, next_followup_date: c.next_followup_date,
     };
   });
@@ -1192,6 +1198,10 @@ async function getDigest() {
     return {
       id: c._id, project_id: job ? job.project_id : null, project_name: `${c.co_number} — ${c.name}`, bid_number: job ? pName[job.project_id] : null,
       estimator_initials: tm[c.estimator_id]?.initials || null,
+      // The job's PM owns CO follow-up, same role the salesperson plays for
+      // bids — reuse the salesperson_initials key so the shared row renderer
+      // shows "who follows up" consistently for both bids and COs.
+      salesperson_initials: job?.pm_id ? (tm[job.pm_id]?.initials || null) : null,
       estimate_amount: c.estimate_amount, estimate_due_date: c.due_date, next_followup_date: c.next_followup_date,
     };
   };
