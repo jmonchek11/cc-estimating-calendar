@@ -123,6 +123,7 @@ router.post('/api/v2/admin/merge-companies',  requireAdmin, t(req => v2db.mergeC
 router.post('/api/v2/admin/merge-jobs',       requireAdmin, t(req => v2db.mergeJobs(req.body.survivor_id, req.body.merge_ids)));
 router.post('/api/v2/admin/dismiss-duplicate', requireAdmin, t(req => v2db.dismissDuplicates(req.body.kind, req.body.ids)));
 router.delete('/api/v2/admin/project/:id',     requireAdmin, t(req => v2db.deleteEmptyProject(req.params.id)));
+router.delete('/api/v2/admin/bid/:id',         requireAdmin, t(req => v2db.deleteBid(req.params.id)));
 router.delete('/api/v2/admin/override/:id',    requireAdmin, t(req => v2db.removeOverride(req.params.id)));
 router.post('/api/v2/bids/:id/close',         t(req => v2db.closeBid(req.params.id, req.body)));
 router.post('/api/v2/bids/:id/submissions',   t(req => v2db.addSubmission(req.params.id, req.body)));

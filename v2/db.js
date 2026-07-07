@@ -1274,6 +1274,16 @@ async function getDataHealth() {
   // near-duplicate projects / companies (merge candidates; honors "not a duplicate")
   const dupProjects = _clusterSimilar(projects.map(p => ({ id: p._id, name: p.name, key: _norm(p.name), bids: (bidsByProj[p._id] || []).length, cos: projCo(p) })), ignoreSet('project'));
   const dupCompanies = _clusterSimilar(companies.map(c => ({ id: c._id, name: c.name, key: _norm(c.name) })), ignoreSet('company'));
+  // Exact-duplicate bids — same bid # created twice under the same project
+  // (e.g. a double-click or double-submit). Project-merge doesn't touch this
+  // since it operates one level up; this is its own class of mistake.
+  const pNameForDup = {}; projects.forEach(p => pNameForDup[p._id] = p.name);
+  const bidsByProjNum = {};
+  bids.forEach(b => { if (!b.bid_number || b.superseded) return; (bidsByProjNum[b.project_id + '|' + b.bid_number] = bidsByProjNum[b.project_id + '|' + b.bid_number] || []).push(b); });
+  const dupBids = Object.values(bidsByProjNum).filter(g => g.length > 1).map(g => ({
+    project_id: g[0].project_id, project: pNameForDup[g[0].project_id] || '?', bid_number: g[0].bid_number,
+    bids: g.map(b => ({ id: b._id, stage: b.stage, estimate_amount: b.estimate_amount, created_at: b.created_at })),
+  }));
   // projects with no bids — classify: legacy (has job/COs) vs empty (truly removable)
   const noBidProjects = projects.filter(p => !(bidsByProj[p._id])).map(p => {
     const jobN = (jobsByProj[p._id] || []).length, coN = projCo(p);
@@ -1296,7 +1306,7 @@ async function getDataHealth() {
 
   return {
     counts: { projects: projects.length, bids: bids.length, jobs: jobs.length, change_orders: cos.length, companies: companies.length },
-    dupProjects, dupCompanies, noBidProjects, jobsNoNumber, missing, overrides,
+    dupProjects, dupCompanies, dupBids, noBidProjects, jobsNoNumber, missing, overrides,
   };
 }
 
@@ -1442,6 +1452,23 @@ async function deleteEmptyProject(id) {
   return { deleted: pid };
 }
 
+// Delete a truly-duplicate bid (Data Health "Duplicate bids" card — same
+// bid # created twice under the same project by mistake, e.g. a double
+// submit). Blocked on anything that represents real activity rather than a
+// clean accident: a submission, or a terminal (decided) stage.
+async function deleteBid(id) {
+  const M = getModels();
+  const bid = await M.Bid.findById(Number(id)).lean();
+  if (!bid) throw new Error('Bid not found');
+  const TERMINAL = ['awarded', 'not_awarded', 'closed'];
+  if (TERMINAL.includes(bid.stage)) throw new Error(`Can't delete — this bid is already ${bid.stage}, that's real history.`);
+  if (await M.BidSubmission.exists({ bid_id: bid._id })) throw new Error("Can't delete — this bid already has a submission. Close it instead if it's no longer needed.");
+  await M.BidCustomer.deleteMany({ bid_id: bid._id });
+  await M.Reminder.deleteMany({ parent_type: 'bid', parent_id: bid._id });
+  await M.Bid.deleteOne({ _id: bid._id });
+  return { deleted: bid._id };
+}
+
 // ── Replay cleanup overrides onto freshly-imported data (called by import.js) ──
 // company_alias is applied during the import build; this handles the rest.
 async function applyCleanupOverrides() {
@@ -1509,5 +1536,5 @@ module.exports = {
   addReminder, dismissReminder, deleteReminder, getRemindersFor, getDueReminders, markReminderEmailed,
   getDigest,
   getTeamV2, createTeamMemberV2, updateTeamMemberV2, updateSettingsV2, getSettings,
-  removeBidCustomer, createCompanyV2,
+  removeBidCustomer, createCompanyV2, deleteBid,
 };

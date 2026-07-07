@@ -193,6 +193,12 @@
 const fmt$ = n => n == null ? '' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
 const fmtD = d => { if (!d) return ''; const [y,m,dd] = d.split('-'); return `${Number(m)}/${Number(dd)}/${String(y).slice(2)}`; };
 const esc = s => (s ?? '').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+// For a name/string embedded inside a single-quoted JS string literal that's
+// itself inside an onclick="..." HTML attribute (two escaping layers at
+// once). esc() alone leaves apostrophes untouched — harmless in plain text,
+// but "Jim O'Driscoll" as an onclick argument breaks the generated JS at the
+// apostrophe (silently — the click handler just throws and does nothing).
+const escJs = s => esc(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 const today = new Date().toISOString().split('T')[0];
 const STAGE = {
   opportunity:'Opportunity', active_bid:'Active Bid', submitted:'Submitted', awarded:'Awarded',
@@ -430,7 +436,7 @@ async function renderSettings() {
       </div>
       ${isAdmin ? `<div class="v2-actions" style="margin:0">
         <button class="v2-btn outline" style="padding:5px 10px;font-size:11px" onclick="actEditTeamMember(${m.id})">✏️ Edit</button>
-        <button class="v2-btn outline" style="padding:5px 10px;font-size:11px" onclick="actResetTeamPassword(${m.id},'${esc(m.name)}')">🔑 Set Password</button>
+        <button class="v2-btn outline" style="padding:5px 10px;font-size:11px" onclick="actResetTeamPassword(${m.id},'${escJs(m.name)}')">🔑 Set Password</button>
       </div>` : ''}
     </div>`).join('');
 
@@ -1164,7 +1170,7 @@ function bidNode(b) {
           <div style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:#fafbfc">
             <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
               <span onclick="openCompanyProfile(${cust.id})" style="cursor:pointer;color:#2563eb;font-weight:700;font-size:12.5px">🏢 ${esc(cust.name)}</span>
-              <button type="button" title="Remove customer from this bid" onclick="actRemoveBidCustomer(${cust.bid_customer_id},'${esc(cust.name)}')" style="border:none;background:none;color:#dc2626;cursor:pointer;font-size:13px;padding:2px 4px;line-height:1">✕</button>
+              <button type="button" title="Remove customer from this bid" onclick="actRemoveBidCustomer(${cust.bid_customer_id},'${escJs(cust.name)}')" style="border:none;background:none;color:#dc2626;cursor:pointer;font-size:13px;padding:2px 4px;line-height:1">✕</button>
             </div>
             ${bidCustomerContactsHtml(cust)}
           </div>`).join('')}</div>` : ''}
@@ -1997,6 +2003,20 @@ async function showHealth() {
     ${card('Likely duplicate companies', dupCoIssues, 'name variants of one company — pick the keeper and merge (repoints all customer/contact links)',
       dupCoIssues ? clusterList(h.dupCompanies, 'company') : '<div style="color:#16a34a;font-size:13px">None 🎉</div>', '#d97706')}
 
+    ${card('Duplicate bids', h.dupBids.length, 'same bid # created twice under one project (e.g. a double-click) — pick which to keep, the rest are deleted',
+      h.dupBids.length ? h.dupBids.map((g, gi) => `
+        <div style="padding:8px 0;border-bottom:1px solid #f1f5f9">
+          <div style="font-size:13px;font-weight:600">${esc(g.bid_number)} — ${esc(g.project)}</div>
+          ${g.bids.map(b => `<div style="font-size:12px;color:var(--text-muted);margin-left:8px">• #${b.id} · ${STAGE[b.stage] || b.stage}${b.estimate_amount ? ` · ${fmt$(b.estimate_amount)}` : ''} · created ${fmtD(b.created_at.slice(0,10))}</div>`).join('')}
+          ${admin ? `<div style="display:flex;gap:6px;align-items:center;margin-top:5px;flex-wrap:wrap">
+            <span style="font-size:11px;color:var(--text-muted)">keep:</span>
+            <select id="dupbid-keep-${gi}" style="font-size:12px;padding:3px 6px;border:1px solid var(--border);border-radius:5px">
+              ${g.bids.map(b => `<option value="${b.id}">#${b.id} (${fmtD(b.created_at.slice(0,10))})</option>`).join('')}
+            </select>
+            <button class="v2-btn red" onclick="doDeleteDupBids(${gi})">Delete the rest</button>
+          </div>` : ''}
+        </div>`).join('') : '<div style="color:#16a34a;font-size:13px">None 🎉</div>', '#dc2626')}
+
     ${card('Projects with no bids', h.noBidProjects.length, 'LEGACY = job + COs, no base bid (expected — just rename) · EMPTY = nothing attached (safe to delete)',
       h.noBidProjects.length ? noBidList(h.noBidProjects) : '<div style="color:#16a34a;font-size:13px">None</div>', '#0891b2')}
 
@@ -2036,6 +2056,23 @@ async function doDismiss(kind, gid) {
     await api('POST', '/api/v2/admin/dismiss-duplicate', { kind, ids: group.map(it => it.id) });
     await showHealth();
   } catch (e) { alert(e.message); }
+}
+
+// Delete every bid in a duplicate-bid group except the one chosen to keep.
+async function doDeleteDupBids(gi) {
+  const group = HEALTH.dupBids[gi];
+  if (!group) return;
+  const keepId = Number(document.getElementById(`dupbid-keep-${gi}`).value);
+  const toDelete = group.bids.map(b => b.id).filter(id => id !== keepId);
+  if (!toDelete.length) return;
+  if (!confirm(`Delete ${toDelete.length} duplicate bid(s) (#${toDelete.join(', #')}), keeping #${keepId}?\n\nThis cannot be undone.`)) return;
+  const errors = [];
+  for (const id of toDelete) {
+    try { await api('DELETE', `/api/v2/admin/bid/${id}`); }
+    catch (e) { errors.push(`#${id}: ${e.message}`); }
+  }
+  if (errors.length) alert('Some deletions failed:\n' + errors.join('\n'));
+  await showHealth();
 }
 
 // Inline rename (project or company) via the admin edit route
