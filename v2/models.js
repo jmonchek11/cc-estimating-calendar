@@ -275,6 +275,23 @@ const CleanupOverrideSchema = new mongoose.Schema({
   created_at: { type: String, default: ts },
 }, opts);
 
+// Audit trail — who did what, when. `undo` carries whatever this specific
+// action type needs to safely reverse itself (only a handful of action
+// types set it; most don't, since most actions here aren't safely
+// reversible — see UNDOABLE_ACTIONS in db.js).
+const ActivityLogSchema = new mongoose.Schema({
+  _id:        Number,
+  ts:         { type: String, default: ts },
+  actor_id:   { type: Number, default: null },
+  actor_name: { type: String, default: null },
+  action:     { type: String, required: true },              // short machine tag, e.g. 'bid.submit'
+  summary:    { type: String, required: true },               // human-readable, e.g. "Submitted bid B26-0123"
+  entity_type:{ type: String, default: null },
+  entity_id:  { type: Number, default: null },
+  undo:       { type: mongoose.Schema.Types.Mixed, default: null },
+  undone:     { type: Number, default: 0 },
+}, opts);
+
 // ── Export models bound to the v2 connection ──────────────────────────────────
 
 function getModels() {
@@ -295,6 +312,7 @@ function getModels() {
     Counter:     c.model('Counter', CounterSchema, 'counters'),
     IgnoredPair: c.model('IgnoredPair', IgnoredPairSchema, 'ignored_pairs'),
     CleanupOverride: c.model('CleanupOverride', CleanupOverrideSchema, 'cleanup_overrides'),
+    ActivityLog: c.model('ActivityLog', ActivityLogSchema, 'activity_log'),
   };
 }
 

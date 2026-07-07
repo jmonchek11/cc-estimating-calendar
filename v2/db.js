@@ -19,6 +19,57 @@ async function nextId(name) {
   return doc.seq;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// AUDIT TRAIL — who did what, when. Logging must never break the action it's
+// logging, so every call site wraps it in try/catch and swallows failures.
+// Only a small, explicitly-safe set of action types carry an `undo` payload
+// (see UNDOABLE_ACTIONS below) — most actions here (stage transitions,
+// merges, deletes) aren't safely reversible in general, so their log rows
+// just record what happened rather than offering a one-click undo.
+// ═══════════════════════════════════════════════════════════════════════════
+async function logActivity({ actor_id, actor_name, action, summary, entity_type, entity_id, undo }) {
+  try {
+    const M = getModels();
+    await M.ActivityLog.create({
+      _id: await nextId('activity_log'), actor_id: actor_id || null, actor_name: actor_name || 'Unknown',
+      action, summary, entity_type: entity_type || null, entity_id: entity_id || null, undo: undo || null,
+    });
+  } catch (e) { console.error('logActivity failed (non-fatal):', e.message); }
+}
+
+async function getActivityLog({ limit } = {}) {
+  const M = getModels();
+  const rows = await M.ActivityLog.find().sort({ _id: -1 }).limit(Math.min(Number(limit) || 200, 500)).lean();
+  return rows.map(r => ({
+    id: r._id, ts: r.ts, actor_name: r.actor_name, action: r.action, summary: r.summary,
+    entity_type: r.entity_type, entity_id: r.entity_id, undone: !!r.undone,
+    undoable: !r.undone && !!r.undo && !!UNDOABLE_ACTIONS[r.action],
+  }));
+}
+
+// Whitelist of action tags that are safe to auto-reverse, and how to do it.
+// Each handler receives the log row's `undo` payload and performs the
+// inverse operation.
+const UNDOABLE_ACTIONS = {
+  'bid.due_date_change': async (u) => updateBidDueDate(u.bid_id, u.due_date_before),
+  'co.due_date_change': async (u) => updateCoDueDate(u.co_id, u.due_date_before),
+  'bid.sub_estimator_add': async (u) => removeSubEstimator(u.bid_id, u.estimator_id, u.scope),
+  'bid.sub_estimator_remove': async (u) => addSubEstimator(u.bid_id, { estimator_id: u.estimator_id, scope: u.scope }),
+  'reminder.dismiss': async (u) => { const M = getModels(); await M.Reminder.updateOne({ _id: u.reminder_id }, { $set: { dismissed: 0 } }); },
+};
+
+async function undoActivity(logId) {
+  const M = getModels();
+  const row = await M.ActivityLog.findById(Number(logId)).lean();
+  if (!row) throw new Error('Log entry not found');
+  if (row.undone) throw new Error('Already undone');
+  const handler = row.undo ? UNDOABLE_ACTIONS[row.action] : null;
+  if (!handler) throw new Error("This action can't be auto-undone — reverse it manually if needed.");
+  await handler(row.undo);
+  await M.ActivityLog.updateOne({ _id: row._id }, { $set: { undone: 1 } });
+  return { ok: true };
+}
+
 function teamMap(members) {
   const m = {};
   members.forEach(t => { m[t._id] = { id: t._id, name: t.name, initials: t.initials, role: t.role }; });
@@ -622,28 +673,39 @@ async function updateOpportunity(id, data) {
   return { bid_id: bid._id };
 }
 
-// Sub-estimators — breaking a large bid into systems (Fire Alarm, Lighting
-// Controls, Distribution, Data, Nurse Call, Security, etc.) taken off by a
-// different estimator than the bid's primary one. Open to any user, not
-// admin-gated, same trust level as adding a customer.
 // Change just the due date — used by the calendar's drag-and-drop (drag a
 // chip to a different day). Deliberately a single-field, non-admin action
 // (like adding a customer or logging a follow-up) rather than the full
 // admin edit form, since correcting a due date is routine day-to-day work.
-async function updateBidDueDate(id, due_date) {
+// `actor` (from the logged-in session) is only used for the audit log —
+// every call site passes it in but treats a missing one as "Unknown" rather
+// than failing, since logging must never block the actual action.
+async function updateBidDueDate(id, due_date, actor) {
   const M = getModels();
   const bid = await loadBid(id);
+  const before = bid.due_date;
   await M.Bid.updateOne({ _id: bid._id }, { $set: { due_date: due_date || null, updated_at: ts() } });
+  await logActivity({ actor_id: actor?.id, actor_name: actor?.name, action: 'bid.due_date_change',
+    summary: `Changed due date on bid #${bid._id}${bid.bid_number ? ' (' + bid.bid_number + ')' : ''} from ${before || 'none'} to ${due_date || 'none'}`,
+    entity_type: 'bid', entity_id: bid._id, undo: { bid_id: bid._id, due_date_before: before } });
   return { bid_id: bid._id, due_date: due_date || null };
 }
-async function updateCoDueDate(id, due_date) {
+async function updateCoDueDate(id, due_date, actor) {
   const M = getModels();
   const co = await loadCO(id);
+  const before = co.due_date;
   await M.ChangeOrder.updateOne({ _id: co._id }, { $set: { due_date: due_date || null, updated_at: ts() } });
+  await logActivity({ actor_id: actor?.id, actor_name: actor?.name, action: 'co.due_date_change',
+    summary: `Changed due date on CO #${co._id} (${co.co_number}) from ${before || 'none'} to ${due_date || 'none'}`,
+    entity_type: 'change_order', entity_id: co._id, undo: { co_id: co._id, due_date_before: before } });
   return { co_id: co._id, due_date: due_date || null };
 }
 
-async function addSubEstimator(bidId, { estimator_id, scope }) {
+// Sub-estimators — breaking a large bid into systems (Fire Alarm, Lighting
+// Controls, Distribution, Data, Nurse Call, Security, etc.) taken off by a
+// different estimator than the bid's primary one. Open to any user, not
+// admin-gated, same trust level as adding a customer.
+async function addSubEstimator(bidId, { estimator_id, scope }, actor) {
   const M = getModels();
   const bid = await loadBid(bidId);
   const eid = Number(estimator_id);
@@ -651,11 +713,17 @@ async function addSubEstimator(bidId, { estimator_id, scope }) {
   if (!eid || !sys) throw new Error('Estimator and system/scope are both required');
   if ((bid.sub_estimators || []).some(s => s.estimator_id === eid && s.scope === sys)) throw new Error('That estimator is already assigned to this system');
   await M.Bid.updateOne({ _id: bid._id }, { $push: { sub_estimators: { estimator_id: eid, scope: sys } }, $set: { updated_at: ts() } });
+  await logActivity({ actor_id: actor?.id, actor_name: actor?.name, action: 'bid.sub_estimator_add',
+    summary: `Added sub-estimator (${sys}) to bid #${bid._id}${bid.bid_number ? ' (' + bid.bid_number + ')' : ''}`,
+    entity_type: 'bid', entity_id: bid._id, undo: { bid_id: bid._id, estimator_id: eid, scope: sys } });
   return { ok: true };
 }
-async function removeSubEstimator(bidId, estimatorId, scope) {
+async function removeSubEstimator(bidId, estimatorId, scope, actor) {
   const M = getModels();
   await M.Bid.updateOne({ _id: Number(bidId) }, { $pull: { sub_estimators: { estimator_id: Number(estimatorId), scope } }, $set: { updated_at: ts() } });
+  await logActivity({ actor_id: actor?.id, actor_name: actor?.name, action: 'bid.sub_estimator_remove',
+    summary: `Removed sub-estimator (${scope}) from bid #${bidId}`,
+    entity_type: 'bid', entity_id: Number(bidId), undo: { bid_id: Number(bidId), estimator_id: Number(estimatorId), scope } });
   return { ok: true };
 }
 
@@ -1883,5 +1951,6 @@ module.exports = {
   getTeamV2, createTeamMemberV2, updateTeamMemberV2, updateSettingsV2, getSettings,
   removeBidCustomer, createCompanyV2, deleteBid, addSubEstimator, removeSubEstimator,
   updateBidDueDate, updateCoDueDate,
+  logActivity, getActivityLog, undoActivity,
   mergeContacts, deleteCompany, deleteChangeOrder,
 };
