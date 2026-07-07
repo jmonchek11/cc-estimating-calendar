@@ -116,10 +116,12 @@ async function getProjectDetail(projectId) {
   const remindersFor = (type, id) => allReminders.filter(r => r.parent_type === type && r.parent_id === id);
   const allFollowups = await M.Followup.find({
     $or: [
+      { parent_type: 'bid', parent_id: { $in: bidIds } },
       { parent_type: 'bid_submission', parent_id: { $in: submissions.map(s => s._id) } },
       { parent_type: 'change_order', parent_id: { $in: cos.map(c => c._id) } },
     ],
   }).lean();
+  const bidFollowups = allFollowups.filter(f => f.parent_type === 'bid');
   const subFollowups = allFollowups.filter(f => f.parent_type === 'bid_submission');
   const coFollowups  = allFollowups.filter(f => f.parent_type === 'change_order');
 
@@ -176,6 +178,13 @@ async function getProjectDetail(projectId) {
     close_reason: b.close_reason,
     next_followup_date: b.next_followup_date,
     notes: b.notes,
+    // Bid-level follow-ups (parent_type 'bid') — the only kind possible
+    // pre-submission, e.g. an opportunity that hasn't been bid yet. Once a
+    // bid is submitted, follow-ups move to the per-submission timeline
+    // (submissions[].followups) instead.
+    followups: bidFollowups.filter(f => f.parent_id === b._id)
+      .sort((a, c) => (c.followup_date || '').localeCompare(a.followup_date || ''))
+      .map(f => fmtFollowup(f, tm)),
     reminders: remindersFor('bid', b._id),
   });
 
@@ -591,6 +600,25 @@ async function addBidCustomers(id, data) {
     added++;
   }
   return { bid_id: bid._id, added };
+}
+
+// Let any user (not just admins) set a due date / estimator / salesperson on
+// an opportunity directly, without going through "Start Bid" — an
+// opportunity is often being tracked/discussed with a customer well before
+// anyone commits to estimating it, and those details (when's the decision
+// due, who's talking to the customer) are useful to capture right away.
+// Deliberately opportunity-only: once a bid has started, these fields are
+// edited via the normal admin edit / Start Bid flow instead.
+async function updateOpportunity(id, data) {
+  const M = getModels();
+  const bid = await loadBid(id);
+  if (bid.stage !== 'opportunity') throw new Error("This is only for opportunities — once a bid has started, edit it from the bid's own Edit button.");
+  const upd = { updated_at: ts() };
+  if ('due_date' in data) upd.due_date = data.due_date || null;
+  if ('estimator_id' in data) upd.estimator_id = data.estimator_id ? Number(data.estimator_id) : null;
+  if ('salesperson_id' in data) upd.salesperson_id = data.salesperson_id ? Number(data.salesperson_id) : null;
+  await M.Bid.updateOne({ _id: bid._id }, { $set: upd });
+  return { bid_id: bid._id };
 }
 
 // Remove a customer mistakenly added to a bid. Blocked if a submission
@@ -1756,7 +1784,7 @@ module.exports = {
   getProjects, getJobsPicker, getProjectDetail, getMeta, getDashboard, getBidList, getCoList, getSearchResults, getDataHealth, mergeProjects, mergeCompanies, mergeJobs,
   dismissDuplicates, deleteEmptyProject, applyCleanupOverrides, removeOverride,
   recomputeBidHeadline, recomputeBidFollowup, nextId,
-  createOpportunity, createDirectBid, startBid, submitBid, addSubmission, addBidCustomers, adminUpdate,
+  createOpportunity, createDirectBid, startBid, submitBid, addSubmission, addBidCustomers, updateOpportunity, adminUpdate,
   getContacts, getContactDetail, createContact, updateContact, deleteContact, getContactBids, getCompanyBids,
   addBidCustomerContact, removeBidCustomerContact,
   awardSubmission, notAwardSubmission, closeBid, logFollowupV2,

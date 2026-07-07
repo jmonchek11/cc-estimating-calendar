@@ -1258,6 +1258,7 @@ function bidNode(b) {
             ${bidCustomerContactsHtml(cust)}
           </div>`).join('')}</div>` : ''}
         ${(b.submissions || []).length ? `<div class="v2-fu"><div style="font-weight:600;color:var(--text);margin-bottom:3px">Submissions</div>${b.submissions.map(s => submissionRow(s, b)).join('')}</div>` : ''}
+        ${(b.followups || []).length ? `<div class="v2-fu"><div style="font-weight:600;color:var(--text);margin-bottom:3px">Follow-ups</div>${b.followups.map(fuRow).join('')}</div>` : ''}
         ${remindersHtml('bid', b.id, b.reminders)}
         ${bidActions(b)}
       </div>
@@ -1306,6 +1307,9 @@ function bidActions(b) {
   if (!b.superseded) {
     if (b.stage === 'opportunity') {
       workflow = `<button class="v2-btn blue" onclick="actStartBid(${b.id})">→ Start Bid</button>
+                  <button class="v2-btn outline" onclick="actAddCustomers(${b.id})">+ Customer</button>
+                  <button class="v2-btn outline" onclick="actLogFollowup('bid',${b.id})">📝 Log Follow-up</button>
+                  <button class="v2-btn outline" onclick="actEditOpportunityDetails(${b.id})">📅 Due Date / Assign</button>
                   <button class="v2-btn gray" onclick="actCloseBid(${b.id})">Close</button>`;
     } else if (b.stage === 'active_bid') {
       workflow = `<button class="v2-btn green" onclick="actSubmitBid(${b.id})">Submit Bid</button>
@@ -1893,6 +1897,18 @@ function actCloseBid(bidId) {
   ], data => api('POST', `/api/v2/bids/${bidId}/close`, data), 'Close', 'gray');
 }
 
+
+// Open to any user (not admin-gated) — an opportunity's due date / estimator
+// / salesperson are useful to capture as soon as they're known, well before
+// anyone commits to "Start Bid".
+function actEditOpportunityDetails(bidId) {
+  const b = DETAIL_CACHE[OPEN_PROJECT]?.bids.find(x => x.id === bidId) || {};
+  showForm('📅 Opportunity Details', [
+    { id: 'due_date', label: 'Due Date (decision expected)', type: 'date', value: b.due_date },
+    { id: 'estimator_id', label: 'Estimator (if known)', type: 'select', options: teamOpts(['estimator']), value: b.estimator?.id },
+    { id: 'salesperson_id', label: 'Salesperson', type: 'select', options: teamOpts(['sales']), value: b.salesperson?.id },
+  ], data => api('PATCH', `/api/v2/bids/${bidId}/opportunity`, data), 'Save');
+}
 
 function actLogFollowup(parentType, parentId) {
   showForm('📝 Log Follow-up', [
@@ -2551,10 +2567,58 @@ function bidCustomerContactsHtml(cust) {
 }
 async function actLinkContact(bidCustomerId, companyId) {
   const existing = await api('GET', `/api/v2/contacts?company_id=${companyId}`);
-  showForm('Link a Contact', [
-    { id: 'contact_id', label: 'Contact at this company', type: 'company', multi: false, required: true, allowNew: false,
-      newKey: '_unused', options: existing.map(c => ({ value: c.id, label: c.full_name })), placeholder: 'Search…' },
-  ], data => api('POST', `/api/v2/bid-customers/${bidCustomerId}/contacts`, { contact_id: data.contact_id }), 'Link');
+  document.getElementById('v2-form-overlay')?.remove();
+  const ov = document.createElement('div');
+  ov.className = 'v2-overlay'; ov.id = 'v2-form-overlay';
+  ov.onclick = e => { if (e.target === ov) ov.remove(); };
+  ov.innerHTML = `
+    <div class="v2-modal" style="max-width:400px">
+      <div class="v2-modal-hd">Link a Contact<button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">✕</button></div>
+      <div class="v2-modal-bd">
+        ${existing.length ? `
+        <div class="v2-field"><label>Existing contact at this company</label>
+          <select id="lc-existing" onchange="document.getElementById('lc-new-block').style.display = this.value ? 'none' : 'block'">
+            <option value="">— pick one —</option>
+            ${existing.map(c => `<option value="${c.id}">${esc(c.full_name)}</option>`).join('')}
+          </select>
+        </div>
+        <div style="text-align:center;color:var(--text-muted);font-size:12px;margin:10px 0">— or add someone new —</div>` : ''}
+        <div id="lc-new-block">
+          <div class="v2-field"><label>First Name</label><input id="lc-first" type="text"></div>
+          <div class="v2-field"><label>Last Name</label><input id="lc-last" type="text"></div>
+          <div class="v2-field"><label>Phone</label><input id="lc-phone" type="text"></div>
+          <div class="v2-field"><label>Email</label><input id="lc-email" type="text"></div>
+        </div>
+      </div>
+      <div class="v2-modal-err" id="vf-err"></div>
+      <div class="v2-modal-ft">
+        <button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">Cancel</button>
+        <button class="v2-btn blue" id="lc-submit">Link</button>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+  document.getElementById('lc-submit').onclick = async () => {
+    const errEl = document.getElementById('vf-err');
+    errEl.style.display = 'none';
+    const existingId = document.getElementById('lc-existing')?.value;
+    try {
+      let contactId;
+      if (existingId) {
+        contactId = Number(existingId);
+      } else {
+        const first = document.getElementById('lc-first').value.trim();
+        const last = document.getElementById('lc-last').value.trim();
+        if (!first && !last) { errEl.textContent = 'Pick an existing contact, or enter a name for a new one.'; errEl.style.display = 'block'; return; }
+        const phone = document.getElementById('lc-phone').value.trim();
+        const email = document.getElementById('lc-email').value.trim();
+        const created = await api('POST', '/api/v2/contacts', { company_id: companyId, first_name: first || null, last_name: last || null, phone: phone || null, email: email || null });
+        contactId = created.id;
+      }
+      await api('POST', `/api/v2/bid-customers/${bidCustomerId}/contacts`, { contact_id: contactId });
+      ov.remove();
+      await refresh();
+    } catch (e) { errEl.textContent = e.message; errEl.style.display = 'block'; }
+  };
 }
 async function actUnlinkContact(bidCustomerId, contactId) {
   try { await api('DELETE', `/api/v2/bid-customers/${bidCustomerId}/contacts/${contactId}`); await refresh(); }
