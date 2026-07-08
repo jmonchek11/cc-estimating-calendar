@@ -225,12 +225,26 @@ let ALL_PROJECTS = [];            // [{id, name}] for the "existing project" pic
 let OPEN_PROJECT = null;          // project id whose hierarchy is expanded
 let DETAIL_CACHE = {};            // project id → detail payload (for award winner picker)
 
-async function api(method, url, body) {
-  const r = await fetch(url, {
-    method,
-    headers: { 'Content-Type': 'application/json' },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+// Quietly retries once on a network failure or 502/503/504 — the few
+// seconds a deploy takes to restart the server can otherwise turn an
+// innocent click into a scary error message. Real validation errors (400s
+// with a normal JSON body) are never retried, just surfaced as-is.
+async function api(method, url, body, _isRetry) {
+  let r;
+  try {
+    r = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch (networkErr) {
+    if (!_isRetry) { await new Promise(res => setTimeout(res, 1200)); return api(method, url, body, true); }
+    throw new Error('Could not reach the server — check your connection and try again.');
+  }
+  if (!_isRetry && [502, 503, 504].includes(r.status)) {
+    await new Promise(res => setTimeout(res, 1200));
+    return api(method, url, body, true);
+  }
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
   return data;
@@ -891,8 +905,18 @@ async function renderBidList(stage) {
     : [['due', 'Due date'], ['amount', 'Amount'], ['project', 'Project name']];
   if (stage === 'submitted' && filterState(stage).sort === 'due') filterState(stage).sort = 'followup';
 
+  const headerActions = stage === 'active_bid' ? `
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="v2-btn green" style="padding:8px 14px;font-size:12px" onclick="actNewBid()">+ New Bid</button>
+        <button class="v2-btn amber" style="padding:8px 14px;font-size:12px" onclick="actImportJIS()">📄 Import Bid (JIS)</button>
+        <button class="v2-btn outline" style="padding:8px 14px;font-size:12px" onclick="actNewLegacyJob()">+ Legacy Job</button>
+      </div>` : stage === 'opportunity' ? `
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="v2-btn blue" style="padding:8px 14px;font-size:12px" onclick="actNewOpportunity()">+ New Opportunity</button>
+      </div>` : '';
+
   main.innerHTML = `
-    <div class="page-header"><div><div class="page-title">${meta.title}</div><div class="page-subtitle" id="bl-count-${stage}">${LIST_STATE[stage].length} ${meta.sub}</div></div></div>
+    <div class="page-header"><div><div class="page-title">${meta.title}</div><div class="page-subtitle" id="bl-count-${stage}">${LIST_STATE[stage].length} ${meta.sub}</div></div>${headerActions}</div>
     <div class="card" style="padding:0">${filterBarHtml(stage, sortOpts)}<div id="bl-body-${stage}"></div></div>`;
   renderBidListBody(stage);
 }
@@ -1302,14 +1326,17 @@ function bidNode(b) {
           ${b.not_awarded_notes ? `<br><span style="color:#dc2626">Not awarded ${fmtD(b.date_not_awarded)}:</span> ${esc(b.not_awarded_notes)}` : ''}
           ${b.notes ? `<br>📝 ${esc(b.notes)}` : ''}
         </div>
-        ${b.customers.length ? `<div style="display:flex;flex-direction:column;gap:6px;margin-top:6px">${b.customers.map(cust => `
+        ${b.customers.length ? (() => {
+          const submittedIds = new Set((b.submissions || []).filter(s => s.is_current).map(s => s.company?.id));
+          return `<div style="display:flex;flex-direction:column;gap:6px;margin-top:6px">${b.customers.map(cust => `
           <div style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:#fafbfc">
             <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-              <span onclick="openCompanyProfile(${cust.id})" style="cursor:pointer;color:#2563eb;font-weight:700;font-size:12.5px">🏢 ${esc(cust.name)}</span>
+              <span onclick="openCompanyProfile(${cust.id})" style="cursor:pointer;color:#2563eb;font-weight:700;font-size:12.5px">🏢 ${esc(cust.name)}${submittedIds.has(cust.id) ? ' <span style="color:#16a34a;font-weight:700;font-size:11px">✓ submitted</span>' : (b.stage === 'active_bid' ? ' <span style="color:#d97706;font-weight:700;font-size:11px">awaiting submission</span>' : '')}</span>
               <button type="button" title="Remove customer from this bid" onclick="actRemoveBidCustomer(${cust.bid_customer_id},'${escJs(cust.name)}')" style="border:none;background:none;color:#dc2626;cursor:pointer;font-size:13px;padding:2px 4px;line-height:1">✕</button>
             </div>
             ${bidCustomerContactsHtml(cust)}
-          </div>`).join('')}</div>` : ''}
+          </div>`).join('')}</div>`;
+        })() : ''}
         ${(b.submissions || []).length ? `<div class="v2-fu"><div style="font-weight:600;color:var(--text);margin-bottom:3px">Submissions</div>${b.submissions.map(s => submissionRow(s, b)).join('')}</div>` : ''}
         ${(b.followups || []).length ? `<div class="v2-fu"><div style="font-weight:600;color:var(--text);margin-bottom:3px">Follow-ups</div>${b.followups.map(fuRow).join('')}</div>` : ''}
         ${remindersHtml('bid', b.id, b.reminders)}
@@ -1798,22 +1825,39 @@ function actStartBid(bidId) {
 }
 
 // Customers on a bid → dropdown options
-function bidCustomerOpts(bidId) {
+function bidCustomerOpts(bidId, { excludeSubmitted } = {}) {
   const b = DETAIL_CACHE[OPEN_PROJECT]?.bids.find(x => x.id === bidId);
-  return (b?.customers || []).map(c => ({ value: c.id, label: c.name }));
+  let custs = b?.customers || [];
+  if (excludeSubmitted) {
+    const submittedIds = new Set((b?.submissions || []).filter(s => s.is_current).map(s => s.company?.id));
+    custs = custs.filter(c => !submittedIds.has(c.id));
+  }
+  return custs.map(c => ({ value: c.id, label: c.name }));
 }
 
+// Batch submit — check off every customer this submission applies to at
+// once (same amount/date/approver for all), rather than one dropdown pick
+// at a time. Customers who already have a submission are left off the list
+// since there's nothing left to submit for them (use "+ Add Submission" to
+// revise one instead). The bid only flips to "Submitted" once every
+// customer on its roster has been checked off — see submitBid()'s guardrail.
 function actSubmitBid(bidId) {
-  const custs = bidCustomerOpts(bidId);
+  const custs = bidCustomerOpts(bidId, { excludeSubmitted: true });
+  if (!custs.length) { alert('Every customer on this bid already has a submission. Use "+ Add Submission" if you need to revise one.'); return; }
   showForm('📤 Submit Bid', [
-    { id: 'company_id', label: 'Submit to which customer?', type: 'select', required: true,
-      value: custs.length === 1 ? custs[0].value : undefined, options: custs },
+    { id: 'company_ids', label: 'Submit to which customer(s)?', type: 'multicheck', required: true, options: custs },
     { id: 'amount', label: 'Estimate Amount $', type: 'number', required: true },
     { id: 'jurisdiction', label: 'IBEW Local Jurisdiction', type: 'text', required: true, placeholder: '98' },
     { id: 'date_submitted', label: 'Date Estimate Sent', type: 'date', required: true, value: today },
     { id: 'approved_by', label: 'Estimate Approved By', type: 'text', required: true },
     { id: 'notes', label: 'Notes', type: 'textarea' },
-  ], data => api('POST', `/api/v2/bids/${bidId}/submit`, data), 'Submit Bid', 'green');
+  ], async data => {
+    const r = await api('POST', `/api/v2/bids/${bidId}/submit`, data);
+    if (r.stage !== 'submitted' && r.remaining > 0) {
+      setTimeout(() => alert(`Submitted. ${r.remaining} more customer(s) still need a submission before this bid moves to Submitted.`), 100);
+    }
+    return r;
+  }, 'Submit Bid', 'green');
 }
 
 // Add customer(s) to a bid's roster — no submission required. They become
@@ -2477,7 +2521,12 @@ async function deleteEmptyProject(id) {
 // Contact.company_id is a real FK (v1's Contact.company was free text), so
 // company links and stats here are exact instead of string-matched.
 // ═══════════════════════════════════════════════════════════════════════════
-let CONTACTS_STATE = { rows: [], q: '', companyId: '', noCompany: false };
+let CONTACTS_STATE = { rows: [], q: '', companyId: '', noCompany: false, sortKey: 'full_name', sortDir: 1 };
+function sortContacts(key) {
+  if (CONTACTS_STATE.sortKey === key) CONTACTS_STATE.sortDir *= -1;
+  else { CONTACTS_STATE.sortKey = key; CONTACTS_STATE.sortDir = 1; }
+  renderContactsBody();
+}
 
 async function renderContacts() {
   setActiveNav('contacts');
@@ -2528,16 +2577,21 @@ function renderContactsBody() {
   document.getElementById('ct-count').textContent = `${out.length} of ${rows.length} contacts`;
 
   // Flat, sortable table (v1's layout) — company grouping is left to the
-  // search/filter above instead of visually clustering rows.
-  out = [...out].sort((a, b) => a.full_name.localeCompare(b.full_name));
+  // search/filter above instead of visually clustering rows. Click a header
+  // to sort by it; click again to reverse.
+  const { sortKey, sortDir } = CONTACTS_STATE;
+  const sortVal = (c, key) => key === 'company' ? (c.company?.name || '') : (c[key] || '');
+  out = [...out].sort((a, b) => sortDir * String(sortVal(a, sortKey)).localeCompare(String(sortVal(b, sortKey))));
+
+  const th = (label, key) => `<th style="text-align:left;padding:8px 16px;color:var(--text-muted);font-weight:600;font-size:11px;cursor:pointer;user-select:none" onclick="sortContacts('${key}')">${label}${sortKey === key ? (sortDir === 1 ? ' ▲' : ' ▼') : ''}</th>`;
 
   document.getElementById('ct-body').innerHTML = out.length ? `
     <table style="width:100%;border-collapse:collapse;font-size:13px">
       <thead><tr style="border-bottom:1px solid var(--border)">
-        <th style="text-align:left;padding:8px 16px;color:var(--text-muted);font-weight:600;font-size:11px">Name</th>
-        <th style="text-align:left;padding:8px 16px;color:var(--text-muted);font-weight:600;font-size:11px">Company</th>
-        <th style="text-align:left;padding:8px 16px;color:var(--text-muted);font-weight:600;font-size:11px">Phone</th>
-        <th style="text-align:left;padding:8px 16px;color:var(--text-muted);font-weight:600;font-size:11px">Email</th>
+        ${th('Name', 'full_name')}
+        ${th('Company', 'company')}
+        ${th('Phone', 'phone')}
+        ${th('Email', 'email')}
       </tr></thead>
       <tbody>${out.map(c => `
         <tr style="border-bottom:1px solid #f1f5f9">
@@ -2989,7 +3043,8 @@ const IDEA_PAGE_NAMES = {
   dashboard: 'Dashboard', digest: 'Weekly Digest', calendar: 'Calendar',
   opportunities: 'Opportunities', 'active-bids': 'Active Bids', 'submitted-bids': 'Submitted Bids',
   'active-cos': 'Active Change Orders', 'submitted-cos': 'Submitted Change Orders',
-  projects: 'Projects', contacts: 'Contacts', health: 'Data Health', settings: 'Settings',
+  projects: 'Projects', contacts: 'Contacts', health: 'Data Health', history: 'History',
+  settings: 'Settings', ideas: 'Ideas & Issues',
 };
 async function openIdeasModal() {
   const isAdmin = !!CURRENT_USER?.is_admin;

@@ -27,6 +27,21 @@ async function nextId(name) {
 // merges, deletes) aren't safely reversible in general, so their log rows
 // just record what happened rather than offering a one-click undo.
 // ═══════════════════════════════════════════════════════════════════════════
+// Human-readable label for a bid/CO — "B26-0218 FRB - Additional PM" instead
+// of a raw id, so History reads the way an estimator actually thinks about
+// a bid rather than an internal database key.
+async function bidLabel(id) {
+  const M = getModels();
+  const b = await M.Bid.findById(Number(id)).lean();
+  if (!b) return `bid #${id}`;
+  return [b.bid_number, b.project_name].filter(Boolean).join(' ') || `bid #${id}`;
+}
+async function coLabel(id) {
+  const M = getModels();
+  const c = await M.ChangeOrder.findById(Number(id)).lean();
+  if (!c) return `CO #${id}`;
+  return [c.co_number, c.name].filter(Boolean).join(' — ') || `CO #${id}`;
+}
 async function logActivity({ actor_id, actor_name, action, summary, entity_type, entity_id, undo }) {
   try {
     const M = getModels();
@@ -740,7 +755,7 @@ async function removeBidCustomer(bidCustomerId) {
   const bid = await M.Bid.findById(bc.bid_id).lean();
   if (bid?.awarded_company_id === bc.company_id) throw new Error('Can’t remove the awarded company.');
   await M.BidCustomer.deleteOne({ _id: bc._id });
-  return { ok: true };
+  return { ok: true, bid_id: bc.bid_id };
 }
 
 // Standalone company creation (Contacts page "+ New Company") — same fields
@@ -766,30 +781,46 @@ async function recomputeBidFollowup(bidId) {
   await M.Bid.updateOne({ _id: bidId }, { $set: { next_followup_date: next ? next.next_followup_date : null, updated_at: ts() } });
 }
 
-// ── active_bid → submitted ("Submit Bid") — creates the FIRST BidSubmission ───
+// ── active_bid → submitted ("Submit Bid") — batch: submit to one or more
+// customers at once with the same amount/date/approver. GUARDRAIL: the bid
+// only advances to 'submitted' once every customer currently on its roster
+// has a current submission — if some customers were left unchecked (or get
+// added to the roster later), the bid stays 'active_bid' so "Submit Bid"
+// can be called again for whoever's left, without losing what's already
+// been submitted. This mirrors what a real bid team needs: nothing counts
+// as "out the door" until every applicable customer actually has a number.
 async function submitBid(id, data) {
   const M = getModels();
   const bid = await loadBid(id);
   if (bid.stage !== 'active_bid') throw new Error(`Cannot submit from stage '${bid.stage}'`);
   require_(data, ['amount', 'jurisdiction', 'date_submitted', 'approved_by']);
-  const companyId = data.company_id ? Number(data.company_id) : (data.new_company ? await resolveCompanyByName(data.new_company) : null);
-  if (!companyId) throw new Error('Customer is required');
-  await ensureBidCustomer(bid._id, companyId);
+  const companyIds = await resolveCompanyIds(data.company_ids, data.new_companies);
+  if (!companyIds.length) throw new Error('Pick at least one customer to submit to');
 
   const s = await getSettings();
-  await M.BidSubmission.create({
-    _id: await nextId('bid_submissions'),
-    bid_id: bid._id, company_id: companyId,
-    amount: Number(data.amount), date_submitted: data.date_submitted, approved_by: data.approved_by,
-    submission_type: 'initial', notes: data.notes || null, is_current: 1,
-    outcome: 'pending', next_followup_date: addDays(data.date_submitted, s.fu_initial_days),
-  });
-  await M.Bid.updateOne({ _id: bid._id }, { $set: {
-    stage: 'submitted', jurisdiction: String(data.jurisdiction), updated_at: ts(),
-  }});
+  for (const companyId of companyIds) {
+    await ensureBidCustomer(bid._id, companyId);
+    await M.BidSubmission.create({
+      _id: await nextId('bid_submissions'),
+      bid_id: bid._id, company_id: companyId,
+      amount: Number(data.amount), date_submitted: data.date_submitted, approved_by: data.approved_by,
+      submission_type: 'initial', notes: data.notes || null, is_current: 1,
+      outcome: 'pending', next_followup_date: addDays(data.date_submitted, s.fu_initial_days),
+    });
+  }
+
+  const upd = { jurisdiction: String(data.jurisdiction), updated_at: ts() };
+  const [allCustomers, currentSubs] = await Promise.all([
+    M.BidCustomer.find({ bid_id: bid._id }).lean(),
+    M.BidSubmission.find({ bid_id: bid._id, is_current: 1 }).lean(),
+  ]);
+  const submittedCompanyIds = new Set(currentSubs.map(s => s.company_id));
+  const allSubmitted = allCustomers.length > 0 && allCustomers.every(bc => submittedCompanyIds.has(bc.company_id));
+  if (allSubmitted) upd.stage = 'submitted';
+  await M.Bid.updateOne({ _id: bid._id }, { $set: upd });
   await recomputeBidHeadline(bid._id);
   await recomputeBidFollowup(bid._id);
-  return { bid_id: bid._id };
+  return { bid_id: bid._id, stage: allSubmitted ? 'submitted' : bid.stage, remaining: allCustomers.length - submittedCompanyIds.size };
 }
 
 // ── Add another submission to a submitted bid ─────────────────────────────────
@@ -1800,10 +1831,11 @@ async function deleteChangeOrder(id) {
   const co = await M.ChangeOrder.findById(Number(id)).lean();
   if (!co) throw new Error('Change order not found');
   if (co.stage !== 'active_co') throw new Error(`Can't delete — this CO is already ${co.stage}, that's real progress.`);
+  const label = [co.co_number, co.name].filter(Boolean).join(' — ') || `CO #${co._id}`;
   await M.Followup.deleteMany({ parent_type: 'change_order', parent_id: co._id });
   await M.Reminder.deleteMany({ parent_type: 'change_order', parent_id: co._id });
   await M.ChangeOrder.deleteOne({ _id: co._id });
-  return { deleted: co._id };
+  return { deleted: co._id, label };
 }
 
 // ── Merge duplicate jobs: move change orders to the survivor, carry over any
@@ -1884,10 +1916,11 @@ async function deleteBid(id) {
   const DECIDED = ['awarded', 'not_awarded'];
   if (DECIDED.includes(bid.stage)) throw new Error(`Can't delete — this bid is already ${bid.stage}, that's real history.`);
   if (await M.BidSubmission.exists({ bid_id: bid._id })) throw new Error("Can't delete — this bid already has a submission. Close it instead if it's no longer needed.");
+  const label = [bid.bid_number, bid.project_name].filter(Boolean).join(' ') || `bid #${bid._id}`;
   await M.BidCustomer.deleteMany({ bid_id: bid._id });
   await M.Reminder.deleteMany({ parent_type: 'bid', parent_id: bid._id });
   await M.Bid.deleteOne({ _id: bid._id });
-  return { deleted: bid._id };
+  return { deleted: bid._id, label };
 }
 
 // ── Replay cleanup overrides onto freshly-imported data (called by import.js) ──
@@ -1959,6 +1992,6 @@ module.exports = {
   getTeamV2, createTeamMemberV2, updateTeamMemberV2, updateSettingsV2, getSettings,
   removeBidCustomer, createCompanyV2, deleteBid, addSubEstimator, removeSubEstimator,
   updateBidDueDate, updateCoDueDate,
-  logActivity, getActivityLog, undoActivity,
+  logActivity, getActivityLog, undoActivity, bidLabel, coLabel,
   mergeContacts, deleteCompany, deleteChangeOrder,
 };
