@@ -1391,7 +1391,12 @@ async function getDigest() {
   // bids & COs are the only rows worth a $ value, shown as both a 30-day
   // window and year-to-date since "currently submitted" isn't the same
   // question as "how much did we submit."
-  const activeCos = cos.filter(c => ['active_co', 'submitted_co'].includes(c.stage));
+  // "Active Change Orders" means stage === 'active_co' only, matching the
+  // Active Change Orders list page — submitted_co is its own separate
+  // count/list. `liveCos` (both stages) is only for the due-soon calc below,
+  // since a submitted CO can still have an upcoming due date worth flagging.
+  const activeCos = cos.filter(c => c.stage === 'active_co');
+  const liveCos = cos.filter(c => ['active_co', 'submitted_co'].includes(c.stage));
   const submittedBids30 = bids.filter(b => b.date_submitted && b.date_submitted >= thirtyAgo && b.date_submitted <= todayStr);
   const submittedBidsYTD = bids.filter(b => b.date_submitted && b.date_submitted >= yearStart && b.date_submitted <= todayStr);
   const submittedCos30 = cos.filter(c => c.date_submitted && c.date_submitted >= thirtyAgo && c.date_submitted <= todayStr);
@@ -1444,7 +1449,7 @@ async function getDigest() {
   const upcomingDueDates = bids.filter(b => ['opportunity', 'active_bid', 'submitted'].includes(b.stage) && b.due_date >= todayStr && b.due_date <= monthAhead).sort((a, b) => (a.due_date || '').localeCompare(b.due_date || '')).map(shapeBid);
   const overdueFollowups = bids.filter(b => b.stage === 'submitted' && b.next_followup_date && b.next_followup_date < todayStr).sort((a, b) => (a.next_followup_date || '').localeCompare(b.next_followup_date || '')).map(shapeBid);
 
-  const coDueSoon = activeCos.filter(c => c.due_date >= todayStr && c.due_date <= monthAhead).sort((a, b) => (a.due_date || '').localeCompare(b.due_date || '')).map(shapeCo);
+  const coDueSoon = liveCos.filter(c => c.due_date >= todayStr && c.due_date <= monthAhead).sort((a, b) => (a.due_date || '').localeCompare(b.due_date || '')).map(shapeCo);
   const coOverdueFollowups = cos.filter(c => c.stage === 'submitted_co' && c.next_followup_date && c.next_followup_date < todayStr).sort((a, b) => (a.next_followup_date || '').localeCompare(b.next_followup_date || '')).map(shapeCo);
 
   const reminders = await M.Reminder.find({ dismissed: { $ne: 1 }, remind_on: { $gte: todayStr, $lte: twoWeeksAhead } }).sort({ remind_on: 1 }).lean();
@@ -1496,7 +1501,10 @@ async function getDashboard(userId, mineOnly) {
     opportunity: stageCount('opportunity'),
     active_bid: stageCount('active_bid'),
   };
-  const activeCos = myCos.filter(c => ['active_co', 'submitted_co'].includes(c.stage) && !c.superseded);
+  // "Active Change Orders" bubble means stage === 'active_co' only, matching
+  // the Active Change Orders list page it links to — submitted_co is a
+  // separate stage with its own list/bubble, not part of this count.
+  const activeCos = myCos.filter(c => c.stage === 'active_co' && !c.superseded);
 
   const submittedYTD = myBids.filter(b => b.date_submitted && b.date_submitted >= yearStart && b.date_submitted <= today);
   const awardedYTD = myBids.filter(b => b.stage === 'awarded' && b.award_date && b.award_date >= yearStart && b.award_date <= today);
