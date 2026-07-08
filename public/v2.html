@@ -98,7 +98,11 @@
   .v2-field input:focus, .v2-field select:focus, .v2-field textarea:focus {
     outline: none; border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,.1);
   }
-  .v2-check { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 3px 0; cursor: pointer; }
+  /* Higher specificity than ".v2-field label" (which sets display:block for
+     normal field labels) — otherwise it wins the tie and the checkbox/text
+     inside a multicheck option stack instead of sitting side by side. */
+  .v2-field label.v2-check { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 400; color: var(--text); margin-bottom: 0; padding: 3px 0; cursor: pointer; text-transform: none; }
+  .v2-check input[type="checkbox"] { flex-shrink: 0; width: 15px; height: 15px; margin: 0; }
   .v2-modal-err { color: #dc2626; font-size: 12px; font-weight: 600; display: none; padding: 0 20px 10px; }
   /* searchable company combobox */
   .v2-combo { position: relative; }
@@ -976,7 +980,7 @@ async function renderCoList(stage) {
   main.innerHTML = `
     <div class="page-header">
       <div><div class="page-title">${meta.title}</div><div class="page-subtitle" id="cl-count-${stage}">${LIST_STATE[stage].length} ${meta.sub}</div></div>
-      ${stage === 'active_co' ? `<button class="v2-btn green" onclick="actNewChangeOrder()">+ New Change Order</button>` : ''}
+      ${stage === 'active_co' ? `<button class="v2-btn green" style="padding:8px 14px;font-size:12px" onclick="actNewChangeOrder()">+ New Change Order</button>` : ''}
     </div>
     <div class="card" style="padding:0">${filterBarHtml(stage, sortOpts)}<div id="cl-body-${stage}"></div></div>`;
   renderCoListBody(stage);
