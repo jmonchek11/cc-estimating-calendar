@@ -4,9 +4,11 @@ const session = require('express-session');
 const MongoStore = require('connect-mongo');
 const mongoose = require('mongoose');
 const path = require('path');
+const crypto = require('crypto');
 const cron = require('node-cron');
 const db = require('./db');
 const mailer = require('./mailer');
+const msauth = require('./msauth');
 const v2db = require('./v2/db');
 const v2notify = require('./v2/notify');
 
@@ -154,6 +156,10 @@ app.post('/api/auth/logout', (req, res) => {
   req.session.destroy(() => res.json({ ok: true }));
 });
 
+app.get('/api/auth/sso-status', (req, res) => {
+  res.json({ enabled: msauth.isConfigured() });
+});
+
 app.post('/api/auth/set-password', async (req, res) => {
   if (!req.session.userId) return res.status(401).json({ error: 'Not authenticated' });
   try {
@@ -175,6 +181,47 @@ app.post('/api/auth/verify-password', async (req, res) => {
     const valid = await db.verifyUserPassword(req.session.userId, password);
     res.json({ valid: !!valid });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Microsoft Entra ID (SSO) — top-level routes, not under /api/, so the
+// /api/* auth middleware doesn't apply (no PUBLIC_API change needed). Both
+// no-op safely (redirect with a clear query param) when AZURE_* env vars
+// aren't set yet, so a deploy before Joe adds them in Render can't crash.
+app.get('/auth/login', async (req, res) => {
+  if (!msauth.isConfigured()) return res.redirect('/legacy?sso=unavailable');
+  try {
+    const state = crypto.randomBytes(16).toString('hex');
+    req.session.msAuthState = state;
+    const url = await msauth.getAuthCodeUrl(state);
+    res.redirect(url);
+  } catch (e) {
+    console.error('MS auth login error:', e);
+    res.redirect('/legacy?sso=error');
+  }
+});
+
+app.get('/auth/callback', async (req, res) => {
+  if (!msauth.isConfigured()) return res.redirect('/legacy?sso=unavailable');
+  try {
+    const expectedState = req.session.msAuthState;
+    delete req.session.msAuthState;
+    if (!req.query.state || req.query.state !== expectedState) return res.status(403).send('Invalid state');
+
+    const response = await msauth.acquireTokenByCode(req.query.code);
+    const claims = response.idTokenClaims || {};
+    const oid = claims.oid;
+    const email = claims.preferred_username || claims.email;
+    const name = response.account?.name || claims.name;
+
+    const member = await db.loginWithMicrosoft({ oid, email, name });
+    if (!member) return res.redirect('/legacy?sso=nomatch');
+
+    req.session.userId = member.id;
+    res.redirect('/');
+  } catch (e) {
+    console.error('MS auth callback error:', e);
+    res.redirect('/legacy?sso=error');
+  }
 });
 
 // Admin-only: send test email + trigger digest on demand

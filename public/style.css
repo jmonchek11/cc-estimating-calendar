@@ -1309,6 +1309,18 @@ textarea.form-input { resize: vertical; min-height: 60px; }
 .login-error { color: #f87171; font-size: 0.85rem; margin-bottom: 12px; padding: 8px 12px; background: rgba(248,113,113,0.1); border-radius: 6px; }
 #pw-requirements div { padding: 2px 0; transition: color 0.2s; }
 
+/* ── "Sign in with Microsoft" (brand button per Microsoft's guidelines) ── */
+.ms-signin-btn {
+  display: flex; align-items: center; justify-content: center; gap: 12px;
+  width: 100%; padding: 11px 14px; background: #fff; color: #5e5e5e;
+  border: 1px solid #8c8c8c; border-radius: 4px; font-family: 'Segoe UI', inherit;
+  font-size: 0.95rem; font-weight: 600; text-decoration: none; cursor: pointer;
+  transition: background 0.15s;
+}
+.ms-signin-btn:hover { background: #f3f3f3; }
+.ms-signin-divider { display: flex; align-items: center; gap: 12px; margin: 16px 0; color: #64748b; font-size: 0.8rem; }
+.ms-signin-divider::before, .ms-signin-divider::after { content: ''; flex: 1; height: 1px; background: #2d3148; }
+
 /* ── GLOBAL SIDEBAR SEARCH ── */
 .sidebar-search-wrap {
   padding: 0 12px 10px;

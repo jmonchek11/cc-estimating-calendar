@@ -5718,6 +5718,30 @@ function firstName(name) {
 function showLoginOverlay() {
   document.getElementById('login-overlay').style.display = 'flex';
   document.getElementById('app').style.display = 'none';
+  showSsoButtonIfEnabled();
+  showSsoQueryError();
+}
+
+async function showSsoButtonIfEnabled() {
+  try {
+    const { enabled } = await api.get('/api/auth/sso-status');
+    if (enabled) document.getElementById('ms-signin-block').style.display = 'block';
+  } catch { /* leave hidden — non-fatal */ }
+}
+
+function showSsoQueryError() {
+  const sso = new URLSearchParams(location.search).get('sso');
+  if (!sso) return;
+  const messages = {
+    nomatch: "Your Microsoft account isn't linked to a team member yet. Ask an admin to add your email on the Team page, then try again.",
+    error: 'Microsoft sign-in failed. Try again or use your password.',
+    unavailable: "Microsoft sign-in isn't set up on this server yet.",
+  };
+  const msg = messages[sso];
+  if (!msg) return;
+  const errEl = document.getElementById('login-error');
+  errEl.textContent = msg;
+  errEl.style.display = 'block';
 }
 
 function hideLoginOverlay() {

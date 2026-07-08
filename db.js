@@ -194,6 +194,25 @@ async function loginUser(email, password) {
   return formatMember(member);
 }
 
+// ── Microsoft SSO login ─────────────────────────────────────────────────────
+// Never auto-creates a TeamMember — unknown Microsoft accounts get a "no
+// match" page; admins add people via the Team page first (same trust model
+// as password login, which also only ever matches existing records).
+async function loginWithMicrosoft({ oid, email, name }) {
+  // Durable link first — survives the member's email changing later.
+  let member = await TeamMember.findOne({ ms_oid: oid, active: 1 });
+  if (member) return formatMember(member);
+
+  const normalizedEmail = (email || '').toLowerCase().trim();
+  if (!normalizedEmail) return null;
+  member = await TeamMember.findOne({ email: normalizedEmail, active: 1 });
+  if (!member) return null;
+
+  member.ms_oid = oid;
+  await member.save();
+  return formatMember(member);
+}
+
 async function setPassword(userId, newPassword) {
   const hash = await bcrypt.hash(newPassword, 12);
   await TeamMember.findByIdAndUpdate(Number(userId), { password_hash: hash, must_change_password: false });
@@ -1838,7 +1857,7 @@ async function markReminderEmailed(bidId, rid) {
 
 module.exports = {
   getTeam, getAllTeam, createTeamMember, updateTeamMember,
-  loginUser, getMember, setPassword, adminSetTempPassword, verifyUserPassword, getMyStats,
+  loginUser, loginWithMicrosoft, getMember, setPassword, adminSetTempPassword, verifyUserPassword, getMyStats,
   getBids, getBid, createBid, updateBid, deleteBid,
   getFollowups, logFollowup,
   getStats, getDigest, getAnalytics,
