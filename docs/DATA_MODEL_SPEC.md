@@ -555,4 +555,49 @@ All questions from the initial draft are resolved and folded into §1–§6 abov
 
 ---
 
+## 8. Events Emitted to liberty-core
+
+Phase 4 of `PLATFORM_ROADMAP.md`: the calendar appends an event to a shared
+`liberty-core.events` collection (own `mongoose.createConnection`, `v2/events.js`)
+on every significant transition, so other platform apps (Manpower Board, PC tool —
+separate consumer work, not built here) can react without querying the calendar's
+own DB. The calendar never reads this collection back except its own backfill
+script. Full spec: `docs/EVENTS_OUTBOX_PLAN.md`.
+
+Event shape: `{ at, type, source: 'estimating', actor_id, project_id, bid_id, job_id,
+co_id, submission_id, job_number, payload, processed }` — `processed` is written only
+by consumers, never by the calendar. Emission uses `safeEmit()`, which never throws:
+a `liberty-core` outage is logged (`EMIT FAILED` + full payload) and swallowed rather
+than blocking the user's action.
+
+| type | emitted from | payload |
+|---|---|---|
+| `project.created` | `createOpportunity`, `createDirectBid`, `createLegacyJob` (new-project path only) | `{ name }` |
+| `bid.created` | `createOpportunity`, `createDirectBid` | `{ project_name, stage, estimator_id, salesperson_id, due_date }` |
+| `bid.stage_changed` | `startBid` (→active_bid), `submitBid` (→submitted), `closeBid` (→closed), `notAwardSubmission` (→not_awarded, only when every submission is lost) | `{ from, to, project_name }` |
+| `bid.awarded` | `awardSubmission` | `{ project_name, company_id, company_name, amount, award_date, pm_id, pm_name }` + `job_id` |
+| `job.created` | `awardSubmission`, `createLegacyJob` | `{ project_name, company_name, award_date, pm_id, from_bid }` |
+| `job.number_assigned` | `updateJob` (null→value) | `{ project_name, job_number }` (+ top-level `job_number`) |
+| `job.number_changed` | `updateJob` (value→different value) | `{ previous, job_number, project_name }` |
+| `job.pm_assigned` | `updateJob` (`pm_id` changes) | `{ pm_id, pm_name, project_name, job_number }` |
+| `co.created` | `createChangeOrder` | `{ co_number, name, project_name, job_number }` |
+| `co.stage_changed` | `submitCO`, `approveCO`, `notApproveCO`, `voidCO`, `reopenCO` | `{ co_number, from, to, amount, project_name, job_number }` |
+
+**Job-number validation** (`updateJob`, `createLegacyJob`): must match `^\d{5,6}$`
+(Foundation format — digits only, 5–6 chars) or is rejected with a friendly message;
+must be unique across Jobs (rejected naming the conflicting project); clearing to
+null is always allowed; existing stored numbers are not retro-validated. Note: the
+admin generic entity-editor (`adminUpdate` → `PATCH /api/v2/admin/job/:id`) can also
+set `job_number` directly and currently bypasses both this validation and event
+emission — out of scope per the outbox plan's literal instructions (only `updateJob`/
+`createLegacyJob` are named), flagged here as a known gap if it needs closing later.
+
+**Backfill/recovery**: `v2/backfill-events.js --dry` (default, safe) / `--write`.
+Idempotent by natural key (`type` + `job_id`/`co_id`/`bid_id`) — safe to re-run.
+Backfilled rows carry `payload.backfilled: true` and `actor_id: null`. Bid-stage
+history before this deploy isn't reconstructible, so only Jobs, terminal CO stages,
+and job-number assignments are backfilled.
+
+---
+
 *All decisions resolved. Next step: full-team review and sign-off, then implementation begins per §6.4 — fake data first, real data only after sign-off.*

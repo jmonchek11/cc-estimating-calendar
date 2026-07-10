@@ -151,9 +151,9 @@ router.post('/api/v2/opportunities',          t(req => v2db.createOpportunity({ 
   async (req, r) => ({ action: 'bid.create_opportunity', summary: `Created opportunity ${await v2db.bidLabel(r.bid_id)}`, entity_type: 'bid', entity_id: r.bid_id })));
 router.post('/api/v2/bids',                   t(req => v2db.createDirectBid({ ...req.body, created_by: req.session.userId }),
   async (req, r) => ({ action: 'bid.create', summary: `Created bid ${await v2db.bidLabel(r.bid_id)}`, entity_type: 'bid', entity_id: r.bid_id })));
-router.post('/api/v2/bids/:id/start',         t(req => v2db.startBid(req.params.id, req.body),
+router.post('/api/v2/bids/:id/start',         t(req => v2db.startBid(req.params.id, req.body, req.session.userId),
   async (req) => ({ action: 'bid.start', summary: `Started bid ${await v2db.bidLabel(req.params.id)}`, entity_type: 'bid', entity_id: Number(req.params.id) })));
-router.post('/api/v2/bids/:id/submit',        t(req => v2db.submitBid(req.params.id, req.body),
+router.post('/api/v2/bids/:id/submit',        t(req => v2db.submitBid(req.params.id, req.body, req.session.userId),
   async (req) => ({ action: 'bid.submit', summary: `Submitted bid ${await v2db.bidLabel(req.params.id)}`, entity_type: 'bid', entity_id: Number(req.params.id) })));
 
 // Admin-only generic edit for any entity: project | bid | job | change_order | bid_submission
@@ -182,7 +182,7 @@ router.delete('/api/v2/admin/company/:id',     requireAdmin, t(req => v2db.delet
 router.delete('/api/v2/admin/change-order/:id', requireAdmin, t(req => v2db.deleteChangeOrder(req.params.id),
   (req, r) => ({ action: 'admin.delete_co', summary: `Deleted change order ${r.label}`, entity_type: 'change_order', entity_id: Number(req.params.id) })));
 router.delete('/api/v2/admin/override/:id',    requireAdmin, t(req => v2db.removeOverride(req.params.id)));
-router.post('/api/v2/bids/:id/close',         t(req => v2db.closeBid(req.params.id, req.body),
+router.post('/api/v2/bids/:id/close',         t(req => v2db.closeBid(req.params.id, req.body, req.session.userId),
   async (req) => ({ action: 'bid.close', summary: `Closed bid ${await v2db.bidLabel(req.params.id)} — ${req.body.close_reason || 'no reason given'}`, entity_type: 'bid', entity_id: Number(req.params.id) })));
 router.post('/api/v2/bids/:id/submissions',   t(req => v2db.addSubmission(req.params.id, req.body),
   async (req) => ({ action: 'bid.add_submission', summary: `Added a submission to bid ${await v2db.bidLabel(req.params.id)}`, entity_type: 'bid', entity_id: Number(req.params.id) })));
@@ -198,7 +198,7 @@ router.delete('/api/v2/bid-customers/:id',    t(req => v2db.removeBidCustomer(re
 // Per-submission win/loss
 router.post('/api/v2/submissions/:id/award', async (req, res) => {
   try {
-    const result = await v2db.awardSubmission(req.params.id, req.body);
+    const result = await v2db.awardSubmission(req.params.id, req.body, req.session.userId);
     res.json(result);
     // fire-and-forget — never let a mail failure (or a logging failure) affect the award itself
     maindb.getMember(req.session.userId).then(async actor => {
@@ -208,7 +208,7 @@ router.post('/api/v2/submissions/:id/award', async (req, res) => {
     }).catch(() => {});
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
-router.post('/api/v2/submissions/:id/not-awarded',  t(req => v2db.notAwardSubmission(req.params.id, req.body),
+router.post('/api/v2/submissions/:id/not-awarded',  t(req => v2db.notAwardSubmission(req.params.id, req.body, req.session.userId),
   async (req, r) => ({ action: 'bid.not_awarded', summary: `Marked a submission not awarded on bid ${await v2db.bidLabel(r.bid_id)}`, entity_type: 'bid', entity_id: r.bid_id })));
 
 // ── Import Bid from JIS (Job Information Sheet) ───────────────────────────────
@@ -252,21 +252,21 @@ router.delete('/api/v2/reminders/:id',         t(req => v2db.deleteReminder(req.
 // ── Jobs ──────────────────────────────────────────────────────────────────────
 router.post('/api/v2/jobs',                   t(req => v2db.createLegacyJob({ ...req.body, created_by: req.session.userId }),
   (req, r) => ({ action: 'job.create_legacy', summary: `Created legacy job #${r.job_id || r.id}`, entity_type: 'job', entity_id: r.job_id || r.id })));
-router.patch('/api/v2/jobs/:id',              t(req => v2db.updateJob(req.params.id, req.body),
+router.patch('/api/v2/jobs/:id',              t(req => v2db.updateJob(req.params.id, req.body, req.session.userId),
   (req) => ({ action: 'job.update', summary: `Edited job #${req.params.id} (${Object.keys(req.body).join(', ')})`, entity_type: 'job', entity_id: Number(req.params.id) })));
-router.post('/api/v2/jobs/:id/change-orders', t(req => v2db.createChangeOrder(req.params.id, req.body),
+router.post('/api/v2/jobs/:id/change-orders', t(req => v2db.createChangeOrder(req.params.id, req.body, req.session.userId),
   async (req, r) => ({ action: 'co.create', summary: `Created CO ${await v2db.coLabel(r.co_id)} on job #${req.params.id}`, entity_type: 'change_order', entity_id: r.co_id })));
 
 // ── Change orders ─────────────────────────────────────────────────────────────
-router.post('/api/v2/change-orders/:id/submit',       t(req => v2db.submitCO(req.params.id, req.body),
+router.post('/api/v2/change-orders/:id/submit',       t(req => v2db.submitCO(req.params.id, req.body, req.session.userId),
   async (req) => ({ action: 'co.submit', summary: `Submitted CO ${await v2db.coLabel(req.params.id)}`, entity_type: 'change_order', entity_id: Number(req.params.id) })));
-router.post('/api/v2/change-orders/:id/approve',      t(req => v2db.approveCO(req.params.id, req.body),
+router.post('/api/v2/change-orders/:id/approve',      t(req => v2db.approveCO(req.params.id, req.body, req.session.userId),
   async (req) => ({ action: 'co.approve', summary: `Approved CO ${await v2db.coLabel(req.params.id)}`, entity_type: 'change_order', entity_id: Number(req.params.id) })));
-router.post('/api/v2/change-orders/:id/not-approved', t(req => v2db.notApproveCO(req.params.id, req.body),
+router.post('/api/v2/change-orders/:id/not-approved', t(req => v2db.notApproveCO(req.params.id, req.body, req.session.userId),
   async (req) => ({ action: 'co.not_approved', summary: `Marked CO ${await v2db.coLabel(req.params.id)} not approved`, entity_type: 'change_order', entity_id: Number(req.params.id) })));
-router.post('/api/v2/change-orders/:id/void',         t(req => v2db.voidCO(req.params.id, req.body),
+router.post('/api/v2/change-orders/:id/void',         t(req => v2db.voidCO(req.params.id, req.body, req.session.userId),
   async (req) => ({ action: 'co.void', summary: `Voided CO ${await v2db.coLabel(req.params.id)} — ${req.body.void_reason || 'no reason given'}`, entity_type: 'change_order', entity_id: Number(req.params.id) })));
-router.post('/api/v2/change-orders/:id/reopen',       t(req => v2db.reopenCO(req.params.id),
+router.post('/api/v2/change-orders/:id/reopen',       t(req => v2db.reopenCO(req.params.id, req.session.userId),
   async (req) => ({ action: 'co.reopen', summary: `Reopened CO ${await v2db.coLabel(req.params.id)}`, entity_type: 'change_order', entity_id: Number(req.params.id) })));
 router.post('/api/v2/change-orders/:id/revise',       t(req => v2db.reviseCO(req.params.id, req.body),
   async (req, r) => ({ action: 'co.revise', summary: `Revised CO ${await v2db.coLabel(req.params.id)} → new CO ${await v2db.coLabel(r.co_id)}`, entity_type: 'change_order', entity_id: r.co_id })));

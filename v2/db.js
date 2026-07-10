@@ -9,6 +9,7 @@
  */
 const bcrypt = require('bcrypt');
 const { getModels } = require('./models');
+const events = require('./events');
 
 const BID_ACTIVE_STAGES = ['opportunity', 'active_bid', 'submitted'];
 const CO_ACTIVE_STAGES  = ['active_co', 'submitted_co'];
@@ -417,18 +418,29 @@ async function updateSettingsV2(data) {
 async function createOpportunity({ project_id, project_name, notes, created_by }) {
   const M = getModels();
   let pid = project_id ? Number(project_id) : null;
+  let isNewProject = false;
   if (!pid) {
     require_({ project_name }, ['project_name']);
     pid = await nextId('projects');
     await M.Project.create({ _id: pid, name: project_name.trim(), created_by: created_by || null });
+    isNewProject = true;
   }
   const bidId = await nextId('bids');
   await M.Bid.create({ _id: bidId, project_id: pid, stage: 'opportunity', notes: notes || null });
+  const actorId = created_by ? Number(created_by) : null;
+  const proj = await M.Project.findById(pid).lean();
+  if (isNewProject) {
+    await events.safeEmit('project.created', { project_id: pid, actor_id: actorId, payload: { name: proj.name } });
+  }
+  await events.safeEmit('bid.created', {
+    project_id: pid, bid_id: bidId, actor_id: actorId,
+    payload: { project_name: proj.name, stage: 'opportunity', estimator_id: null, salesperson_id: null, due_date: null },
+  });
   return { project_id: pid, bid_id: bidId };
 }
 
 // ── opportunity → active_bid ("Start Bid") ────────────────────────────────────
-async function startBid(id, data) {
+async function startBid(id, data, actorId) {
   const M = getModels();
   const bid = await loadBid(id);
   if (bid.stage !== 'opportunity') throw new Error(`Cannot start bid from stage '${bid.stage}'`);
@@ -459,6 +471,11 @@ async function startBid(id, data) {
       contact_ids: (data.contact_ids_by_company || {})[companyId] || [],
     });
   }
+  const proj = await M.Project.findById(bid.project_id).lean();
+  await events.safeEmit('bid.stage_changed', {
+    project_id: bid.project_id, bid_id: bid._id, actor_id: actorId || null,
+    payload: { from: 'opportunity', to: 'active_bid', project_name: proj?.name || null },
+  });
   return { bid_id: bid._id, bid_number };
 }
 
@@ -473,7 +490,7 @@ async function createDirectBid(data) {
     project_name: data.project_name,
     created_by: data.created_by,
   });
-  const started = await startBid(bid_id, data);
+  const started = await startBid(bid_id, data, data.created_by);
   // Adding a new bid supersedes the project's prior non-terminal bids (e.g. a
   // later drawing stage replaces the earlier one). Terminal bids
   // (awarded/not_awarded/closed) are historical and left untouched.
@@ -789,7 +806,7 @@ async function recomputeBidFollowup(bidId) {
 // can be called again for whoever's left, without losing what's already
 // been submitted. This mirrors what a real bid team needs: nothing counts
 // as "out the door" until every applicable customer actually has a number.
-async function submitBid(id, data) {
+async function submitBid(id, data, actorId) {
   const M = getModels();
   const bid = await loadBid(id);
   if (bid.stage !== 'active_bid') throw new Error(`Cannot submit from stage '${bid.stage}'`);
@@ -820,6 +837,13 @@ async function submitBid(id, data) {
   await M.Bid.updateOne({ _id: bid._id }, { $set: upd });
   await recomputeBidHeadline(bid._id);
   await recomputeBidFollowup(bid._id);
+  if (allSubmitted) {
+    const proj = await M.Project.findById(bid.project_id).lean();
+    await events.safeEmit('bid.stage_changed', {
+      project_id: bid.project_id, bid_id: bid._id, actor_id: actorId || null,
+      payload: { from: 'active_bid', to: 'submitted', project_name: proj?.name || null },
+    });
+  }
   return { bid_id: bid._id, stage: allSubmitted ? 'submitted' : bid.stage, remaining: allCustomers.length - submittedCompanyIds.size };
 }
 
@@ -914,7 +938,7 @@ async function loadSubmission(id) {
 // ── Submission awarded — that customer gave us the job; creates the Job ───────
 // Per-submission win. The first awarded submission wins the bid; siblings are
 // LEFT pending (resolved individually). One winner per bid.
-async function awardSubmission(submissionId, data) {
+async function awardSubmission(submissionId, data, actorId) {
   const M = getModels();
   const sub = await loadSubmission(submissionId);
   const bid = await loadBid(sub.bid_id);
@@ -931,12 +955,30 @@ async function awardSubmission(submissionId, data) {
   await recomputeBidHeadline(bid._id);   // headline now reflects the winning submission
   await recomputeBidFollowup(bid._id);   // siblings stay pending; bid f/u rolls up from them
   const jobId = await nextId('jobs');
+  const pmId = data.pm_id ? Number(data.pm_id) : null;
   await M.Job.create({
     _id: jobId, project_id: bid.project_id, winning_bid_id: bid._id,
     job_number: null,                                  // accounting assigns later
     awarded_company_id: sub.company_id,
-    pm_id: data.pm_id ? Number(data.pm_id) : null,
+    pm_id: pmId,
     award_date: data.award_date,
+  });
+
+  const [proj, company, pm] = await Promise.all([
+    M.Project.findById(bid.project_id).lean(),
+    M.Company.findById(sub.company_id).lean(),
+    pmId ? M.TeamMember.findById(pmId).lean() : null,
+  ]);
+  await events.safeEmit('bid.awarded', {
+    project_id: bid.project_id, bid_id: bid._id, job_id: jobId, submission_id: sub._id, actor_id: actorId || null,
+    payload: {
+      project_name: proj?.name || null, company_id: sub.company_id, company_name: company?.name || null,
+      amount: sub.amount, award_date: data.award_date, pm_id: pmId, pm_name: pm?.name || null,
+    },
+  });
+  await events.safeEmit('job.created', {
+    project_id: bid.project_id, bid_id: bid._id, job_id: jobId, actor_id: actorId || null,
+    payload: { project_name: proj?.name || null, company_name: company?.name || null, award_date: data.award_date, pm_id: pmId, from_bid: true },
   });
   return { submission_id: sub._id, bid_id: bid._id, job_id: jobId };
 }
@@ -944,7 +986,7 @@ async function awardSubmission(submissionId, data) {
 // ── Submission not awarded — this customer went elsewhere ─────────────────────
 // When ALL of a bid's submissions are not_awarded (none awarded), the bid
 // becomes not_awarded. Otherwise it stays submitted (others still pending).
-async function notAwardSubmission(submissionId, data) {
+async function notAwardSubmission(submissionId, data, actorId) {
   const M = getModels();
   const sub = await loadSubmission(submissionId);
   const bid = await loadBid(sub.bid_id);
@@ -965,21 +1007,32 @@ async function notAwardSubmission(submissionId, data) {
       stage: 'not_awarded', date_not_awarded: data.date_not_awarded,
       not_awarded_notes: 'All customers declined.', next_followup_date: null, updated_at: ts(),
     }});
+    const proj = await M.Project.findById(bid.project_id).lean();
+    await events.safeEmit('bid.stage_changed', {
+      project_id: bid.project_id, bid_id: bid._id, actor_id: actorId || null,
+      payload: { from: 'submitted', to: 'not_awarded', project_name: proj?.name || null },
+    });
   }
   return { submission_id: sub._id, bid_id: bid._id };
 }
 
 // ── opportunity / active_bid → closed ─────────────────────────────────────────
-async function closeBid(id, data) {
+async function closeBid(id, data, actorId) {
   const M = getModels();
   const bid = await loadBid(id);
   if (!['opportunity', 'active_bid'].includes(bid.stage)) throw new Error(`Cannot close from stage '${bid.stage}'`);
   require_(data, ['closed_date', 'closed_approved_by', 'close_reason']);
+  const fromStage = bid.stage;
   await M.Bid.updateOne({ _id: bid._id }, { $set: {
     stage: 'closed', closed_date: data.closed_date,
     closed_approved_by: data.closed_approved_by, close_reason: data.close_reason,
     updated_at: ts(),
   }});
+  const proj = await M.Project.findById(bid.project_id).lean();
+  await events.safeEmit('bid.stage_changed', {
+    project_id: bid.project_id, bid_id: bid._id, actor_id: actorId || null,
+    payload: { from: fromStage, to: 'closed', project_name: proj?.name || null },
+  });
   return { bid_id: bid._id };
 }
 
@@ -1063,39 +1116,119 @@ async function markReminderEmailed(id) {
   await M.Reminder.updateOne({ _id: Number(id) }, { $set: { emailed: 1 } });
 }
 
+// Job # format is Foundation's: digits only, 5-6 chars (customer # + 3-digit
+// sequence). Clearing to null is always allowed; existing stored numbers are
+// NOT retro-validated (only enforced when a number is being SET).
+async function validateJobNumber(M, jobNumber, excludeJobId) {
+  if (jobNumber == null) return;
+  if (!/^\d{5,6}$/.test(jobNumber)) {
+    throw new Error('Job numbers are 5-6 digits, no dashes (e.g. 18002). This must match Foundation.');
+  }
+  const query = { job_number: jobNumber };
+  if (excludeJobId != null) query._id = { $ne: excludeJobId };
+  const conflict = await M.Job.findOne(query).lean();
+  if (conflict) {
+    const proj = await M.Project.findById(conflict.project_id).lean();
+    throw new Error(`Job number ${jobNumber} is already in use on "${proj ? proj.name : 'another project'}".`);
+  }
+}
+
 // ── Job: manual creation (legacy) + accounting/PM updates ─────────────────────
 async function createLegacyJob(data) {
   const M = getModels();
   let pid = data.project_id ? Number(data.project_id) : null;
+  let isNewProject = false;
   if (!pid) {
     require_(data, ['project_name']);
     pid = await nextId('projects');
     await M.Project.create({ _id: pid, name: data.project_name.trim(), created_by: data.created_by || null });
+    isNewProject = true;
   }
+  const jobNumber = data.job_number || null;
+  await validateJobNumber(M, jobNumber, null);
   const jobId = await nextId('jobs');
+  const awardedCompanyId = data.awarded_company_id ? Number(data.awarded_company_id)
+    : (data.new_company ? await resolveCompanyByName(data.new_company) : null);
+  const pmId = data.pm_id ? Number(data.pm_id) : null;
   await M.Job.create({
     _id: jobId, project_id: pid, winning_bid_id: null,   // legacy — no bid in system
-    job_number: data.job_number || null,
-    awarded_company_id: data.awarded_company_id ? Number(data.awarded_company_id)
-      : (data.new_company ? await resolveCompanyByName(data.new_company) : null),
-    pm_id: data.pm_id ? Number(data.pm_id) : null,
+    job_number: jobNumber,
+    awarded_company_id: awardedCompanyId,
+    pm_id: pmId,
     award_date: data.award_date || null,
   });
+
+  const actorId = data.created_by ? Number(data.created_by) : null;
+  const [proj, company] = await Promise.all([
+    M.Project.findById(pid).lean(),
+    awardedCompanyId ? M.Company.findById(awardedCompanyId).lean() : null,
+  ]);
+  if (isNewProject) {
+    await events.safeEmit('project.created', { project_id: pid, actor_id: actorId, payload: { name: proj.name } });
+  }
+  await events.safeEmit('job.created', {
+    project_id: pid, job_id: jobId, actor_id: actorId,
+    payload: { project_name: proj?.name || null, company_name: company?.name || null, award_date: data.award_date || null, pm_id: pmId, from_bid: false },
+  });
+  if (jobNumber) {
+    await events.safeEmit('job.number_assigned', {
+      project_id: pid, job_id: jobId, job_number: jobNumber, actor_id: actorId,
+      payload: { project_name: proj?.name || null, job_number: jobNumber },
+    });
+  }
   return { project_id: pid, job_id: jobId };
 }
 
-async function updateJob(id, data) {
+async function updateJob(id, data, actorId) {
   const M = getModels();
+  const jobId = Number(id);
+  const before = await M.Job.findById(jobId).lean();
+  if (!before) throw new Error('Job not found');
+
   const upd = { updated_at: ts() };
-  if ('job_number' in data) upd.job_number = data.job_number || null;
+  if ('job_number' in data) {
+    const jobNumber = data.job_number || null;
+    if (jobNumber !== before.job_number) await validateJobNumber(M, jobNumber, jobId);
+    upd.job_number = jobNumber;
+  }
   if ('pm_id' in data) upd.pm_id = data.pm_id ? Number(data.pm_id) : null;
-  const r = await M.Job.updateOne({ _id: Number(id) }, { $set: upd });
+  const r = await M.Job.updateOne({ _id: jobId }, { $set: upd });
   if (!r.matchedCount) throw new Error('Job not found');
-  return { job_id: Number(id) };
+
+  const proj = await M.Project.findById(before.project_id).lean();
+  if ('job_number' in upd && upd.job_number !== before.job_number) {
+    if (!before.job_number && upd.job_number) {
+      await events.safeEmit('job.number_assigned', {
+        project_id: before.project_id, job_id: jobId, job_number: upd.job_number, actor_id: actorId || null,
+        payload: { project_name: proj?.name || null, job_number: upd.job_number },
+      });
+    } else if (before.job_number && upd.job_number) {
+      await events.safeEmit('job.number_changed', {
+        project_id: before.project_id, job_id: jobId, job_number: upd.job_number, actor_id: actorId || null,
+        payload: { previous: before.job_number, job_number: upd.job_number, project_name: proj?.name || null },
+      });
+    }
+  }
+  if ('pm_id' in upd && upd.pm_id !== before.pm_id) {
+    const pm = upd.pm_id ? await M.TeamMember.findById(upd.pm_id).lean() : null;
+    await events.safeEmit('job.pm_assigned', {
+      project_id: before.project_id, job_id: jobId, actor_id: actorId || null,
+      payload: { pm_id: upd.pm_id, pm_name: pm?.name || null, project_name: proj?.name || null, job_number: upd.job_number ?? before.job_number },
+    });
+  }
+  return { job_id: jobId };
 }
 
 // ── Change Orders ─────────────────────────────────────────────────────────────
-async function createChangeOrder(jobId, data) {
+// Shared lookup for CO event payloads — project name + job # via the CO's Job.
+async function _coEventContext(M, co) {
+  const job = await M.Job.findById(co.job_id).lean();
+  if (!job) return { project_id: null, project_name: null, job_number: null };
+  const proj = await M.Project.findById(job.project_id).lean();
+  return { project_id: job.project_id, project_name: proj?.name || null, job_number: job.job_number || null };
+}
+
+async function createChangeOrder(jobId, data, actorId) {
   const M = getModels();
   const job = await M.Job.findById(Number(jobId)).lean();
   if (!job) throw new Error('A change order cannot exist without a Job');
@@ -1108,10 +1241,15 @@ async function createChangeOrder(jobId, data) {
     estimator_id: data.estimator_id ? Number(data.estimator_id) : null,
     notes: data.notes || null,
   });
+  const proj = await M.Project.findById(job.project_id).lean();
+  await events.safeEmit('co.created', {
+    project_id: job.project_id, job_id: job._id, co_id: coId, actor_id: actorId || null,
+    payload: { co_number: data.co_number, name: data.name, project_name: proj?.name || null, job_number: job.job_number || null },
+  });
   return { co_id: coId };
 }
 
-async function submitCO(id, data) {
+async function submitCO(id, data, actorId) {
   const M = getModels();
   const co = await loadCO(id);
   if (co.stage !== 'active_co') throw new Error(`Cannot submit CO from stage '${co.stage}'`);
@@ -1124,10 +1262,15 @@ async function submitCO(id, data) {
     date_submitted: data.date_submitted, approved_by: data.approved_by,
     next_followup_date: next, updated_at: ts(),
   }});
+  const ctx = await _coEventContext(M, co);
+  await events.safeEmit('co.stage_changed', {
+    project_id: ctx.project_id, job_id: co.job_id, co_id: co._id, actor_id: actorId || null,
+    payload: { co_number: co.co_number, from: 'active_co', to: 'submitted_co', amount: Number(data.estimate_amount), project_name: ctx.project_name, job_number: ctx.job_number },
+  });
   return { co_id: co._id, next_followup_date: next };
 }
 
-async function approveCO(id, data) {
+async function approveCO(id, data, actorId) {
   const M = getModels();
   const co = await loadCO(id);
   if (co.stage !== 'submitted_co') throw new Error(`Cannot approve CO from stage '${co.stage}'`);
@@ -1136,10 +1279,15 @@ async function approveCO(id, data) {
     stage: 'approved', approval_date: data.approval_date,
     next_followup_date: null, updated_at: ts(),
   }});
+  const ctx = await _coEventContext(M, co);
+  await events.safeEmit('co.stage_changed', {
+    project_id: ctx.project_id, job_id: co.job_id, co_id: co._id, actor_id: actorId || null,
+    payload: { co_number: co.co_number, from: 'submitted_co', to: 'approved', amount: co.estimate_amount, project_name: ctx.project_name, job_number: ctx.job_number },
+  });
   return { co_id: co._id };
 }
 
-async function notApproveCO(id, data) {
+async function notApproveCO(id, data, actorId) {
   const M = getModels();
   const co = await loadCO(id);
   if (co.stage !== 'submitted_co') throw new Error(`Cannot mark not-approved from stage '${co.stage}'`);
@@ -1149,27 +1297,39 @@ async function notApproveCO(id, data) {
     not_approved_notes: data.not_approved_notes || null,
     next_followup_date: null, updated_at: ts(),
   }});
+  const ctx = await _coEventContext(M, co);
+  await events.safeEmit('co.stage_changed', {
+    project_id: ctx.project_id, job_id: co.job_id, co_id: co._id, actor_id: actorId || null,
+    payload: { co_number: co.co_number, from: 'submitted_co', to: 'not_approved', amount: co.estimate_amount, project_name: ctx.project_name, job_number: ctx.job_number },
+  });
   return { co_id: co._id };
 }
 
-async function voidCO(id, data) {
+async function voidCO(id, data, actorId) {
   const M = getModels();
   const co = await loadCO(id);
   if (!['active_co', 'submitted_co'].includes(co.stage)) throw new Error(`Cannot void CO from stage '${co.stage}'`);
   require_(data, ['void_reason']);
+  const fromStage = co.stage;
   await M.ChangeOrder.updateOne({ _id: co._id }, { $set: {
     stage: 'voided', void_reason: data.void_reason,
     next_followup_date: null, updated_at: ts(),
   }});
+  const ctx = await _coEventContext(M, co);
+  await events.safeEmit('co.stage_changed', {
+    project_id: ctx.project_id, job_id: co.job_id, co_id: co._id, actor_id: actorId || null,
+    payload: { co_number: co.co_number, from: fromStage, to: 'voided', amount: co.estimate_amount, project_name: ctx.project_name, job_number: ctx.job_number },
+  });
   return { co_id: co._id };
 }
 
 // Reopen: voided/not_approved → submitted_co if previously submitted, else active_co.
 // Anyone can reopen (per spec Q2). Timer restarts when returning to submitted_co.
-async function reopenCO(id) {
+async function reopenCO(id, actorId) {
   const M = getModels();
   const co = await loadCO(id);
   if (!['voided', 'not_approved'].includes(co.stage)) throw new Error(`Cannot reopen CO from stage '${co.stage}'`);
+  const fromStage = co.stage;
   const target = co.was_submitted ? 'submitted_co' : 'active_co';
   const s = await getSettings();
   await M.ChangeOrder.updateOne({ _id: co._id }, { $set: {
@@ -1178,6 +1338,11 @@ async function reopenCO(id) {
     next_followup_date: target === 'submitted_co' ? addDays(today(), s.fu_recurring_days) : null,
     updated_at: ts(),
   }});
+  const ctx = await _coEventContext(M, co);
+  await events.safeEmit('co.stage_changed', {
+    project_id: ctx.project_id, job_id: co.job_id, co_id: co._id, actor_id: actorId || null,
+    payload: { co_number: co.co_number, from: fromStage, to: target, amount: co.estimate_amount, project_name: ctx.project_name, job_number: ctx.job_number },
+  });
   return { co_id: co._id, stage: target };
 }
 
