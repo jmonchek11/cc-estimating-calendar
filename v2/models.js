@@ -230,6 +230,18 @@ const ReminderSchema = new mongoose.Schema({
   created_at:  { type: String, default: ts },
 }, opts);
 
+// A dateless, freeform note — distinct from Reminder (which is a "ping me on
+// this date" tickler) and from Bid/ChangeOrder's own single `notes` field
+// (a static description). This is an append-only log anyone can add to.
+const NoteSchema = new mongoose.Schema({
+  _id:         Number,
+  parent_type: { type: String, enum: ['bid', 'change_order'], required: true },
+  parent_id:   { type: Number, required: true },
+  text:        { type: String, required: true },
+  created_by:  { type: Number, default: null },
+  created_at:  { type: String, default: ts },
+}, opts);
+
 // TeamMember is v1's ACTUAL model (not a v2-isolated copy). v1 and v2 used to
 // have independently-assigned TeamMember ids in two separate databases —
 // merged in July 2026 (v2/merge-team-ids.js) after that silently broke
@@ -307,6 +319,7 @@ function getModels() {
     Contact:     c.model('Contact', ContactSchema, 'contacts'),
     Followup:    c.model('Followup', FollowupSchema, 'followups'),
     Reminder:    c.model('Reminder', ReminderSchema, 'reminders'),
+    Note:        c.model('Note', NoteSchema, 'notes'),
     TeamMember:  V1TeamMember,
     Settings:    c.model('Settings', SettingsSchema, 'settings'),
     Counter:     c.model('Counter', CounterSchema, 'counters'),

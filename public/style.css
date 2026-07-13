@@ -1428,6 +1428,9 @@ textarea.form-input { resize: vertical; min-height: 60px; }
 }
 .cal-day:hover { border-color: var(--primary); }
 .cal-day-today { border-color: var(--primary); background: rgba(37,99,235,0.04); }
+.cal-day-holiday { background: var(--sidebar-hover-bg); opacity: 0.6; }
+.cal-day-holiday .cal-day-num { color: var(--text-muted); }
+.cal-day-holiday-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cal-day-num { font-size: 12px; font-weight: 600; color: var(--text-muted); line-height: 1.2; }
 .cal-day-num-today {
   display: inline-flex; align-items: center; justify-content: center;

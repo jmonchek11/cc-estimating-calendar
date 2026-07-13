@@ -130,6 +130,17 @@ async function actorOf(req) {
   try { return await maindb.getMember(req.session.userId); } catch { return null; }
 }
 
+// Fire assignment emails for whichever of estimator_id/salesperson_id actually
+// changed to a new, non-null person (never for the person making the change).
+// Fire-and-forget — called after the response is already sent, same pattern
+// as the award-email flow below.
+function notifyAssignmentDiff(bidId, oldBid, newData, actorId) {
+  const newEstId = newData.estimator_id != null ? Number(newData.estimator_id) : undefined;
+  if (newEstId && newEstId !== oldBid?.estimator_id) notify.notifyAssigned(bidId, newEstId, actorId, 'estimator');
+  const newSpId = newData.salesperson_id != null ? Number(newData.salesperson_id) : undefined;
+  if (newSpId && newSpId !== oldBid?.salesperson_id) notify.notifyAssigned(bidId, newSpId, actorId, 'salesperson');
+}
+
 // Audit trail — admin-only, same gate as Data Health merges (visibility
 // into everyone's activity across the team).
 router.get('/api/v2/activity', requireAdmin, async (req, res) => {
@@ -151,13 +162,23 @@ router.post('/api/v2/opportunities',          t(req => v2db.createOpportunity({ 
   async (req, r) => ({ action: 'bid.create_opportunity', summary: `Created opportunity ${await v2db.bidLabel(r.bid_id)}`, entity_type: 'bid', entity_id: r.bid_id })));
 router.post('/api/v2/bids',                   t(req => v2db.createDirectBid({ ...req.body, created_by: req.session.userId }),
   async (req, r) => ({ action: 'bid.create', summary: `Created bid ${await v2db.bidLabel(r.bid_id)}`, entity_type: 'bid', entity_id: r.bid_id })));
-router.post('/api/v2/bids/:id/start',         t(req => v2db.startBid(req.params.id, req.body, req.session.userId),
+router.post('/api/v2/bids/:id/start',         t(async req => {
+    const oldBid = await v2db.loadBid(req.params.id).catch(() => null);
+    const r = await v2db.startBid(req.params.id, req.body, req.session.userId);
+    notifyAssignmentDiff(Number(req.params.id), oldBid, req.body, req.session.userId);
+    return r;
+  },
   async (req) => ({ action: 'bid.start', summary: `Started bid ${await v2db.bidLabel(req.params.id)}`, entity_type: 'bid', entity_id: Number(req.params.id) })));
 router.post('/api/v2/bids/:id/submit',        t(req => v2db.submitBid(req.params.id, req.body, req.session.userId),
   async (req) => ({ action: 'bid.submit', summary: `Submitted bid ${await v2db.bidLabel(req.params.id)}`, entity_type: 'bid', entity_id: Number(req.params.id) })));
 
 // Admin-only generic edit for any entity: project | bid | job | change_order | bid_submission
-router.patch('/api/v2/admin/:entity/:id',     requireAdmin, t(req => v2db.adminUpdate(req.params.entity, req.params.id, req.body),
+router.patch('/api/v2/admin/:entity/:id',     requireAdmin, t(async req => {
+    const oldBid = req.params.entity === 'bid' ? await v2db.loadBid(req.params.id).catch(() => null) : null;
+    const r = await v2db.adminUpdate(req.params.entity, req.params.id, req.body);
+    if (req.params.entity === 'bid') notifyAssignmentDiff(Number(req.params.id), oldBid, req.body, req.session.userId);
+    return r;
+  },
   async (req) => {
     const label = req.params.entity === 'bid' ? await v2db.bidLabel(req.params.id)
       : req.params.entity === 'change_order' ? await v2db.coLabel(req.params.id)
@@ -186,11 +207,22 @@ router.post('/api/v2/bids/:id/close',         t(req => v2db.closeBid(req.params.
   async (req) => ({ action: 'bid.close', summary: `Closed bid ${await v2db.bidLabel(req.params.id)} — ${req.body.close_reason || 'no reason given'}`, entity_type: 'bid', entity_id: Number(req.params.id) })));
 router.post('/api/v2/bids/:id/submissions',   t(req => v2db.addSubmission(req.params.id, req.body),
   async (req) => ({ action: 'bid.add_submission', summary: `Added a submission to bid ${await v2db.bidLabel(req.params.id)}`, entity_type: 'bid', entity_id: Number(req.params.id) })));
+router.post('/api/v2/bids/:id/reactivate',    t(req => v2db.reactivateBid(req.params.id, req.body, req.session.userId),
+  async (req) => ({ action: 'bid.reactivate', summary: `Reactivated bid ${await v2db.bidLabel(req.params.id)} for a new round`, entity_type: 'bid', entity_id: Number(req.params.id) })));
 router.post('/api/v2/bids/:id/customers',     t(req => v2db.addBidCustomers(req.params.id, req.body),
   async (req) => ({ action: 'bid.add_customers', summary: `Added customer(s) to bid ${await v2db.bidLabel(req.params.id)}`, entity_type: 'bid', entity_id: Number(req.params.id) })));
-router.patch('/api/v2/bids/:id/opportunity',  t(req => v2db.updateOpportunity(req.params.id, req.body),
+router.patch('/api/v2/bids/:id/opportunity',  t(async req => {
+    const oldBid = await v2db.loadBid(req.params.id).catch(() => null);
+    const r = await v2db.updateOpportunity(req.params.id, req.body);
+    notifyAssignmentDiff(Number(req.params.id), oldBid, req.body, req.session.userId);
+    return r;
+  },
   async (req) => ({ action: 'bid.opportunity_edit', summary: `Edited opportunity ${await v2db.bidLabel(req.params.id)} (${Object.keys(req.body).join(', ')})`, entity_type: 'bid', entity_id: Number(req.params.id) })));
-router.post('/api/v2/bids/:id/sub-estimators',   t(async req => v2db.addSubEstimator(req.params.id, req.body, await actorOf(req))));
+router.post('/api/v2/bids/:id/sub-estimators',   t(async req => {
+    const r = await v2db.addSubEstimator(req.params.id, req.body, await actorOf(req));
+    if (req.body.estimator_id) notify.notifyAssigned(Number(req.params.id), Number(req.body.estimator_id), req.session.userId, 'estimator');
+    return r;
+  }));
 router.delete('/api/v2/bids/:id/sub-estimators', t(async req => v2db.removeSubEstimator(req.params.id, req.body.estimator_id, req.body.scope, await actorOf(req))));
 router.delete('/api/v2/bid-customers/:id',    t(req => v2db.removeBidCustomer(req.params.id),
   async (req, r) => ({ action: 'bid.remove_customer', summary: `Removed a customer from bid ${await v2db.bidLabel(r.bid_id)}`, entity_type: 'bid', entity_id: r.bid_id })));
@@ -248,6 +280,11 @@ router.post('/api/v2/reminders',               t(req => v2db.addReminder(req.bod
 router.put('/api/v2/reminders/:id/dismiss',    t(req => v2db.dismissReminder(req.params.id),
   (req) => ({ action: 'reminder.dismiss', summary: `Dismissed reminder #${req.params.id}`, entity_type: 'reminder', entity_id: Number(req.params.id), undo: { reminder_id: Number(req.params.id) } })));
 router.delete('/api/v2/reminders/:id',         t(req => v2db.deleteReminder(req.params.id)));
+
+// ── Notes (polymorphic — bid or change_order; dateless, separate from Reminders) ──
+router.get('/api/v2/notes',                    async (req, res) => { try { res.json(await v2db.getNotesFor(req.query.parent_type, req.query.parent_id)); } catch (e) { res.status(500).json({ error: e.message }); } });
+router.post('/api/v2/notes',                   t(req => v2db.addNote(req.body.parent_type, req.body.parent_id, req.body, req.session.userId)));
+router.delete('/api/v2/notes/:id',             t(req => v2db.deleteNote(req.params.id)));
 
 // ── Jobs ──────────────────────────────────────────────────────────────────────
 router.post('/api/v2/jobs',                   t(req => v2db.createLegacyJob({ ...req.body, created_by: req.session.userId }),

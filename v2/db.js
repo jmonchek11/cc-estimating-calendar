@@ -181,6 +181,11 @@ async function getProjectDetail(projectId) {
     $or: [{ parent_type: 'bid', parent_id: { $in: bidIds } }, { parent_type: 'change_order', parent_id: { $in: cos.map(c => c._id) } }],
   }).sort({ remind_on: 1 }).lean();
   const remindersFor = (type, id) => allReminders.filter(r => r.parent_type === type && r.parent_id === id);
+  const allNotes = await M.Note.find({
+    $or: [{ parent_type: 'bid', parent_id: { $in: bidIds } }, { parent_type: 'change_order', parent_id: { $in: cos.map(c => c._id) } }],
+  }).sort({ created_at: -1 }).lean();
+  const notesFor = (type, id) => allNotes.filter(n => n.parent_type === type && n.parent_id === id)
+    .map(n => ({ id: n._id, text: n.text, created_at: n.created_at, author: tm[n.created_by] || null }));
   const allFollowups = await M.Followup.find({
     $or: [
       { parent_type: 'bid', parent_id: { $in: bidIds } },
@@ -253,6 +258,7 @@ async function getProjectDetail(projectId) {
       .sort((a, c) => (c.followup_date || '').localeCompare(a.followup_date || ''))
       .map(f => fmtFollowup(f, tm)),
     reminders: remindersFor('bid', b._id),
+    notes_log: notesFor('bid', b._id),
   });
 
   const fmtCo = (co) => ({
@@ -277,6 +283,7 @@ async function getProjectDetail(projectId) {
       .sort((a, c) => (c.followup_date || '').localeCompare(a.followup_date || ''))
       .map(f => fmtFollowup(f, tm)),
     reminders: remindersFor('change_order', co._id),
+    notes_log: notesFor('change_order', co._id),
   });
 
   return {
@@ -332,6 +339,103 @@ function addDays(dateStr, days) {
   return d.toISOString().split('T')[0];
 }
 
+// ── Holidays + working-day math ────────────────────────────────────────────
+// All computed in UTC (Date.UTC / getUTCDay / setUTCDate throughout) so the
+// result never depends on the server's local timezone — a Date built from
+// plain Y/M/D and formatted straight back to Y/M/D via toISOString() only
+// round-trips safely if every step stays in UTC.
+function _nthWeekdayOfMonth(year, month, weekday, n) { // month 0-indexed, weekday 0=Sun
+  const d = new Date(Date.UTC(year, month, 1));
+  let count = 0;
+  while (true) {
+    if (d.getUTCDay() === weekday) { count++; if (count === n) return d; }
+    d.setUTCDate(d.getUTCDate() + 1);
+  }
+}
+function _lastWeekdayOfMonth(year, month, weekday) {
+  const d = new Date(Date.UTC(year, month + 1, 0));
+  while (d.getUTCDay() !== weekday) d.setUTCDate(d.getUTCDate() - 1);
+  return d;
+}
+function _observedWeekend(d) { // federal rule: Sat -> observed Fri, Sun -> observed Mon
+  const day = d.getUTCDay();
+  if (day === 6) { const r = new Date(d); r.setUTCDate(r.getUTCDate() - 1); return r; }
+  if (day === 0) { const r = new Date(d); r.setUTCDate(r.getUTCDate() + 1); return r; }
+  return d;
+}
+const _isoUTC = d => d.toISOString().split('T')[0];
+
+// US federal holidays (weekend-observed) plus the Friday after Thanksgiving
+// and Christmas Eve, which most construction/trades shops also close for.
+// Used both to grey out the calendar and to skip in addWorkingDays() below.
+function getHolidays(year) {
+  const dates = [];
+  const fixed = (m, day) => dates.push(_isoUTC(_observedWeekend(new Date(Date.UTC(year, m, day)))));
+  fixed(0, 1);                                            // New Year's Day
+  dates.push(_isoUTC(_nthWeekdayOfMonth(year, 0, 1, 3)));  // MLK Day — 3rd Mon of Jan
+  dates.push(_isoUTC(_nthWeekdayOfMonth(year, 1, 1, 3)));  // Presidents Day — 3rd Mon of Feb
+  dates.push(_isoUTC(_lastWeekdayOfMonth(year, 4, 1)));    // Memorial Day — last Mon of May
+  fixed(5, 19);                                            // Juneteenth
+  fixed(6, 4);                                             // Independence Day
+  dates.push(_isoUTC(_nthWeekdayOfMonth(year, 8, 1, 1)));  // Labor Day — 1st Mon of Sep
+  const thanksgiving = _nthWeekdayOfMonth(year, 10, 4, 4); // 4th Thu of Nov
+  dates.push(_isoUTC(thanksgiving));
+  const dayAfter = new Date(thanksgiving); dayAfter.setUTCDate(dayAfter.getUTCDate() + 1);
+  dates.push(_isoUTC(dayAfter));                           // Day after Thanksgiving — always a Friday
+  // Christmas Eve is a bonus closure day, not a federal holiday with a legal
+  // "observed" substitution rule — use the literal date. If it lands on a
+  // weekend it's already covered by the separate weekend check, so it never
+  // needs to steal a weekday from Christmas Day's own observed shift (that
+  // collision is what caused Dec 24 to show as both "Eve" and "Day" for 2027).
+  dates.push(_isoUTC(new Date(Date.UTC(year, 11, 24))));   // Christmas Eve
+  fixed(11, 25);                                            // Christmas Day
+  return [...new Set(dates)].sort();
+}
+// Small range is plenty — the calendar view only ever browses a few years out.
+function getHolidaysAround(centerYear) {
+  return [centerYear - 1, centerYear, centerYear + 1, centerYear + 2].flatMap(getHolidays);
+}
+// Same dates as getHolidays(), labeled — for the calendar's grey-out tooltip.
+function getHolidayNames(year) {
+  const map = {};
+  const fixed = (m, day, name) => { map[_isoUTC(_observedWeekend(new Date(Date.UTC(year, m, day))))] = name; };
+  fixed(0, 1, "New Year's Day");
+  map[_isoUTC(_nthWeekdayOfMonth(year, 0, 1, 3))] = 'MLK Day';
+  map[_isoUTC(_nthWeekdayOfMonth(year, 1, 1, 3))] = "Presidents Day";
+  map[_isoUTC(_lastWeekdayOfMonth(year, 4, 1))] = 'Memorial Day';
+  fixed(5, 19, 'Juneteenth');
+  fixed(6, 4, 'Independence Day');
+  map[_isoUTC(_nthWeekdayOfMonth(year, 8, 1, 1))] = 'Labor Day';
+  const thanksgiving = _nthWeekdayOfMonth(year, 10, 4, 4);
+  map[_isoUTC(thanksgiving)] = 'Thanksgiving';
+  const dayAfter = new Date(thanksgiving); dayAfter.setUTCDate(dayAfter.getUTCDate() + 1);
+  map[_isoUTC(dayAfter)] = 'Day after Thanksgiving';
+  map[_isoUTC(new Date(Date.UTC(year, 11, 24)))] = 'Christmas Eve';
+  fixed(11, 25, 'Christmas Day');
+  return map;
+}
+function getHolidayNamesAround(centerYear) {
+  return Object.assign({}, ...[centerYear - 1, centerYear, centerYear + 1, centerYear + 2].map(getHolidayNames));
+}
+function isWeekendOrHoliday(dateStr) {
+  const day = new Date(dateStr + 'T00:00:00Z').getUTCDay();
+  if (day === 0 || day === 6) return true;
+  return getHolidays(Number(dateStr.slice(0, 4))).includes(dateStr);
+}
+// Steps N *working* days (skipping weekends + holidays) forward from dateStr —
+// used for follow-up next-date scheduling so a timer never lands on a day
+// nobody's in the office.
+function addWorkingDays(dateStr, days) {
+  const step = Number(days) >= 0 ? 1 : -1;
+  let remaining = Math.abs(Number(days));
+  let d = new Date(dateStr + 'T00:00:00Z');
+  while (remaining > 0) {
+    d.setUTCDate(d.getUTCDate() + step);
+    if (!isWeekendOrHoliday(_isoUTC(d))) remaining--;
+  }
+  return _isoUTC(d);
+}
+
 async function getSettings() {
   const { Settings } = getModels();
   return (await Settings.findById('company').lean()) || { fu_initial_days: 3, fu_recurring_days: 7 };
@@ -366,6 +470,7 @@ async function getMeta() {
   return {
     companies: companies.map(c => ({ id: c._id, name: c.name })),
     team: team.map(t => ({ id: t._id, name: t.name, initials: t.initials, role: t.role })),
+    holidays: getHolidayNamesAround(new Date().getUTCFullYear()),
   };
 }
 
@@ -822,7 +927,7 @@ async function submitBid(id, data, actorId) {
       bid_id: bid._id, company_id: companyId,
       amount: Number(data.amount), date_submitted: data.date_submitted, approved_by: data.approved_by,
       submission_type: 'initial', notes: data.notes || null, is_current: 1,
-      outcome: 'pending', next_followup_date: addDays(data.date_submitted, s.fu_initial_days),
+      outcome: 'pending', next_followup_date: addWorkingDays(data.date_submitted, s.fu_initial_days),
     });
   }
 
@@ -871,10 +976,31 @@ async function addSubmission(id, data) {
     bid_id: bid._id, company_id: companyId,
     amount: Number(data.amount), date_submitted: data.date_submitted, approved_by: data.approved_by,
     submission_type: data.submission_type, notes: data.notes || null, is_current: 1,
-    outcome: 'pending', next_followup_date: addDays(data.date_submitted, s.fu_initial_days),
+    outcome: 'pending', next_followup_date: addWorkingDays(data.date_submitted, s.fu_initial_days),
   });
   await recomputeBidHeadline(bid._id);
   await recomputeBidFollowup(bid._id);
+  return { bid_id: bid._id };
+}
+
+// ── submitted → active_bid ("Reactivate") — a revision or best-and-final
+// round needs its own due date and needs to show back up on the calendar /
+// estimator dashboard, which only happens for active_bid-stage bids. Doesn't
+// touch existing BidSubmission rows — those stay as history; add a fresh
+// submission (addSubmission, above) once the revised numbers are ready.
+async function reactivateBid(id, data, actorId) {
+  const M = getModels();
+  const bid = await loadBid(id);
+  if (bid.stage !== 'submitted') throw new Error(`Cannot reactivate a bid from stage '${bid.stage}'`);
+  require_(data, ['due_date']);
+  await M.Bid.updateOne({ _id: bid._id }, { $set: {
+    stage: 'active_bid', due_date: data.due_date, next_followup_date: null, updated_at: ts(),
+  }});
+  const proj = await M.Project.findById(bid.project_id).lean();
+  await events.safeEmit('bid.stage_changed', {
+    project_id: bid.project_id, bid_id: bid._id, actor_id: actorId || null,
+    payload: { from: 'submitted', to: 'active_bid', project_name: proj?.name || null },
+  });
   return { bid_id: bid._id };
 }
 
@@ -1042,7 +1168,7 @@ async function logFollowupV2(data) {
   require_(data, ['parent_type', 'parent_id', 'contact_method', 'notes']);
   const s = await getSettings();
   const outcome = data.outcome || 'no_decision';
-  const next = outcome === 'no_decision' ? addDays(today(), s.fu_recurring_days) : null;
+  const next = outcome === 'no_decision' ? addWorkingDays(today(), s.fu_recurring_days) : null;
 
   const fu = await M.Followup.create({
     _id: await nextId('followups'),
@@ -1114,6 +1240,26 @@ async function getDueReminders() {
 async function markReminderEmailed(id) {
   const M = getModels();
   await M.Reminder.updateOne({ _id: Number(id) }, { $set: { emailed: 1 } });
+}
+
+// Notes — dateless, freeform, append-only log on a bid/opportunity or change
+// order. Distinct from Reminder (a dated tickler) and from the entity's own
+// single `notes` description field.
+async function addNote(parentType, parentId, { text }, actorId) {
+  if (!text || !text.trim()) throw new Error('Note text is required');
+  const M = getModels();
+  const id = await nextId('notes');
+  await M.Note.create({ _id: id, parent_type: parentType, parent_id: Number(parentId), text: text.trim(), created_by: actorId || null });
+  return { id };
+}
+async function deleteNote(id) {
+  const M = getModels();
+  await M.Note.deleteOne({ _id: Number(id) });
+  return { ok: true };
+}
+async function getNotesFor(parentType, parentId) {
+  const M = getModels();
+  return M.Note.find({ parent_type: parentType, parent_id: Number(parentId) }).sort({ created_at: -1 }).lean();
 }
 
 // Job # format is Foundation's: digits only, 5-6 chars (customer # + 3-digit
@@ -1255,7 +1401,7 @@ async function submitCO(id, data, actorId) {
   if (co.stage !== 'active_co') throw new Error(`Cannot submit CO from stage '${co.stage}'`);
   require_(data, ['estimate_amount', 'date_submitted', 'approved_by']);
   const s = await getSettings();
-  const next = addDays(data.date_submitted, s.fu_initial_days);
+  const next = addWorkingDays(data.date_submitted, s.fu_initial_days);
   await M.ChangeOrder.updateOne({ _id: co._id }, { $set: {
     stage: 'submitted_co', was_submitted: 1,
     estimate_amount: Number(data.estimate_amount),
@@ -1335,7 +1481,7 @@ async function reopenCO(id, actorId) {
   await M.ChangeOrder.updateOne({ _id: co._id }, { $set: {
     stage: target,
     void_reason: null, date_not_approved: null, not_approved_notes: null,
-    next_followup_date: target === 'submitted_co' ? addDays(today(), s.fu_recurring_days) : null,
+    next_followup_date: target === 'submitted_co' ? addWorkingDays(today(), s.fu_recurring_days) : null,
     updated_at: ts(),
   }});
   const ctx = await _coEventContext(M, co);
@@ -2144,8 +2290,8 @@ async function applyCleanupOverrides() {
 module.exports = {
   getProjects, getJobsPicker, getProjectDetail, getMeta, getDashboard, getBidList, getCoList, getSearchResults, getDataHealth, mergeProjects, mergeCompanies, mergeJobs,
   dismissDuplicates, deleteEmptyProject, applyCleanupOverrides, removeOverride,
-  recomputeBidHeadline, recomputeBidFollowup, nextId,
-  createOpportunity, createDirectBid, startBid, submitBid, addSubmission, addBidCustomers, updateOpportunity, adminUpdate,
+  recomputeBidHeadline, recomputeBidFollowup, nextId, getHolidays, getHolidaysAround, getHolidayNames, getHolidayNamesAround, addWorkingDays, isWeekendOrHoliday,
+  createOpportunity, createDirectBid, startBid, submitBid, addSubmission, reactivateBid, addBidCustomers, updateOpportunity, adminUpdate,
   getContacts, getContactDetail, createContact, updateContact, deleteContact, getContactBids, getCompanyBids,
   addBidCustomerContact, removeBidCustomerContact,
   awardSubmission, notAwardSubmission, closeBid, logFollowupV2,
@@ -2153,10 +2299,11 @@ module.exports = {
   createChangeOrder, submitCO, approveCO, notApproveCO, voidCO, reopenCO, reviseCO,
   _norm, resolveCompanyByName, ensureBidCustomer, teamMap,
   addReminder, dismissReminder, deleteReminder, getRemindersFor, getDueReminders, markReminderEmailed,
+  addNote, deleteNote, getNotesFor,
   getDigest,
   getTeamV2, createTeamMemberV2, updateTeamMemberV2, updateSettingsV2, getSettings,
   removeBidCustomer, createCompanyV2, deleteBid, addSubEstimator, removeSubEstimator,
   updateBidDueDate, updateCoDueDate,
-  logActivity, getActivityLog, undoActivity, bidLabel, coLabel,
+  logActivity, getActivityLog, undoActivity, bidLabel, coLabel, loadBid,
   mergeContacts, deleteCompany, deleteChangeOrder,
 };

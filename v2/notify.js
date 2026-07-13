@@ -46,6 +46,22 @@ async function bidEmailShape(bidId) {
   };
 }
 
+// Someone was just added/changed as estimator, salesperson, or sub-estimator
+// on a bid — let them know, with a link back into the app. Never emails the
+// person who made the change (assigning yourself isn't news).
+async function notifyAssigned(bidId, recipientId, actorId, role) {
+  try {
+    if (!recipientId || Number(recipientId) === Number(actorId)) return;
+    const recipient = await emailForV2Member(recipientId);
+    if (!recipient?.email) return;
+    const shape = await bidEmailShape(bidId);
+    if (!shape) return;
+    const actor = actorId ? await maindb.getMember(actorId) : null;
+    const { subject, html } = mailer.emailAssigned(shape, recipient.name, actor?.name || 'A team member', role);
+    await mailer.sendMail({ to: recipient.email, subject, html });
+  } catch (e) { console.error('[v2 notify] assigned email failed:', e.message); }
+}
+
 async function notifyAwarded(bidId, actorName) {
   try {
     const shape = await bidEmailShape(bidId);
@@ -77,4 +93,4 @@ async function emailShapeForReminder(reminder) {
   return reminder.parent_type === 'change_order' ? coEmailShape(reminder.parent_id) : bidEmailShape(reminder.parent_id);
 }
 
-module.exports = { bidEmailShape, coEmailShape, emailShapeForReminder, notifyAwarded, emailForV2Member };
+module.exports = { bidEmailShape, coEmailShape, emailShapeForReminder, notifyAwarded, notifyAssigned, emailForV2Member };
