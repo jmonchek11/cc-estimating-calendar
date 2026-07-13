@@ -1,5 +1,7 @@
 # CC / LIS Estimating Calendar — Claude Persistent Memory
 
+> This app is part of the Liberty platform — read docs/PLATFORM_CONTEXT.md before changing auth, events, or anything touching the liberty-core database.
+
 ## Project Purpose
 A full-stack internal web app for the Liberty Integrated Solutions estimating/sales team to track bids, change orders, projects, and follow-ups — replacing the weekly Monday morning status meeting.
 
