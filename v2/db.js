@@ -983,25 +983,38 @@ async function addSubmission(id, data) {
   return { bid_id: bid._id };
 }
 
-// ── submitted → active_bid ("Reactivate") — a revision or best-and-final
-// round needs its own due date and needs to show back up on the calendar /
-// estimator dashboard, which only happens for active_bid-stage bids. Doesn't
-// touch existing BidSubmission rows — those stay as history; add a fresh
-// submission (addSubmission, above) once the revised numbers are ready.
+// ── (submitted | closed) → active_bid/opportunity ("Reactivate") ──────────────
+// From 'submitted': a revision or best-and-final round needs its own due date
+// and needs to show back up on the calendar/estimator dashboard, which only
+// happens for active_bid-stage bids. Doesn't touch existing BidSubmission
+// rows — those stay as history; add a fresh submission (addSubmission,
+// above) once the revised numbers are ready.
+// From 'closed': the customer came back after all. A closed bid can have
+// been closed while still just an opportunity (no bid_number yet) or after
+// it was already started — reactivate back to whichever of those it came
+// from rather than forcing it through "Start Bid" again. Always clears the
+// closed_date/closed_approved_by/close_reason bookkeeping.
 async function reactivateBid(id, data, actorId) {
   const M = getModels();
   const bid = await loadBid(id);
-  if (bid.stage !== 'submitted') throw new Error(`Cannot reactivate a bid from stage '${bid.stage}'`);
-  require_(data, ['due_date']);
-  await M.Bid.updateOne({ _id: bid._id }, { $set: {
-    stage: 'active_bid', due_date: data.due_date, next_followup_date: null, updated_at: ts(),
-  }});
+  if (!['submitted', 'closed'].includes(bid.stage)) throw new Error(`Cannot reactivate a bid from stage '${bid.stage}'`);
+  const fromStage = bid.stage;
+  const target = fromStage === 'closed' && !bid.bid_number ? 'opportunity' : 'active_bid';
+  const upd = { stage: target, next_followup_date: null, updated_at: ts() };
+  if (fromStage === 'closed') Object.assign(upd, { closed_date: null, closed_approved_by: null, close_reason: null });
+  if (target === 'active_bid') {
+    require_(data, ['due_date']);
+    upd.due_date = data.due_date;
+  } else if (data.due_date) {
+    upd.due_date = data.due_date;
+  }
+  await M.Bid.updateOne({ _id: bid._id }, { $set: upd });
   const proj = await M.Project.findById(bid.project_id).lean();
   await events.safeEmit('bid.stage_changed', {
     project_id: bid.project_id, bid_id: bid._id, actor_id: actorId || null,
-    payload: { from: 'submitted', to: 'active_bid', project_name: proj?.name || null },
+    payload: { from: fromStage, to: target, project_name: proj?.name || null },
   });
-  return { bid_id: bid._id };
+  return { bid_id: bid._id, stage: target };
 }
 
 // ── Admin: edit any field on any entity (admin view only) ─────────────────────

@@ -1469,6 +1469,10 @@ function bidActions(b) {
       workflow = `<button class="v2-btn amber" onclick="actAddSubmission(${b.id})">+ Add Submission</button>
                   <button class="v2-btn outline" onclick="actAddCustomers(${b.id})">+ Customer</button>
                   <button class="v2-btn blue" onclick="actReactivateBid(${b.id})">↻ Reactivate</button>`;
+    } else if (b.stage === 'closed') {
+      // The customer came back after all — reopens to wherever it was closed
+      // from (opportunity if it never got a bid #, active_bid otherwise).
+      workflow = `<button class="v2-btn blue" onclick="actReactivateBid(${b.id})">↻ Reactivate</button>`;
     }
   }
   const adminBtn = (CURRENT_USER?.is_admin && BID_EDITABLE_STAGES.includes(b.stage))
@@ -2001,8 +2005,13 @@ function actAddSubmission(bidId) {
 // active_bid-stage bids by due date). Existing submissions are left alone
 // as history; log the revised numbers via "+ Add Submission" once ready.
 function actReactivateBid(bidId) {
+  const b = DETAIL_CACHE[OPEN_PROJECT]?.bids.find(x => x.id === bidId) || {};
+  // A bid closed before it ever got a bid # goes back to an opportunity (no
+  // due date required there); anything else goes back to active_bid, which
+  // does need one so it shows up on the calendar/dashboard again.
+  const backToOpportunity = b.stage === 'closed' && !b.bid_number;
   showForm('↻ Reactivate Bid', [
-    { id: 'due_date', label: 'New Due Date', type: 'date', required: true },
+    { id: 'due_date', label: backToOpportunity ? 'Due Date (optional)' : 'New Due Date', type: 'date', required: !backToOpportunity },
   ], data => api('POST', `/api/v2/bids/${bidId}/reactivate`, data), 'Reactivate', 'blue');
 }
 
