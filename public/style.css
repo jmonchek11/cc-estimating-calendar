@@ -50,7 +50,17 @@ body {
 
 #main {
   flex: 1;
+  min-width: 0;
   overflow-y: auto;
+  /* Reserve the scrollbar's track width always, not just when a page is
+     tall enough to need it. Without this, a dense/busy month (needs a
+     scrollbar) and a light month (doesn't) get a slightly different
+     available content width, so the 7-column calendar grid computed
+     for one month doesn't line up with the header row computed at a
+     different width — visible as day cells drifting past the app edge
+     on smaller screens or at higher zoom, where the scrollbar's ~15px
+     is a bigger fraction of the available width. */
+  scrollbar-gutter: stable;
   padding: 24px;
 }
 
@@ -1418,11 +1428,11 @@ textarea.form-input { resize: vertical; min-height: 60px; }
   color: var(--text); font-family: inherit; cursor: pointer; margin-left: auto;
 }
 .cal-hdr { display: grid; grid-template-columns: repeat(7,1fr); margin-bottom: 3px; }
-.cal-hdr-cell { text-align:center; font-size:12px; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:.05em; padding:8px 0; }
+.cal-hdr-cell { text-align:center; font-size:12px; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:.05em; padding:8px 0; min-width: 0; }
 .cal-grid { display: grid; grid-template-columns: repeat(7,1fr); gap: 3px; }
-.cal-day-empty { min-height: 80px; border-radius: 6px; background: var(--sidebar-hover-bg); opacity: 0.25; }
+.cal-day-empty { min-height: 80px; min-width: 0; border-radius: 6px; background: var(--sidebar-hover-bg); opacity: 0.25; }
 .cal-day {
-  min-height: 80px; padding: 5px; border-radius: 6px;
+  min-height: 80px; min-width: 0; padding: 5px; border-radius: 6px;
   background: var(--card-bg); border: 1px solid var(--border);
   display: flex; flex-direction: column; gap: 2px; transition: border-color 0.15s;
 }
@@ -1430,14 +1440,14 @@ textarea.form-input { resize: vertical; min-height: 60px; }
 .cal-day-today { border-color: var(--primary); background: rgba(37,99,235,0.04); }
 .cal-day-holiday { background: var(--sidebar-hover-bg); opacity: 0.6; }
 .cal-day-holiday .cal-day-num { color: var(--text-muted); }
-.cal-day-holiday-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cal-day-holiday-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .cal-day-num { font-size: 12px; font-weight: 600; color: var(--text-muted); line-height: 1.2; }
 .cal-day-num-today {
   display: inline-flex; align-items: center; justify-content: center;
   width: 22px; height: 22px; border-radius: 50%;
   background: var(--primary); color: #fff; font-size: 12px; font-weight: 700;
 }
-.cal-day-chips { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+.cal-day-chips { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
 .cal-day-clickable { cursor: pointer; }
 .cal-chip {
   display: flex; align-items: center; gap: 3px; padding: 2px 5px;
