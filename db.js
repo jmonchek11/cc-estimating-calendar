@@ -975,21 +975,76 @@ async function submitIdea(data) {
   return { id };
 }
 
-async function getIdeas() {
-  const ideas = await Idea.find({}).sort({ created_at: -1 }).lean();
+// Ideas/issues are visible to every logged-in user (not just admins) — the
+// whole point of voting is that people can see what's already been
+// suggested and back it instead of filing a duplicate. Only status changes
+// stay admin-only (enforced at the route level).
+async function getIdeas(viewerId) {
+  const { IDEA_TERMINAL_STATUSES } = require('./models/Idea');
+  const ideas = await Idea.find({}).lean();
   const teamMap = {};
   (await TeamMember.find({}).lean()).forEach(m => { teamMap[m._id] = m; });
-  return ideas.map(i => ({
-    id: i._id, type: i.type, title: i.title, body: i.body,
-    page: i.page || null,
-    status: i.status, created_at: i.created_at,
-    submitted_by_name:     i.submitted_by && teamMap[i.submitted_by] ? teamMap[i.submitted_by].name : null,
-    submitted_by_initials: i.submitted_by && teamMap[i.submitted_by] ? teamMap[i.submitted_by].initials : null,
-  }));
+  const nameFor = uid => uid && teamMap[uid] ? teamMap[uid].name : (uid ? `#${uid}` : 'Anonymous');
+
+  const shaped = ideas.map(i => {
+    const votes = i.votes instanceof Map ? Object.fromEntries(i.votes) : (i.votes || {});
+    const score = Object.values(votes).reduce((s, v) => s + v, 0);
+    return {
+      id: i._id, type: i.type, title: i.title, body: i.body,
+      page: i.page || null,
+      status: i.status, created_at: i.created_at, updated_at: i.updated_at,
+      submitted_by_name:     i.submitted_by && teamMap[i.submitted_by] ? teamMap[i.submitted_by].name : null,
+      submitted_by_initials: i.submitted_by && teamMap[i.submitted_by] ? teamMap[i.submitted_by].initials : null,
+      score,
+      my_vote: viewerId ? (votes[String(viewerId)] || 0) : 0,
+      comments: (i.comments || []).map(c => ({
+        id: c._id, text: c.text, created_at: c.created_at,
+        user_name: nameFor(c.user_id),
+      })).sort((a, b) => (a.created_at || '').localeCompare(b.created_at || '')),
+      is_terminal: IDEA_TERMINAL_STATUSES.includes(i.status),
+    };
+  });
+
+  // Active items first (highest score, then newest), terminal items last
+  // (most recently resolved first) — see models/Idea.js for the split.
+  const active = shaped.filter(i => !i.is_terminal)
+    .sort((a, b) => b.score - a.score || (b.created_at || '').localeCompare(a.created_at || ''));
+  const terminal = shaped.filter(i => i.is_terminal)
+    .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''));
+  return [...active, ...terminal];
 }
 
 async function updateIdeaStatus(id, status) {
-  await Idea.findByIdAndUpdate(Number(id), { status, updated_at: nowStr() });
+  const { IDEA_STATUSES } = require('./models/Idea');
+  if (!IDEA_STATUSES.includes(status)) throw new Error(`Invalid status '${status}'`);
+  const before = await Idea.findById(Number(id)).lean();
+  if (!before) throw new Error('Idea not found');
+  await Idea.updateOne({ _id: Number(id) }, { status, updated_at: nowStr() });
+  return { id: Number(id), from: before.status, to: status, submitted_by: before.submitted_by, title: before.title, type: before.type };
+}
+
+// value: 1 (upvote), -1 (downvote), or 0 (remove my vote)
+async function voteIdea(id, userId, value) {
+  const v = Number(value);
+  if (![1, -1, 0].includes(v)) throw new Error('Invalid vote value');
+  const key = `votes.${userId}`;
+  if (v === 0) await Idea.updateOne({ _id: Number(id) }, { $unset: { [key]: '' } });
+  else await Idea.updateOne({ _id: Number(id) }, { $set: { [key]: v } });
+  const idea = await Idea.findById(Number(id)).lean();
+  if (!idea) throw new Error('Idea not found');
+  const votes = idea.votes instanceof Map ? Object.fromEntries(idea.votes) : (idea.votes || {});
+  return { id: Number(id), score: Object.values(votes).reduce((s, x) => s + x, 0), my_vote: v };
+}
+
+async function addIdeaComment(id, userId, text) {
+  const clean = String(text || '').trim();
+  if (!clean) throw new Error('Comment text is required');
+  const comment = { user_id: userId || null, text: clean, created_at: nowStr() };
+  const r = await Idea.findByIdAndUpdate(Number(id), { $push: { comments: comment } }, { new: true }).lean();
+  if (!r) throw new Error('Idea not found');
+  const member = userId ? await getMember(userId) : null;
+  const added = r.comments[r.comments.length - 1];
+  return { id: added._id, text: added.text, created_at: added.created_at, user_name: member?.name || 'Anonymous' };
 }
 
 // ── Settings ──────────────────────────────────────────────────────────────────
@@ -1868,7 +1923,7 @@ module.exports = {
   getPropagatableCustomersByJobNum, applyPropagateCustomersByJobNum,
   addIgnoredPair, getIgnoredPairs,
   heartbeat, getOnlineUsers,
-  submitIdea, getIdeas, updateIdeaStatus,
+  submitIdea, getIdeas, updateIdeaStatus, voteIdea, addIdeaComment,
   getEstimatorBids,
   savePhase, getLinkedCOs, linkCOToParent, checkDuplicateBidNumber,
   getSettings, updateSettings,

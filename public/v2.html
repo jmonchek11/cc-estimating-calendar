@@ -3158,34 +3158,58 @@ const IDEA_PAGE_NAMES = {
   projects: 'Projects', contacts: 'Contacts', health: 'Data Health', history: 'History',
   settings: 'Settings', ideas: 'Ideas & Issues',
 };
+// Visible to everyone (not just admins) — the whole point of voting is that
+// people can see what's already been suggested and back it instead of
+// filing a duplicate. IDEAS_COMMENTS_OPEN tracks which threads are expanded
+// across re-renders (voting/commenting re-fetches + rebuilds this modal).
+let IDEAS_CACHE = [];
+const IDEAS_COMMENTS_OPEN = new Set();
+const IDEA_STATUS_LABEL = { new: 'New', reviewed: 'Reviewed', done: 'Done', wontfix: "Won't Fix" };
+const IDEA_TYPE_ICON = t => t === 'issue' ? '🐛' : '💡';
+
+function ideaCardHtml(i, isAdmin) {
+  const upActive = i.my_vote === 1, downActive = i.my_vote === -1;
+  const done = i.is_terminal;
+  const openComments = IDEAS_COMMENTS_OPEN.has(i.id);
+  return `
+    <div style="display:flex;gap:10px;padding:10px 0;border-bottom:1px solid #f1f5f9;${done ? 'opacity:0.55' : ''}">
+      <div style="display:flex;flex-direction:column;align-items:center;flex-shrink:0;width:28px">
+        <button onclick="voteOnIdea(${i.id},1)" style="border:none;background:none;cursor:pointer;font-size:13px;padding:1px;color:${upActive ? '#2563eb' : 'var(--text-muted)'}" title="Upvote">▲</button>
+        <div style="font-size:12px;font-weight:700;color:var(--text)">${i.score}</div>
+        <button onclick="voteOnIdea(${i.id},-1)" style="border:none;background:none;cursor:pointer;font-size:13px;padding:1px;color:${downActive ? '#dc2626' : 'var(--text-muted)'}" title="Downvote">▼</button>
+      </div>
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:flex-start;gap:8px">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:13px;font-weight:600;${done ? 'text-decoration:line-through' : ''}">${IDEA_TYPE_ICON(i.type)} ${esc(i.title)}</div>
+            ${i.body ? `<div style="font-size:12px;color:var(--text-muted);margin-top:2px">${esc(i.body)}</div>` : ''}
+            <div style="font-size:11px;color:var(--text-muted);margin-top:4px">
+              ${i.submitted_by_name ? esc(i.submitted_by_name) : 'Anonymous'} · ${fmtD((i.created_at || '').slice(0, 10))}
+              ${i.page ? ` · <span style="background:#f1f5f9;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:600">${esc(IDEA_PAGE_NAMES[i.page] || i.page)}</span>` : ''}
+              · <span style="background:#f1f5f9;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:600">${IDEA_STATUS_LABEL[i.status]}</span>
+            </div>
+          </div>
+          ${isAdmin ? `<select style="font-size:11px;border-radius:4px;padding:2px 4px;border:1px solid var(--border);cursor:pointer;flex-shrink:0" onchange="setIdeaStatus(${i.id}, this.value)">
+            ${['new', 'reviewed', 'done', 'wontfix'].map(s => `<option value="${s}" ${i.status === s ? 'selected' : ''}>${IDEA_STATUS_LABEL[s]}</option>`).join('')}
+          </select>` : ''}
+        </div>
+        <a href="#" onclick="event.preventDefault();toggleIdeaComments(${i.id})" style="font-size:11px;color:#2563eb;display:inline-block;margin-top:4px">💬 ${i.comments.length} comment${i.comments.length === 1 ? '' : 's'}</a>
+        ${openComments ? `
+          <div style="margin-top:6px;padding:8px;background:var(--sidebar-hover-bg);border-radius:6px">
+            ${i.comments.map(c => `<div style="font-size:12px;margin-bottom:6px"><strong>${esc(c.user_name)}</strong> <span style="color:var(--text-muted);font-size:11px">${fmtHistoryTs(c.created_at)}</span><div>${esc(c.text)}</div></div>`).join('') || '<div style="font-size:12px;color:var(--text-muted)">No comments yet.</div>'}
+            <div style="display:flex;gap:6px;margin-top:6px">
+              <input id="idea-comment-${i.id}" type="text" placeholder="Add a comment…" style="flex:1;font-size:12px;padding:5px 8px;border:1px solid var(--border);border-radius:4px" onkeydown="if(event.key==='Enter')postIdeaComment(${i.id})">
+              <button class="v2-btn blue" style="padding:4px 10px;font-size:11px" onclick="postIdeaComment(${i.id})">Post</button>
+            </div>
+          </div>` : ''}
+      </div>
+    </div>`;
+}
+
 async function openIdeasModal() {
   const isAdmin = !!CURRENT_USER?.is_admin;
-  let ideas = [];
-  if (isAdmin) { try { ideas = await api('GET', '/api/ideas'); } catch { ideas = []; } }
-  const statusLabel = s => ({ new: 'New', reviewed: 'Reviewed', done: 'Done', wontfix: "Won't Fix" }[s] || s);
-  const typeIcon = t => t === 'issue' ? '🐛' : '💡';
-
-  const adminInbox = isAdmin ? `
-    <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px">
-      <div style="font-size:13px;font-weight:700;margin-bottom:8px">📥 Submitted (${ideas.length})</div>
-      ${ideas.length ? ideas.map(i => `
-        <div style="padding:8px 0;border-bottom:1px solid #f1f5f9">
-          <div style="display:flex;align-items:flex-start;gap:8px">
-            <span style="font-size:16px;flex-shrink:0">${typeIcon(i.type)}</span>
-            <div style="flex:1;min-width:0">
-              <div style="font-size:13px;font-weight:600">${esc(i.title)}</div>
-              ${i.body ? `<div style="font-size:12px;color:var(--text-muted);margin-top:2px">${esc(i.body)}</div>` : ''}
-              <div style="font-size:11px;color:var(--text-muted);margin-top:4px">
-                ${i.submitted_by_name ? esc(i.submitted_by_name) : 'Anonymous'} · ${fmtD((i.created_at || '').slice(0, 10))}
-                ${i.page ? ` · <span style="background:#f1f5f9;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:600">${esc(IDEA_PAGE_NAMES[i.page] || i.page)}</span>` : ''}
-              </div>
-            </div>
-            <select style="font-size:11px;border-radius:4px;padding:2px 4px;border:1px solid var(--border);cursor:pointer;flex-shrink:0" onchange="updateIdeaStatus(${i.id}, this.value)">
-              ${['new', 'reviewed', 'done', 'wontfix'].map(s => `<option value="${s}" ${i.status === s ? 'selected' : ''}>${statusLabel(s)}</option>`).join('')}
-            </select>
-          </div>
-        </div>`).join('') : '<div style="font-size:13px;color:var(--text-muted)">No submissions yet.</div>'}
-    </div>` : '';
+  try { IDEAS_CACHE = await api('GET', '/api/ideas'); } catch { IDEAS_CACHE = []; }
+  const firstTerminalIdx = IDEAS_CACHE.findIndex(i => i.is_terminal);
 
   document.getElementById('v2-form-overlay')?.remove();
   const ov = document.createElement('div');
@@ -3193,10 +3217,10 @@ async function openIdeasModal() {
   ov.onclick = e => { if (e.target === ov) ov.remove(); };
   const currentPage = (location.hash || '#dashboard').replace('#', '').split('/')[0];
   ov.innerHTML = `
-    <div class="v2-modal" style="max-width:480px;max-height:85vh;overflow-y:auto">
+    <div class="v2-modal" style="max-width:520px;max-height:85vh;overflow-y:auto">
       <div class="v2-modal-hd">💡 Ideas &amp; Issues<button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">✕</button></div>
       <div class="v2-modal-bd">
-        <p style="font-size:13px;color:var(--text-muted);margin:0 0 12px">Have an idea to improve the app, or spotted something broken? Send it straight to the admin.</p>
+        <p style="font-size:13px;color:var(--text-muted);margin:0 0 12px">Have an idea to improve the app, or spotted something broken? Upvote an existing one below, or add your own.</p>
         <div class="v2-field"><label>Type</label>
           <div style="display:flex;gap:14px">
             <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="idea-type" value="idea" checked> 💡 Idea / Enhancement</label>
@@ -3212,7 +3236,10 @@ async function openIdeasModal() {
         <div class="v2-field"><label>Title <span class="req">*</span></label><input id="idea-title" type="text" placeholder="One line summary…"></div>
         <div class="v2-field"><label>Details</label><textarea id="idea-body" rows="3" placeholder="Any extra context, steps to reproduce, etc."></textarea></div>
         <div style="display:flex;justify-content:flex-end;margin-top:6px"><button class="v2-btn blue" onclick="submitIdea()">Submit</button></div>
-        ${adminInbox}
+        <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px">
+          <div style="font-size:13px;font-weight:700;margin-bottom:4px">📥 All Submissions (${IDEAS_CACHE.length})</div>
+          ${IDEAS_CACHE.length ? IDEAS_CACHE.map((i, idx) => (idx === firstTerminalIdx ? '<div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin-top:10px;padding-top:8px;border-top:1px dashed var(--border)">Resolved</div>' : '') + ideaCardHtml(i, isAdmin)).join('') : '<div style="font-size:13px;color:var(--text-muted)">No submissions yet.</div>'}
+        </div>
       </div>
     </div>`;
   document.body.appendChild(ov);
@@ -3225,16 +3252,36 @@ async function submitIdea() {
   const page = document.getElementById('idea-page')?.value || null;
   try {
     await api('POST', '/api/ideas', { type, title, body, page });
-    document.getElementById('v2-form-overlay')?.remove();
     const toast = document.createElement('div');
     toast.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#166534;color:white;padding:10px 20px;border-radius:8px;font-size:13px;font-weight:600;z-index:9999';
     toast.textContent = '✓ Submitted — thanks!';
     document.body.appendChild(toast);
     setTimeout(() => toast.remove(), 3000);
+    await openIdeasModal();
   } catch (e) { alert('Failed: ' + e.message); }
 }
-async function updateIdeaStatus(id, status) {
-  try { await api('PUT', `/api/ideas/${id}`, { status }); } catch (e) { alert(e.message); }
+async function setIdeaStatus(id, status) {
+  try { await api('PUT', `/api/ideas/${id}`, { status }); await openIdeasModal(); } catch (e) { alert(e.message); }
+}
+async function voteOnIdea(id, value) {
+  const idea = IDEAS_CACHE.find(i => i.id === id);
+  const next = idea && idea.my_vote === value ? 0 : value; // clicking your own vote again un-votes
+  try { await api('POST', `/api/ideas/${id}/vote`, { value: next }); await openIdeasModal(); }
+  catch (e) { alert('Failed: ' + e.message); }
+}
+function toggleIdeaComments(id) {
+  if (IDEAS_COMMENTS_OPEN.has(id)) IDEAS_COMMENTS_OPEN.delete(id); else IDEAS_COMMENTS_OPEN.add(id);
+  openIdeasModal();
+}
+async function postIdeaComment(id) {
+  const input = document.getElementById(`idea-comment-${id}`);
+  const text = input?.value.trim();
+  if (!text) return;
+  try {
+    await api('POST', `/api/ideas/${id}/comments`, { text });
+    IDEAS_COMMENTS_OPEN.add(id);
+    await openIdeasModal();
+  } catch (e) { alert('Failed: ' + e.message); }
 }
 
 async function bootstrap() {

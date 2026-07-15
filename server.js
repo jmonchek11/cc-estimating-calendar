@@ -589,27 +589,56 @@ app.get('/api/online', async (req, res) => {
 });
 
 // ── Ideas / feedback ──────────────────────────────────────────────────────────
+const IDEA_ADMIN_NOTIFY_EMAIL = 'jmonchek@libertyintegrated.com';
+
 app.post('/api/ideas', async (req, res) => {
   if (!req.session.userId) return res.status(401).json({ error: 'Not logged in' });
-  try { res.json(await db.submitIdea({ ...req.body, submitted_by: req.session.userId })); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  try {
+    const result = await db.submitIdea({ ...req.body, submitted_by: req.session.userId });
+    res.json(result);
+    // Fire-and-forget — never let a mail hiccup affect the actual submission.
+    db.getMember(req.session.userId).then(submitter => {
+      const { subject, html } = mailer.emailIdeaSubmitted(req.body, submitter?.name);
+      return mailer.sendMail({ to: IDEA_ADMIN_NOTIFY_EMAIL, subject, html });
+    }).catch(() => {});
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+// Visible to any logged-in user (not just admins) — voting only makes sense
+// if people can see what's already been suggested.
 app.get('/api/ideas', async (req, res) => {
-  try {
-    const user = await db.getMember(req.session.userId);
-    if (!user || !user.is_admin) return res.status(403).json({ error: 'Admin only' });
-    res.json(await db.getIdeas());
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  try { res.json(await db.getIdeas(req.session.userId)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.put('/api/ideas/:id', async (req, res) => {
   try {
     const user = await db.getMember(req.session.userId);
     if (!user || !user.is_admin) return res.status(403).json({ error: 'Admin only' });
-    await db.updateIdeaStatus(req.params.id, req.body.status);
+    const result = await db.updateIdeaStatus(req.params.id, req.body.status);
     res.json({ ok: true });
+    // Fire-and-forget — only email the submitter if the status actually
+    // changed and someone's actually attached to notify.
+    if (result.from !== result.to && result.submitted_by && result.submitted_by !== req.session.userId) {
+      db.getMember(result.submitted_by).then(recipient => {
+        if (!recipient?.email) return;
+        const { subject, html } = mailer.emailIdeaStatusChanged(result, result.to);
+        return mailer.sendMail({ to: recipient.email, subject, html });
+      }).catch(() => {});
+    }
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/ideas/:id/vote', async (req, res) => {
+  if (!req.session.userId) return res.status(401).json({ error: 'Not logged in' });
+  try { res.json(await db.voteIdea(req.params.id, req.session.userId, req.body.value)); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.post('/api/ideas/:id/comments', async (req, res) => {
+  if (!req.session.userId) return res.status(401).json({ error: 'Not logged in' });
+  try { res.json(await db.addIdeaComment(req.params.id, req.session.userId, req.body.text)); }
+  catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 // MUST be before /api/projects/:id

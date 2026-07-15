@@ -273,4 +273,36 @@ function emailDigest(digest) {
   };
 }
 
-module.exports = { sendMail, emailAssigned, emailFollowup, emailAwarded, emailReminder, emailDigest };
+const IDEA_STATUS_LABEL = { new: 'New', reviewed: 'Reviewed', done: 'Done', wontfix: "Won't Fix" };
+const IDEA_TYPE_ICON = t => t === 'issue' ? '🐛 Bug/Issue' : '💡 Idea/Enhancement';
+
+function emailIdeaSubmitted(idea, submitterName) {
+  return {
+    subject: `${idea.type === 'issue' ? '🐛' : '💡'} New ${idea.type === 'issue' ? 'bug report' : 'idea'} — ${idea.title}`,
+    html: base(`
+      <h2>${IDEA_TYPE_ICON(idea.type)}</h2>
+      <p><strong>${submitterName || 'Someone'}</strong> just submitted a new ${idea.type === 'issue' ? 'bug report' : 'idea'}.</p>
+      <table>
+        <tr><td class="lbl">Title</td><td><strong>${idea.title}</strong></td></tr>
+        ${idea.body ? `<tr><td class="lbl">Details</td><td>${idea.body}</td></tr>` : ''}
+        ${idea.page ? `<tr><td class="lbl">Page</td><td>${idea.page}</td></tr>` : ''}
+      </table>
+      <a href="${APP_URL}" class="btn">Open App</a>
+    `),
+  };
+}
+
+function emailIdeaStatusChanged(idea, newStatus) {
+  const label = IDEA_STATUS_LABEL[newStatus] || newStatus;
+  const pillClass = newStatus === 'done' ? 'pill-green' : newStatus === 'wontfix' ? 'pill-gray' : 'pill-blue';
+  return {
+    subject: `${IDEA_TYPE_ICON(idea.type).split(' ')[0]} Your ${idea.type === 'issue' ? 'bug report' : 'idea'} was marked "${label}" — ${idea.title}`,
+    html: base(`
+      <h2>Update on your ${idea.type === 'issue' ? 'bug report' : 'idea'}</h2>
+      <p><strong>${idea.title}</strong> is now <span class="pill ${pillClass}">${label}</span>.</p>
+      <a href="${APP_URL}" class="btn">Open App</a>
+    `),
+  };
+}
+
+module.exports = { sendMail, emailAssigned, emailFollowup, emailAwarded, emailReminder, emailDigest, emailIdeaSubmitted, emailIdeaStatusChanged };
