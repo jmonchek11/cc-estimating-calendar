@@ -13,6 +13,32 @@ function getTransporter() {
   return _transporter;
 }
 
+// Every email this app sends was HTML-only — no text/plain part. A manually
+// typed email always has both (Gmail generates the plain-text part for
+// you); an HTML-only message is a well-known spam/phishing signal to most
+// mail security gateways (GoDaddy/Microsoft included), and several can
+// silently discard it AFTER accepting it during the SMTP handshake — no
+// bounce, no visible quarantine entry, exactly the symptom that sent us
+// looking here. Deriving a plain-text alternative from the HTML fixes this
+// for every email template at once, in the one shared place they all funnel
+// through, rather than touching each individual template.
+function htmlToPlainText(html) {
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(td|th)>/gi, '  ')
+    .replace(/<\/(p|div|tr|h[1-6]|li)>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 async function sendMail({ to, subject, html }) {
   if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
     console.log('[email] skipped — no credentials configured');
@@ -26,6 +52,7 @@ async function sendMail({ to, subject, html }) {
       to: toArr.join(', '),
       subject,
       html,
+      text: htmlToPlainText(html),
     });
     console.log('[email] sent:', subject, '->', toArr.join(', '));
   } catch (e) {
