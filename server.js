@@ -597,10 +597,13 @@ app.post('/api/ideas', async (req, res) => {
     const result = await db.submitIdea({ ...req.body, submitted_by: req.session.userId });
     res.json(result);
     // Fire-and-forget — never let a mail hiccup affect the actual submission.
+    // Logged loudly on failure since this runs outside the request/response
+    // cycle and a silent .catch(() => {}) here was undiagnosable last time.
+    console.log(`[ideas] #${result.id} submitted by user ${req.session.userId} — notifying ${IDEA_ADMIN_NOTIFY_EMAIL}`);
     db.getMember(req.session.userId).then(submitter => {
       const { subject, html } = mailer.emailIdeaSubmitted(req.body, submitter?.name);
       return mailer.sendMail({ to: IDEA_ADMIN_NOTIFY_EMAIL, subject, html });
-    }).catch(() => {});
+    }).catch(e => console.error(`[ideas] submission-notify email failed for #${result.id}:`, e.message));
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
