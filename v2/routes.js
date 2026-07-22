@@ -22,6 +22,28 @@ async function requireAdmin(req, res, next) {
   } catch (e) { res.status(500).json({ error: e.message }); }
 }
 
+// Same generic editor as requireAdmin gates, but a bid/CO's own assigned
+// estimator or salesperson (bid) / estimator (CO) can also edit it, even
+// without admin rights — everything else routed through this editor
+// (project/company/job/bid_submission, or a bid/CO they AREN'T assigned to)
+// still requires real admin. Scoped to just the :entity/:id PATCH route,
+// not the merge/delete/other admin-only actions.
+async function requireAdminOrAssigned(req, res, next) {
+  try {
+    const actor = await maindb.getMember(req.session.userId);
+    if (actor?.is_admin) return next();
+    const { entity, id } = req.params;
+    if (actor && entity === 'bid') {
+      const bid = await v2db.loadBid(id).catch(() => null);
+      if (bid && (bid.estimator_id === actor.id || bid.salesperson_id === actor.id)) return next();
+    } else if (actor && entity === 'change_order') {
+      const co = await v2db.loadCO(id).catch(() => null);
+      if (co && co.estimator_id === actor.id) return next();
+    }
+    return res.status(403).json({ error: 'Admin only' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+}
+
 router.get('/api/v2/projects', async (req, res) => {
   try { res.json(await v2db.getProjects()); }
   catch (e) { res.status(500).json({ error: e.message }); }
@@ -172,8 +194,10 @@ router.post('/api/v2/bids/:id/start',         t(async req => {
 router.post('/api/v2/bids/:id/submit',        t(req => v2db.submitBid(req.params.id, req.body, req.session.userId),
   async (req) => ({ action: 'bid.submit', summary: `Submitted bid ${await v2db.bidLabel(req.params.id)}`, entity_type: 'bid', entity_id: Number(req.params.id) })));
 
-// Admin-only generic edit for any entity: project | bid | job | change_order | bid_submission
-router.patch('/api/v2/admin/:entity/:id',     requireAdmin, t(async req => {
+// Generic edit for any entity: project | bid | job | change_order | bid_submission.
+// Admin-only, EXCEPT a bid/CO's own assigned estimator/salesperson can also
+// edit that specific one — see requireAdminOrAssigned above.
+router.patch('/api/v2/admin/:entity/:id',     requireAdminOrAssigned, t(async req => {
     const oldBid = req.params.entity === 'bid' ? await v2db.loadBid(req.params.id).catch(() => null) : null;
     const r = await v2db.adminUpdate(req.params.entity, req.params.id, req.body);
     if (req.params.entity === 'bid') notifyAssignmentDiff(Number(req.params.id), oldBid, req.body, req.session.userId);

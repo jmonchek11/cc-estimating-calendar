@@ -1483,7 +1483,11 @@ function bidActions(b) {
       workflow = `<button class="v2-btn blue" onclick="actReactivateBid(${b.id})">↻ Reactivate</button>`;
     }
   }
-  const adminBtn = (CURRENT_USER?.is_admin && BID_EDITABLE_STAGES.includes(b.stage))
+  // Admins can edit any bid; the assigned estimator/salesperson can edit
+  // their own even without admin rights (server enforces this too — see
+  // requireAdminOrAssigned in v2/routes.js).
+  const canEditBid = CURRENT_USER?.is_admin || CURRENT_USER?.id === b.estimator?.id || CURRENT_USER?.id === b.salesperson?.id;
+  const adminBtn = (canEditBid && BID_EDITABLE_STAGES.includes(b.stage))
     ? `<button class="v2-btn outline" onclick="actEditBid(${b.id})">✏️ Edit</button>` : '';
   const all = [workflow, adminBtn].filter(Boolean).join('');
   return all ? `<div class="v2-actions">${all}</div>` : '';
@@ -1565,7 +1569,10 @@ function coActions(co) {
     // Pricing/scope sometimes changes after approval too — still revisable.
     workflow = `<button class="v2-btn outline" onclick="actReviseCO(${co.id})">↻ Revise</button>`;
   }
-  const adminBtn = (CURRENT_USER?.is_admin && CO_EDITABLE_STAGES.includes(co.stage) && !co.superseded)
+  // Admins can edit any CO; its assigned estimator can edit their own even
+  // without admin rights (server enforces this too — requireAdminOrAssigned).
+  const canEditCO = CURRENT_USER?.is_admin || CURRENT_USER?.id === co.estimator?.id;
+  const adminBtn = (canEditCO && CO_EDITABLE_STAGES.includes(co.stage) && !co.superseded)
     ? `<button class="v2-btn outline" onclick="actEditCO(${co.id})">✏️ Edit</button>` : '';
   const all = [workflow, adminBtn].filter(Boolean).join('');
   return all ? `<div class="v2-actions">${all}</div>` : '';

@@ -2345,6 +2345,6 @@ module.exports = {
   getTeamV2, createTeamMemberV2, updateTeamMemberV2, updateSettingsV2, getSettings,
   removeBidCustomer, createCompanyV2, deleteBid, addSubEstimator, removeSubEstimator,
   updateBidDueDate, updateCoDueDate,
-  logActivity, getActivityLog, undoActivity, bidLabel, coLabel, loadBid,
+  logActivity, getActivityLog, undoActivity, bidLabel, coLabel, loadBid, loadCO,
   mergeContacts, deleteCompany, deleteChangeOrder,
 };
