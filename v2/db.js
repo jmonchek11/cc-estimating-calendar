@@ -527,7 +527,7 @@ async function updateSettingsV2(data) {
 
 // ── Opportunity creation ──────────────────────────────────────────────────────
 // Creates a Project (or attaches to an existing one) + an opportunity Bid.
-async function createOpportunity({ project_id, project_name, notes, description, location, due_date, company_ids, new_companies, contact_ids, created_by }) {
+async function createOpportunity({ project_id, project_name, notes, description, location, due_date, company_ids, new_companies, contact_ids_by_company, created_by }) {
   const M = getModels();
   let pid = project_id ? Number(project_id) : null;
   let isNewProject = false;
@@ -544,12 +544,16 @@ async function createOpportunity({ project_id, project_name, notes, description,
 
   const companyIds = await resolveCompanyIds(company_ids, new_companies);
   for (const companyId of companyIds) await ensureBidCustomer(bidId, companyId);
-  // Contacts aren't scoped to a single customer this early — attach whichever
-  // ones were picked to every customer on the roster; refine per-customer
-  // later from the bid flyout (which already has that UI).
-  if (companyIds.length && contact_ids && contact_ids.length) {
-    const ids = contact_ids.map(Number);
-    await M.BidCustomer.updateMany({ bid_id: bidId }, { $addToSet: { contact_ids: { $each: ids } } });
+  // Each customer only gets the contacts picked specifically for THEM (the
+  // frontend only offers a company's own contacts once it's selected) —
+  // new companies typed in fresh have no contacts yet, nothing to attach.
+  if (contact_ids_by_company) {
+    for (const [companyIdStr, contactIds] of Object.entries(contact_ids_by_company)) {
+      const companyId = Number(companyIdStr);
+      if (!companyIds.includes(companyId) || !contactIds?.length) continue;
+      const bc = await M.BidCustomer.findOne({ bid_id: bidId, company_id: companyId }).lean();
+      if (bc) await M.BidCustomer.updateOne({ _id: bc._id }, { $addToSet: { contact_ids: { $each: contactIds.map(Number) } } });
+    }
   }
 
   const actorId = created_by ? Number(created_by) : null;

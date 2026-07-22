@@ -1463,7 +1463,6 @@ function bidActions(b) {
   if (!b.superseded) {
     if (b.stage === 'opportunity') {
       workflow = `<button class="v2-btn blue" onclick="actStartBid(${b.id})">→ Start Bid</button>
-                  <button class="v2-btn outline" onclick="actImportJIS(${b.id})">📄 Start from JIS</button>
                   <button class="v2-btn outline" onclick="actAddCustomers(${b.id})">+ Customer</button>
                   <button class="v2-btn outline" onclick="actLogFollowup('bid',${b.id})">📝 Log Follow-up</button>
                   <button class="v2-btn outline" onclick="actEditOpportunityDetails(${b.id})">📅 Due Date / Assign</button>
@@ -1672,7 +1671,7 @@ function comboRenderChips(fid) {
   el.innerHTML = (COMBO_STATE[fid] || []).map((s, i) =>
     `<span class="v2-chip">${esc(s.name)}${s.id ? '' : ' <em>new</em>'}<button type="button" onmousedown="event.preventDefault();comboRemove('${fid}',${i})">✕</button></span>`).join('');
 }
-function comboRemove(fid, i) { (COMBO_STATE[fid] || []).splice(i, 1); comboRenderChips(fid); comboRenderMenu(fid); }
+function comboRemove(fid, i) { (COMBO_STATE[fid] || []).splice(i, 1); comboRenderChips(fid); comboRenderMenu(fid); COMBO_FIELDS[fid]?.onChange?.(); }
 function comboRenderMenu(fid) {
   const f = COMBO_FIELDS[fid], input = document.getElementById('vf-' + fid), menu = document.getElementById('cc-' + fid + '-menu');
   if (!f || !input || !menu) return;
@@ -1719,16 +1718,18 @@ function comboPick(fid, val) {
   COMBO_STATE[fid].push({ id: opt.value, name: opt.label });
   const input = document.getElementById('vf-' + fid); input.value = '';
   comboRenderChips(fid); comboRenderMenu(fid); input.focus();
+  f.onChange?.();
 }
 function comboAddNew(fid) {
   const f = COMBO_FIELDS[fid], input = document.getElementById('vf-' + fid), name = input.value.trim(); if (!name) return;
   if (!f.multi) COMBO_STATE[fid] = [];
   COMBO_STATE[fid].push({ id: null, name });
   input.value = ''; comboRenderChips(fid); comboRenderMenu(fid); input.focus();
+  f.onChange?.();
 }
 function initCombos(ov, fields) {
   COMBO_STATE = {}; COMBO_FIELDS = {};
-  for (const f of fields.filter(x => x.type === 'company' || x.type === 'project' || x.type === 'contact')) {
+  for (const f of fields.filter(x => x.type === 'company' || x.type === 'project')) {
     COMBO_FIELDS[f.id] = f; COMBO_STATE[f.id] = [];
     if (f.value != null) { const o = f.options.find(o => o.value == f.value); if (o) COMBO_STATE[f.id].push({ id: o.value, name: o.label }); }
     comboRenderChips(f.id);
@@ -1770,7 +1771,7 @@ function showForm(title, fields, onSubmit, submitLabel = 'Save', submitClass = '
       return `<div class="v2-field"><label>${f.label}${req}</label>
         ${f.options.map(o => `<label class="v2-check"><input type="checkbox" data-multi="${f.id}" value="${o.value}"> ${esc(o.label)}</label>`).join('')}</div>`;
     }
-    if (f.type === 'company' || f.type === 'project' || f.type === 'contact') {
+    if (f.type === 'company' || f.type === 'project') {
       return `<div class="v2-field"><label>${f.label}${req}</label>
         <div class="v2-combo">
           <div class="v2-combo-box">
@@ -1787,6 +1788,13 @@ function showForm(title, fields, onSubmit, submitLabel = 'Save', submitClass = '
     if (f.type === 'currency') {
       return `<div class="v2-field"><label>${f.label}${req}</label>
         <input id="vf-${f.id}" type="text" inputmode="decimal" value="${f.value != null ? fmtCurrencyInput(f.value) : ''}" placeholder="${esc(f.placeholder || '$0')}" oninput="formatCurrencyField(this)"></div>`;
+    }
+    if (f.type === 'custom') {
+      // An empty placeholder the caller fills in after showForm renders (via
+      // document.getElementById('custom-<id>')) — lets a form position a
+      // hand-built section (e.g. sub-estimators, per-customer contacts)
+      // exactly where it belongs instead of only ever at the end.
+      return `<div id="custom-${f.id}"></div>`;
     }
     return `<div class="v2-field"><label>${f.label}${req}</label>
       <input id="vf-${f.id}" type="${f.type || 'text'}" value="${esc(f.value ?? '')}" placeholder="${esc(f.placeholder || '')}" ${f.type === 'number' ? 'step="any"' : ''}></div>`;
@@ -1812,7 +1820,7 @@ function showForm(title, fields, onSubmit, submitLabel = 'Save', submitClass = '
       if (f.type === 'multicheck') {
         data[f.id] = [...ov.querySelectorAll(`input[data-multi="${f.id}"]:checked`)].map(c => Number(c.value));
         if (f.required && !data[f.id].length) missing.push(f.label);
-      } else if (f.type === 'company' || f.type === 'project' || f.type === 'contact') {
+      } else if (f.type === 'company' || f.type === 'project') {
         const sel = COMBO_STATE[f.id] || [];
         const ids = sel.filter(s => s.id).map(s => s.id);
         const names = sel.filter(s => !s.id).map(s => s.name);
@@ -1825,6 +1833,9 @@ function showForm(title, fields, onSubmit, submitLabel = 'Save', submitClass = '
         const digits = raw.replace(/[^\d]/g, '');
         data[f.id] = digits ? (negative ? -1 : 1) * Number(digits) : null;
         if (f.required && !digits) missing.push(f.label);
+      } else if (f.type === 'custom') {
+        // Nothing to collect — the caller reads its own hand-built section's
+        // inputs directly in its onSubmit callback.
       } else {
         const v = document.getElementById('vf-' + f.id)?.value?.trim();
         data[f.id] = v || null;
@@ -1918,15 +1929,38 @@ function newBidForm({ projectId, projectName } = {}) {
 // ═══════════════════════════════════════════════════════════════════════════
 // ACTIONS — one per state-machine transition
 // ═══════════════════════════════════════════════════════════════════════════
+// Contacts are shown per-customer — only that company's own contacts — once
+// a customer is picked, rather than a flat list disconnected from which
+// company each contact actually belongs to. New (not-yet-in-system)
+// companies have no contacts to pick from; add those after creating the
+// opportunity, same as always.
+function renderOppContactPickers(contactsByCompany) {
+  const container = document.getElementById('custom-opp_contacts_section');
+  if (!container) return;
+  const selected = COMBO_STATE['company_ids'] || [];
+  const existing = selected.filter(s => s.id);
+  const fresh = selected.filter(s => !s.id);
+  if (!selected.length) {
+    container.innerHTML = `<div class="v2-field"><label>Contact(s)</label><div style="font-size:12px;color:var(--text-muted)">Pick a customer above to choose their contacts.</div></div>`;
+    return;
+  }
+  const rows = existing.map(s => {
+    const contacts = contactsByCompany[s.id] || [];
+    return `<div style="margin-bottom:8px">
+      <div style="font-size:12px;font-weight:600;margin-bottom:3px">${esc(s.name)}</div>
+      ${contacts.length ? contacts.map(c => `<label class="v2-check"><input type="checkbox" data-opp-contact="${s.id}" value="${c.id}"> ${esc(c.full_name)}${c.title ? ` <span style="color:var(--text-muted)">(${esc(c.title)})</span>` : ''}</label>`).join('')
+        : `<div style="font-size:11px;color:var(--text-muted)">No contacts on file yet — add one after creating the opportunity.</div>`}
+    </div>`;
+  }).join('');
+  const freshNote = fresh.length ? `<div style="font-size:11px;color:var(--text-muted);margin-top:4px">${esc(fresh.map(s => s.name).join(', '))} — new compan${fresh.length > 1 ? 'ies' : 'y'}, no contacts yet.</div>` : '';
+  container.innerHTML = `<div class="v2-field"><label>Contact(s)</label>${rows}${freshNote}</div>`;
+}
 async function actNewOpportunity() {
-  // Contacts are pick-only (allowNew: false) — a contact needs a company to
-  // belong to, so "create new" doesn't make sense from this early-intake
-  // form; per-customer contact linking already exists in the bid flyout.
-  let contactOpts = [];
+  let contactsByCompany = {};
   try {
     const contacts = await api('GET', '/api/v2/contacts');
-    contactOpts = contacts.map(c => ({ value: c.id, label: c.company ? `${c.full_name} (${c.company.name})` : c.full_name }));
-  } catch { /* contact picker just comes up empty if this fails */ }
+    contacts.forEach(c => { if (c.company_id) (contactsByCompany[c.company_id] = contactsByCompany[c.company_id] || []).push(c); });
+  } catch { /* per-customer contact lists just come up empty if this fails */ }
 
   showForm('💡 New Opportunity', [
     { id: 'project_id', label: 'Project', type: 'project', multi: false, required: true,
@@ -1934,10 +1968,20 @@ async function actNewOpportunity() {
     { id: 'description', label: 'Project Description', type: 'textarea', placeholder: 'Brief description of the scope of work…' },
     { id: 'location', label: 'Location', type: 'text', placeholder: 'City, State or site address…' },
     { id: 'due_date', label: 'Due Date', type: 'date' },
-    { id: 'company_ids', label: 'Customer(s)', type: 'company', multi: true, newKey: 'new_companies', options: companyOpts(), placeholder: 'Type customer name…' },
-    { id: 'contact_ids', label: 'Contact(s)', type: 'contact', multi: true, allowNew: false, noun: 'contact', newKey: 'new_contacts', options: contactOpts, placeholder: 'Type contact name…' },
+    { id: 'company_ids', label: 'Customer(s)', type: 'company', multi: true, newKey: 'new_companies', options: companyOpts(), placeholder: 'Type customer name…',
+      onChange: () => renderOppContactPickers(contactsByCompany) },
+    { id: 'opp_contacts_section', type: 'custom' },
     { id: 'notes', label: 'Notes (internal discussion)', type: 'textarea', placeholder: 'Why are we considering this?' },
-  ], data => api('POST', '/api/v2/opportunities', data), 'Create Opportunity');
+  ], data => {
+    const contact_ids_by_company = {};
+    document.querySelectorAll('#v2-form-overlay [data-opp-contact]:checked').forEach(el => {
+      const cid = el.dataset.oppContact;
+      (contact_ids_by_company[cid] = contact_ids_by_company[cid] || []).push(Number(el.value));
+    });
+    return api('POST', '/api/v2/opportunities', { ...data, contact_ids_by_company });
+  }, 'Create Opportunity');
+
+  renderOppContactPickers(contactsByCompany);
 }
 
 function actNewLegacyJob() {
@@ -1951,7 +1995,24 @@ function actNewLegacyJob() {
   ], data => api('POST', '/api/v2/jobs', data), 'Create Job');
 }
 
+// Offers manual entry or pulling straight from a JIS, instead of a second
+// dedicated button cluttering the opportunity card.
 function actStartBid(bidId) {
+  document.getElementById('v2-form-overlay')?.remove();
+  const ov = document.createElement('div');
+  ov.className = 'v2-overlay'; ov.id = 'v2-form-overlay';
+  ov.onclick = e => { if (e.target === ov) ov.remove(); };
+  ov.innerHTML = `
+    <div class="v2-modal" style="max-width:380px">
+      <div class="v2-modal-hd">→ Start Bid<button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">✕</button></div>
+      <div class="v2-modal-bd" style="display:flex;flex-direction:column;gap:8px">
+        <button class="v2-btn blue" style="width:100%;padding:9px 12px" onclick="document.getElementById('v2-form-overlay').remove();actStartBidManual(${bidId})">✏️ Fill in the details manually</button>
+        <button class="v2-btn outline" style="width:100%;padding:9px 12px" onclick="document.getElementById('v2-form-overlay').remove();actImportJIS(${bidId})">📄 Import from a JIS file</button>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+}
+function actStartBidManual(bidId) {
   showForm('→ Start Bid', startBidFields(), data => api('POST', `/api/v2/bids/${bidId}/start`, data), 'Start Bid');
 }
 
@@ -2063,17 +2124,29 @@ function actEditProject(projectId) {
 
 function actEditBid(bidId) {
   const b = DETAIL_CACHE[OPEN_PROJECT]?.bids.find(x => x.id === bidId) || {};
+  // Sub-estimator management moved here from the bid card (was a small
+  // easy-to-miss link) — same dedicated add/remove endpoints, just surfaced
+  // right under Estimator/Salesperson since that's where people look for it,
+  // via a 'custom' placeholder field rather than always at the very bottom.
+  const showSubEst = !b.superseded && ['opportunity', 'active_bid', 'submitted'].includes(b.stage);
   const fields = [];
   if (b.stage !== 'opportunity') {
     fields.push({ id: 'bid_number', label: 'Bid #', type: 'text', required: true, value: b.bid_number });
     fields.push(
       { id: 'estimator_id', label: 'Estimator', type: 'select', emptyLabel: 'TBD', options: teamOpts(['estimator']), value: b.estimator?.id },
       { id: 'salesperson_id', label: 'Salesperson', type: 'select', emptyLabel: 'TBD', options: teamOpts(['sales']), value: b.salesperson?.id },
+    );
+    if (showSubEst) fields.push({ id: 'sub_est_section', type: 'custom' });
+    fields.push(
       { id: 'date_received', label: 'Date Received', type: 'date', value: b.date_received },
       { id: 'due_date', label: 'Due Date', type: 'date', value: b.due_date },
       { id: 'start_date', label: 'Start Date', type: 'date', value: b.start_date },
       { id: 'drawing_stage', label: 'Drawing Stage', type: 'text', value: b.drawing_stage },
     );
+  } else if (showSubEst) {
+    // Opportunity stage has no estimator/salesperson fields in this form at
+    // all (nothing's been assigned yet) — sub-estimators just go first.
+    fields.push({ id: 'sub_est_section', type: 'custom' });
   }
   fields.push({ id: 'notes', label: 'Notes', type: 'textarea', value: b.notes });
   if (b.stage === 'submitted') {
@@ -2086,12 +2159,9 @@ function actEditBid(bidId) {
   }
   showForm('✏️ Edit Bid (admin)', fields, data => api('PATCH', `/api/v2/admin/bid/${bidId}`, data), 'Save Changes');
 
-  // Sub-estimator management moved here from the bid card (was a small easy-
-  // to-miss link) — same dedicated add/remove endpoints, just surfaced in
-  // the edit window where people actually look for it.
-  if (!b.superseded && ['opportunity', 'active_bid', 'submitted'].includes(b.stage)) {
-    const bd = document.querySelector('#v2-form-overlay .v2-modal-bd');
-    if (bd) bd.insertAdjacentHTML('beforeend', subEstimatorSectionHtml(bidId, b));
+  if (showSubEst) {
+    const container = document.getElementById('custom-sub_est_section');
+    if (container) container.outerHTML = subEstimatorSectionHtml(bidId, b);
   }
 }
 
@@ -3077,8 +3147,9 @@ function renderJISReview(p, targetBidId) {
   ov.onclick = e => { if (e.target === ov) ov.remove(); };
 
   // Three modes: starting an existing opportunity from a JIS (targetBidId
-  // set from the bid card's "Start from JIS" button), enriching a bid # the
-  // JIS matched by coincidence, or creating a brand-new bid from scratch.
+  // set from the "Start Bid" choice menu's "Import from a JIS file" option),
+  // enriching a bid # the JIS matched by coincidence, or creating a
+  // brand-new bid from scratch.
   const startingExisting = !!targetBidId;
   const isNewBid = !p.existing_bid && !startingExisting;
   const editableFields = isNewBid || startingExisting;
