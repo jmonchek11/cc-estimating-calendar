@@ -33,6 +33,8 @@ const ts = () => new Date().toISOString().replace('T', ' ').substring(0, 19);
 const ProjectSchema = new mongoose.Schema({
   _id:        Number,                       // internal only — never shown in UI
   name:       { type: String, required: true },
+  description:{ type: String, default: null },   // brief scope-of-work description, captured at opportunity intake
+  location:   { type: String, default: null },   // freeform "City, State" or site description — separate from the JIS-sourced street/city/state/zip below
   source_key: { type: String, default: null },   // stable import key: "job:<#>" or "name:<norm>" — survives re-import
   street:     { type: String, default: null },   // job site address — from the JIS title sheet
   city:       { type: String, default: null },
@@ -198,6 +200,7 @@ const ContactSchema = new mongoose.Schema({
   last_name:  { type: String, default: null },
   phone:      { type: String, default: null },
   email:      { type: String, default: null },
+  title:      { type: String, default: null },   // e.g. "Project Manager", "Purchasing" — which part of the project they're connected to
   notes:      { type: String, default: null },
   active:     { type: Number, default: 1 },
   created_at: { type: String, default: ts },

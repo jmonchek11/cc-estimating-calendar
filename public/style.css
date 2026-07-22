@@ -682,6 +682,12 @@ tbody td {
   text-align: center;
   line-height: 26px;
 }
+/* Estimators and salespeople can share initials (e.g. two people both "DD") —
+   role color is what actually tells them apart, not the letters. */
+.initials-pill-sales {
+  background: #dcfce7;
+  color: #166534;
+}
 /* Clickable estimator pill */
 .est-pill-clickable { cursor: pointer; }
 .est-pill-clickable:hover { opacity: 0.75; outline: 2px solid var(--primary); outline-offset: 1px; }

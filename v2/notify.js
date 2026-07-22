@@ -43,6 +43,11 @@ async function bidEmailShape(bidId) {
     stage: bid.stage,
     estimate_due_date: bid.due_date,
     estimate_amount: bid.estimate_amount,
+    // Lets mailer.js build a direct #project/:id/bid/:id link instead of
+    // just the bare app URL — v1 bid objects passed through the same
+    // templates simply won't have these, and fall back gracefully.
+    bid_id: bid._id,
+    project_id: bid.project_id,
   };
 }
 

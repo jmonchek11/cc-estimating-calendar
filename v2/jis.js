@@ -165,13 +165,29 @@ async function resolveGCContact(poc, companyId) {
 
 async function applyJISImport(payload) {
   const M = getModels();
-  const { bid_number, due_date, drawings, address, existing_bid_id, project_id, project_name, estimator_id, salesperson_id, gcs = [] } = payload;
+  const { bid_number, due_date, drawings, address, existing_bid_id, target_bid_id, project_id, project_name, estimator_id, salesperson_id, gcs = [], actor_id } = payload;
 
   const resolvedGCs = [];
   for (const gc of gcs) resolvedGCs.push({ ...gc, companyId: await resolveGCCompany(gc) });
 
   let bidId, projectId;
-  if (existing_bid_id) {
+  if (target_bid_id) {
+    // "Start Bid" on an existing opportunity, pulling the fields from a JIS
+    // instead of typing them by hand — goes through the normal startBid()
+    // opportunity->active_bid transition, not createDirectBid (which would
+    // create a brand-new bid and supersede this one).
+    const bid = await M.Bid.findById(Number(target_bid_id)).lean();
+    if (!bid) throw new Error('Bid not found');
+    if (!bid_number) throw new Error('Bid # is required to start this bid');
+    const started = await db.startBid(target_bid_id, {
+      bid_number, due_date,
+      estimator_id: estimator_id || null, salesperson_id: salesperson_id || null,
+      date_received: ts().slice(0, 10),
+      company_ids: resolvedGCs.map(g => g.companyId),
+    }, actor_id || null);
+    bidId = started.bid_id; projectId = bid.project_id;
+    if (drawings) await M.Bid.updateOne({ _id: bidId }, { $set: { drawings, updated_at: ts() } });
+  } else if (existing_bid_id) {
     const bid = await M.Bid.findById(Number(existing_bid_id)).lean();
     if (!bid) throw new Error('Bid not found');
     bidId = bid._id; projectId = bid.project_id;

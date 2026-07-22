@@ -236,7 +236,7 @@ const STAGE_COLOR = {
 const METHOD = { phone:'📞 phone', email:'✉️ email', in_person:'🤝 in person', other:'other' };
 
 const stageBadge = s => `<span class="badge badge-stage" style="color:${STAGE_COLOR[s]};font-weight:700">${STAGE[s] || s}</span>`;
-const ini = m => m ? `<span class="initials-pill" style="transform:scale(.85);transform-origin:center" title="${esc(m.name || '')}">${esc(m.initials)}</span>` : '';
+const ini = m => m ? `<span class="initials-pill${m.role === 'sales' ? ' initials-pill-sales' : ''}" style="transform:scale(.85);transform-origin:center" title="${esc(m.name || '')}${m.role ? ' — ' + esc(m.role) : ''}">${esc(m.initials)}</span>` : '';
 
 let META = { companies: [], team: [] };
 let CURRENT_USER = null;          // { id, name, is_admin } — gates admin-only actions
@@ -304,8 +304,16 @@ function setHash(h) {
 // the dashboard.
 function routeFromHash() {
   const raw = (location.hash || '#dashboard').replace(/^#/, '');
-  const [seg, arg] = raw.split('/');
-  if (seg === 'project' && arg) { renderProjectPage(Number(arg)); return; }
+  const [seg, arg, sub, subArg] = raw.split('/');
+  if (seg === 'project' && arg) {
+    renderProjectPage(Number(arg)).then(() => {
+      // A deep link into a specific bid/CO (e.g. from an assignment email) —
+      // open its flyout once the project page underneath has loaded.
+      if (sub === 'bid' && subArg) openBidFlyout(Number(arg), Number(subArg));
+      else if (sub === 'co' && subArg) openCoFlyout(Number(arg), Number(subArg));
+    });
+    return;
+  }
   navigate(seg || 'dashboard');
 }
 window.addEventListener('popstate', routeFromHash);
@@ -490,7 +498,7 @@ async function renderSettings() {
   const teamRows = team.map(m => `
     <div class="proj-row" style="${m.active ? '' : 'opacity:.5'}">
       <div style="flex:1;min-width:0">
-        <div class="proj-name">${esc(m.name)} <span class="initials-pill">${esc(m.initials)}</span>
+        <div class="proj-name">${esc(m.name)} <span class="initials-pill${m.role === 'sales' ? ' initials-pill-sales' : ''}">${esc(m.initials)}</span>
           ${m.is_admin ? '<span class="badge" style="background:#ede9fe;color:#5b21b6">ADMIN</span>' : ''}
           ${!m.active ? '<span class="badge" style="background:#e2e8f0;color:#64748b">INACTIVE</span>' : ''}
           ${m.has_password === false ? '<span class="badge" style="background:#fef3c7;color:#b45309">NO PASSWORD SET</span>' : ''}</div>
@@ -1272,8 +1280,8 @@ function closeFlyout() {
   document.getElementById('fly-panel')?.remove();
 }
 
-function openBidFlyout(projectId, bidId) { FLYOUT = { kind: 'bid', projectId, id: bidId }; OPEN_PROJECT = projectId; renderFlyout(true); }
-function openCoFlyout(projectId, coId) { FLYOUT = { kind: 'co', projectId, id: coId }; OPEN_PROJECT = projectId; renderFlyout(true); }
+function openBidFlyout(projectId, bidId) { FLYOUT = { kind: 'bid', projectId, id: bidId }; OPEN_PROJECT = projectId; setHash(`project/${projectId}/bid/${bidId}`); renderFlyout(true); }
+function openCoFlyout(projectId, coId) { FLYOUT = { kind: 'co', projectId, id: coId }; OPEN_PROJECT = projectId; setHash(`project/${projectId}/co/${coId}`); renderFlyout(true); }
 
 async function renderFlyout(fresh) {
   if (!FLYOUT) return;
@@ -1363,7 +1371,6 @@ function bidNode(b) {
           ${b.awarded_company ? `Won by <strong style="color:#16a34a">${esc(b.awarded_company.name)}</strong> ${fmtD(b.award_date)}<br>` : ''}
           ${b.estimator ? `Est: ${ini(b.estimator)}` : ''}
           ${b.sub_estimators.map(s => `${ini(s)}<span style="font-size:10px">${esc(s.scope)}<a href="#" onclick="event.preventDefault();actRemoveSubEstimator(${b.id},${s.id},'${escJs(s.scope)}')" style="color:#dc2626;margin-left:2px">✕</a></span>`).join(' ')}
-          ${!b.superseded && ['opportunity','active_bid','submitted'].includes(b.stage) ? ` <a href="#" onclick="event.preventDefault();actAddSubEstimator(${b.id})" style="font-size:11px;color:#2563eb">+ Sub-estimator</a>` : ''}
           ${b.salesperson ? ` Sales: ${ini(b.salesperson)}` : ''}
           ${b.jurisdiction ? ` · Local ${esc(b.jurisdiction)}` : ''}
           ${b.next_followup_date ? ` · Next F/U: <span class="${b.next_followup_date < today ? 'overdue-txt' : ''}">${fmtD(b.next_followup_date)}${b.next_followup_date < today ? ' — OVERDUE' : ''}</span>` : ''}
@@ -1456,6 +1463,7 @@ function bidActions(b) {
   if (!b.superseded) {
     if (b.stage === 'opportunity') {
       workflow = `<button class="v2-btn blue" onclick="actStartBid(${b.id})">→ Start Bid</button>
+                  <button class="v2-btn outline" onclick="actImportJIS(${b.id})">📄 Start from JIS</button>
                   <button class="v2-btn outline" onclick="actAddCustomers(${b.id})">+ Customer</button>
                   <button class="v2-btn outline" onclick="actLogFollowup('bid',${b.id})">📝 Log Follow-up</button>
                   <button class="v2-btn outline" onclick="actEditOpportunityDetails(${b.id})">📅 Due Date / Assign</button>
@@ -1713,7 +1721,7 @@ function comboAddNew(fid) {
 }
 function initCombos(ov, fields) {
   COMBO_STATE = {}; COMBO_FIELDS = {};
-  for (const f of fields.filter(x => x.type === 'company' || x.type === 'project')) {
+  for (const f of fields.filter(x => x.type === 'company' || x.type === 'project' || x.type === 'contact')) {
     COMBO_FIELDS[f.id] = f; COMBO_STATE[f.id] = [];
     if (f.value != null) { const o = f.options.find(o => o.value == f.value); if (o) COMBO_STATE[f.id].push({ id: o.value, name: o.label }); }
     comboRenderChips(f.id);
@@ -1726,11 +1734,15 @@ function initCombos(ov, fields) {
 
 function fmtCurrencyInput(n) {
   const num = Number(n);
-  return isNaN(num) || n === '' || n == null ? '' : '$' + Math.round(num).toLocaleString('en-US');
+  if (isNaN(num) || n === '' || n == null) return '';
+  return (num < 0 ? '-$' : '$') + Math.round(Math.abs(num)).toLocaleString('en-US');
 }
+// Allows a single leading '-' (change-order credits are negative amounts) —
+// everything else strips down to digits, same as before.
 function formatCurrencyField(el) {
+  const negative = el.value.trim().startsWith('-');
   const digits = el.value.replace(/[^\d]/g, '');
-  el.value = digits ? '$' + Number(digits).toLocaleString('en-US') : '';
+  el.value = digits ? (negative ? '-$' : '$') + Number(digits).toLocaleString('en-US') : (negative ? '-' : '');
 }
 function showForm(title, fields, onSubmit, submitLabel = 'Save', submitClass = 'blue') {
   document.getElementById('v2-form-overlay')?.remove();
@@ -1743,7 +1755,7 @@ function showForm(title, fields, onSubmit, submitLabel = 'Save', submitClass = '
     if (f.type === 'select') {
       return `<div class="v2-field"><label>${f.label}${req}</label>
         <select id="vf-${f.id}">
-          ${f.required ? '' : '<option value="">—</option>'}
+          ${f.required ? '' : `<option value="">${esc(f.emptyLabel || '—')}</option>`}
           ${f.options.map(o => `<option value="${o.value}" ${o.value == f.value ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
         </select></div>`;
     }
@@ -1751,7 +1763,7 @@ function showForm(title, fields, onSubmit, submitLabel = 'Save', submitClass = '
       return `<div class="v2-field"><label>${f.label}${req}</label>
         ${f.options.map(o => `<label class="v2-check"><input type="checkbox" data-multi="${f.id}" value="${o.value}"> ${esc(o.label)}</label>`).join('')}</div>`;
     }
-    if (f.type === 'company' || f.type === 'project') {
+    if (f.type === 'company' || f.type === 'project' || f.type === 'contact') {
       return `<div class="v2-field"><label>${f.label}${req}</label>
         <div class="v2-combo">
           <div class="v2-combo-box">
@@ -1793,7 +1805,7 @@ function showForm(title, fields, onSubmit, submitLabel = 'Save', submitClass = '
       if (f.type === 'multicheck') {
         data[f.id] = [...ov.querySelectorAll(`input[data-multi="${f.id}"]:checked`)].map(c => Number(c.value));
         if (f.required && !data[f.id].length) missing.push(f.label);
-      } else if (f.type === 'company' || f.type === 'project') {
+      } else if (f.type === 'company' || f.type === 'project' || f.type === 'contact') {
         const sel = COMBO_STATE[f.id] || [];
         const ids = sel.filter(s => s.id).map(s => s.id);
         const names = sel.filter(s => !s.id).map(s => s.name);
@@ -1801,8 +1813,10 @@ function showForm(title, fields, onSubmit, submitLabel = 'Save', submitClass = '
         else { data[f.id] = ids[0] ?? null; data[f.newKey || 'new_company'] = names[0] || null; }
         if (f.required && !ids.length && !names.length) missing.push(f.label);
       } else if (f.type === 'currency') {
-        const digits = (document.getElementById('vf-' + f.id)?.value || '').replace(/[^\d]/g, '');
-        data[f.id] = digits ? Number(digits) : null;
+        const raw = document.getElementById('vf-' + f.id)?.value || '';
+        const negative = raw.trim().startsWith('-');
+        const digits = raw.replace(/[^\d]/g, '');
+        data[f.id] = digits ? (negative ? -1 : 1) * Number(digits) : null;
         if (f.required && !digits) missing.push(f.label);
       } else {
         const v = document.getElementById('vf-' + f.id)?.value?.trim();
@@ -1835,8 +1849,8 @@ const projectOpts = () => ALL_PROJECTS.map(p => ({ value: p.id, label: p.name })
 const startBidFields = () => ([
   { id: 'bid_number', label: 'Bid # (entered manually for now)', type: 'text', required: true, placeholder: 'B26-0198' },
   { id: 'company_ids', label: 'Customer(s) — who are we bidding to?', type: 'company', multi: true, required: true, newKey: 'new_companies', options: companyOpts() },
-  { id: 'estimator_id', label: 'Estimator', type: 'select', required: true, options: teamOpts(['estimator']) },
-  { id: 'salesperson_id', label: 'Salesperson', type: 'select', required: true, options: teamOpts(['sales']) },
+  { id: 'estimator_id', label: 'Estimator', type: 'select', emptyLabel: 'TBD', options: teamOpts(['estimator']) },
+  { id: 'salesperson_id', label: 'Salesperson', type: 'select', emptyLabel: 'TBD', options: teamOpts(['sales']) },
   { id: 'date_received', label: 'Date Received', type: 'date', required: true, value: today },
   { id: 'due_date', label: 'Due Date', type: 'date', required: true },
   { id: 'start_date', label: 'Start Date', type: 'date' },
@@ -1897,10 +1911,24 @@ function newBidForm({ projectId, projectName } = {}) {
 // ═══════════════════════════════════════════════════════════════════════════
 // ACTIONS — one per state-machine transition
 // ═══════════════════════════════════════════════════════════════════════════
-function actNewOpportunity() {
+async function actNewOpportunity() {
+  // Contacts are pick-only (allowNew: false) — a contact needs a company to
+  // belong to, so "create new" doesn't make sense from this early-intake
+  // form; per-customer contact linking already exists in the bid flyout.
+  let contactOpts = [];
+  try {
+    const contacts = await api('GET', '/api/v2/contacts');
+    contactOpts = contacts.map(c => ({ value: c.id, label: c.company ? `${c.full_name} (${c.company.name})` : c.full_name }));
+  } catch { /* contact picker just comes up empty if this fails */ }
+
   showForm('💡 New Opportunity', [
     { id: 'project_id', label: 'Project', type: 'project', multi: false, required: true,
       newKey: 'project_name', options: projectOpts(), placeholder: 'Type project name…' },
+    { id: 'description', label: 'Project Description', type: 'textarea', placeholder: 'Brief description of the scope of work…' },
+    { id: 'location', label: 'Location', type: 'text', placeholder: 'City, State or site address…' },
+    { id: 'due_date', label: 'Due Date', type: 'date' },
+    { id: 'company_ids', label: 'Customer(s)', type: 'company', multi: true, newKey: 'new_companies', options: companyOpts(), placeholder: 'Type customer name…' },
+    { id: 'contact_ids', label: 'Contact(s)', type: 'contact', multi: true, allowNew: false, noun: 'contact', newKey: 'new_contacts', options: contactOpts, placeholder: 'Type contact name…' },
     { id: 'notes', label: 'Notes (internal discussion)', type: 'textarea', placeholder: 'Why are we considering this?' },
   ], data => api('POST', '/api/v2/opportunities', data), 'Create Opportunity');
 }
@@ -1911,7 +1939,7 @@ function actNewLegacyJob() {
       newKey: 'project_name', options: projectOpts(), placeholder: 'Type project name…' },
     { id: 'job_number', label: 'Job # (if known)', type: 'text', placeholder: '26-XXXX' },
     { id: 'awarded_company_id', label: 'Customer (who awarded us)', type: 'company', multi: false, newKey: 'new_company', options: companyOpts() },
-    { id: 'pm_id', label: 'PM', type: 'select', options: teamOpts(['pm', 'sales', 'estimator']) },
+    { id: 'pm_id', label: 'PM', type: 'select', emptyLabel: 'TBD', options: teamOpts(['pm', 'sales', 'estimator']) },
     { id: 'award_date', label: 'Award Date', type: 'date' },
   ], data => api('POST', '/api/v2/jobs', data), 'Create Job');
 }
@@ -1970,12 +1998,8 @@ function actAddCustomers(bidId) {
 // Distribution, Data, Nurse Call, Security, etc.) to a different estimator
 // than the bid's primary one. That estimator then sees this bid on their
 // own "mine only" dashboard/lists too, same as if they were the primary.
-function actAddSubEstimator(bidId) {
-  showForm('+ Sub-estimator', [
-    { id: 'estimator_id', label: 'Estimator', type: 'select', required: true, options: teamOpts(['estimator']) },
-    { id: 'scope', label: 'System / Scope', type: 'text', required: true, placeholder: 'Fire Alarm, Lighting Controls, Distribution, Data, Nurse Call, Security…' },
-  ], data => api('POST', `/api/v2/bids/${bidId}/sub-estimators`, data), 'Add', 'blue');
-}
+// Managed from the bid edit window (subEstAdd/subEstRemove, near
+// actEditBid) rather than a standalone form.
 async function actRemoveSubEstimator(bidId, estimatorId, scope) {
   if (!confirm(`Remove this sub-estimator (${scope})?`)) return;
   try { await api('DELETE', `/api/v2/bids/${bidId}/sub-estimators`, { estimator_id: estimatorId, scope }); await refresh(); }
@@ -2036,8 +2060,8 @@ function actEditBid(bidId) {
   if (b.stage !== 'opportunity') {
     fields.push({ id: 'bid_number', label: 'Bid #', type: 'text', required: true, value: b.bid_number });
     fields.push(
-      { id: 'estimator_id', label: 'Estimator', type: 'select', options: teamOpts(['estimator']), value: b.estimator?.id },
-      { id: 'salesperson_id', label: 'Salesperson', type: 'select', options: teamOpts(['sales']), value: b.salesperson?.id },
+      { id: 'estimator_id', label: 'Estimator', type: 'select', emptyLabel: 'TBD', options: teamOpts(['estimator']), value: b.estimator?.id },
+      { id: 'salesperson_id', label: 'Salesperson', type: 'select', emptyLabel: 'TBD', options: teamOpts(['sales']), value: b.salesperson?.id },
       { id: 'date_received', label: 'Date Received', type: 'date', value: b.date_received },
       { id: 'due_date', label: 'Due Date', type: 'date', value: b.due_date },
       { id: 'start_date', label: 'Start Date', type: 'date', value: b.start_date },
@@ -2054,6 +2078,62 @@ function actEditBid(bidId) {
     );
   }
   showForm('✏️ Edit Bid (admin)', fields, data => api('PATCH', `/api/v2/admin/bid/${bidId}`, data), 'Save Changes');
+
+  // Sub-estimator management moved here from the bid card (was a small easy-
+  // to-miss link) — same dedicated add/remove endpoints, just surfaced in
+  // the edit window where people actually look for it.
+  if (!b.superseded && ['opportunity', 'active_bid', 'submitted'].includes(b.stage)) {
+    const bd = document.querySelector('#v2-form-overlay .v2-modal-bd');
+    if (bd) bd.insertAdjacentHTML('beforeend', subEstimatorSectionHtml(bidId, b));
+  }
+}
+
+function subEstimatorListHtml(bidId, b) {
+  const chips = (b.sub_estimators || []).map(s => `
+    <span class="v2-chip" style="background:#f8fafc;color:var(--text);border-color:var(--border)">
+      ${ini(s)} ${esc(s.scope)}<button type="button" onclick="subEstRemove(${bidId},${s.id},'${escJs(s.scope)}')">✕</button>
+    </span>`).join('');
+  return `<div id="sub-est-list" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">
+    ${chips || '<span style="font-size:12px;color:var(--text-muted)">None yet</span>'}
+  </div>`;
+}
+function subEstimatorSectionHtml(bidId, b) {
+  return `<div class="v2-field"><label>Sub-Estimators</label>
+    ${subEstimatorListHtml(bidId, b)}
+    <div style="display:flex;gap:6px">
+      <select id="sub-est-new-estimator" style="flex:1">
+        <option value="">Estimator…</option>
+        ${teamOpts(['estimator']).map(o => `<option value="${o.value}">${esc(o.label)}</option>`).join('')}
+      </select>
+      <input id="sub-est-new-scope" type="text" placeholder="Scope (e.g. Fire Alarm)" style="flex:1">
+      <button type="button" class="v2-btn outline" onclick="subEstAdd(${bidId})">+ Add</button>
+    </div>
+  </div>`;
+}
+function _refreshSubEstList(bidId) {
+  const b = DETAIL_CACHE[OPEN_PROJECT]?.bids.find(x => x.id === bidId);
+  const list = document.getElementById('sub-est-list');
+  if (list && b) list.outerHTML = subEstimatorListHtml(bidId, b);
+}
+async function subEstAdd(bidId) {
+  const estimator_id = document.getElementById('sub-est-new-estimator')?.value;
+  const scope = document.getElementById('sub-est-new-scope')?.value?.trim();
+  if (!estimator_id || !scope) { alert('Pick an estimator and enter a scope'); return; }
+  try {
+    await api('POST', `/api/v2/bids/${bidId}/sub-estimators`, { estimator_id, scope });
+    await refresh();
+    _refreshSubEstList(bidId);
+    const scopeInput = document.getElementById('sub-est-new-scope');
+    if (scopeInput) scopeInput.value = '';
+  } catch (e) { alert('Failed: ' + e.message); }
+}
+async function subEstRemove(bidId, estimatorId, scope) {
+  if (!confirm(`Remove this sub-estimator (${scope})?`)) return;
+  try {
+    await api('DELETE', `/api/v2/bids/${bidId}/sub-estimators`, { estimator_id: estimatorId, scope });
+    await refresh();
+    _refreshSubEstList(bidId);
+  } catch (e) { alert('Failed: ' + e.message); }
 }
 
 // Admin edit of a single submission row
@@ -2084,7 +2164,7 @@ function actEditJob(jobId) {
   const j = DETAIL_CACHE[OPEN_PROJECT]?.jobs.find(x => x.id === jobId) || {};
   showForm('✏️ Edit Job (admin)', [
     { id: 'job_number', label: 'Job #', type: 'text', value: j.job_number },
-    { id: 'pm_id', label: 'PM', type: 'select', options: teamOpts(['pm', 'sales', 'estimator']), value: j.pm?.id },
+    { id: 'pm_id', label: 'PM', type: 'select', emptyLabel: 'TBD', options: teamOpts(['pm', 'sales', 'estimator']), value: j.pm?.id },
     { id: 'awarded_company_id', label: 'Customer (awarded by)', type: 'select', options: companyOpts(), value: j.awarded_company?.id },
     { id: 'award_date', label: 'Award Date', type: 'date', value: j.award_date },
   ], data => api('PATCH', `/api/v2/admin/job/${jobId}`, data), 'Save Changes');
@@ -2097,7 +2177,7 @@ function actEditCO(coId) {
     { id: 'name', label: 'Description of Work', type: 'text', required: true, value: co.name },
     { id: 'due_date', label: 'Due Date', type: 'date', value: co.due_date },
     { id: 'start_date', label: 'Start Date', type: 'date', value: co.start_date },
-    { id: 'estimator_id', label: 'Estimator', type: 'select', options: teamOpts(['estimator']), value: co.estimator?.id },
+    { id: 'estimator_id', label: 'Estimator', type: 'select', emptyLabel: 'TBD', options: teamOpts(['estimator']), value: co.estimator?.id },
     { id: 'notes', label: 'Notes', type: 'textarea', value: co.notes },
   ];
   if (co.stage === 'submitted_co') {
@@ -2116,7 +2196,7 @@ function actAwardSubmission(submissionId) {
   const s = findSubmission(submissionId);
   showForm(`🎉 Awarded — ${esc(s?.company?.name || 'customer')}`, [
     { id: 'award_date', label: 'Award Date', type: 'date', required: true, value: today },
-    { id: 'pm_id', label: 'Assign PM (can be set later)', type: 'select', options: teamOpts(['pm', 'sales', 'estimator']) },
+    { id: 'pm_id', label: 'Assign PM (can be set later)', type: 'select', emptyLabel: 'TBD', options: teamOpts(['pm', 'sales', 'estimator']) },
   ], data => api('POST', `/api/v2/submissions/${submissionId}/award`, data), 'Confirm Awarded', 'green');
 }
 
@@ -2144,8 +2224,8 @@ function actEditOpportunityDetails(bidId) {
   const b = DETAIL_CACHE[OPEN_PROJECT]?.bids.find(x => x.id === bidId) || {};
   showForm('📅 Opportunity Details', [
     { id: 'due_date', label: 'Due Date (decision expected)', type: 'date', value: b.due_date },
-    { id: 'estimator_id', label: 'Estimator (if known)', type: 'select', options: teamOpts(['estimator']), value: b.estimator?.id },
-    { id: 'salesperson_id', label: 'Salesperson', type: 'select', options: teamOpts(['sales']), value: b.salesperson?.id },
+    { id: 'estimator_id', label: 'Estimator (if known)', type: 'select', emptyLabel: 'TBD', options: teamOpts(['estimator']), value: b.estimator?.id },
+    { id: 'salesperson_id', label: 'Salesperson', type: 'select', emptyLabel: 'TBD', options: teamOpts(['sales']), value: b.salesperson?.id },
   ], data => api('PATCH', `/api/v2/bids/${bidId}/opportunity`, data), 'Save');
 }
 
@@ -2168,7 +2248,7 @@ function actSetJobNumber(jobId) {
 
 function actSetPM(jobId) {
   showForm('Assign PM to Job', [
-    { id: 'pm_id', label: 'PM', type: 'select', required: true, options: teamOpts(['pm', 'sales', 'estimator']) },
+    { id: 'pm_id', label: 'PM', type: 'select', emptyLabel: 'TBD', options: teamOpts(['pm', 'sales', 'estimator']) },
   ], data => api('PATCH', `/api/v2/jobs/${jobId}`, data), 'Assign');
 }
 
@@ -2239,7 +2319,7 @@ function actAddCO(jobId) {
     { id: 'name', label: 'Description of Work', type: 'text', required: true },
     { id: 'due_date', label: 'Due Date', type: 'date', required: true },
     { id: 'start_date', label: 'Start Date', type: 'date', required: true, value: today },
-    { id: 'estimator_id', label: 'Estimator', type: 'select', options: teamOpts(['estimator']) },
+    { id: 'estimator_id', label: 'Estimator', type: 'select', emptyLabel: 'TBD', options: teamOpts(['estimator']) },
   ], data => api('POST', `/api/v2/jobs/${jobId}/change-orders`, data), 'Create CO');
 }
 
@@ -2286,7 +2366,7 @@ function actReviseCO(coId) {
     { id: 'name', label: 'Description of Work', type: 'text', required: true, value: co.name },
     { id: 'due_date', label: 'Due Date', type: 'date', value: co.due_date },
     { id: 'start_date', label: 'Start Date', type: 'date', value: today },
-    { id: 'estimator_id', label: 'Estimator', type: 'select', options: teamOpts(['estimator']), value: co.estimator?.id },
+    { id: 'estimator_id', label: 'Estimator', type: 'select', emptyLabel: 'TBD', options: teamOpts(['estimator']), value: co.estimator?.id },
     { id: 'notes', label: 'What changed?', type: 'textarea', placeholder: 'Why this revision — scope/pricing change…' },
   ], data => api('POST', `/api/v2/change-orders/${coId}/revise`, data), 'Create Revision', 'blue');
 }
@@ -2701,6 +2781,7 @@ function renderContactsBody() {
     <table style="width:100%;border-collapse:collapse;font-size:13px">
       <thead><tr style="border-bottom:1px solid var(--border)">
         ${th('Name', 'full_name')}
+        ${th('Position', 'title')}
         ${th('Company', 'company')}
         ${th('Phone', 'phone')}
         ${th('Email', 'email')}
@@ -2708,6 +2789,7 @@ function renderContactsBody() {
       <tbody>${out.map(c => `
         <tr style="border-bottom:1px solid #f1f5f9">
           <td style="padding:8px 16px"><a href="#" onclick="event.preventDefault();openContactProfile(${c.id})" style="font-weight:600;color:inherit;text-decoration:none">${esc(c.full_name)}</a></td>
+          <td style="padding:8px 16px">${c.title ? esc(c.title) : '<span style="color:var(--text-muted)">—</span>'}</td>
           <td style="padding:8px 16px">${c.company ? `<a href="#" onclick="event.preventDefault();openCompanyProfile(${c.company.id})" style="color:#2563eb;text-decoration:none">${esc(c.company.name)}</a>` : '<span style="color:var(--text-muted)">—</span>'}</td>
           <td style="padding:8px 16px">${c.phone ? esc(c.phone) : '<span style="color:var(--text-muted)">—</span>'}</td>
           <td style="padding:8px 16px">${c.email ? `<a href="mailto:${esc(c.email)}" style="color:#2563eb">${esc(c.email)}</a>` : '<span style="color:var(--text-muted)">—</span>'}</td>
@@ -2738,6 +2820,7 @@ function actNewContact(prefillCompanyId) {
       options: META.companies.map(c => ({ value: c.id, label: c.name })), value: prefillCompanyId, placeholder: 'Type company name…' },
     { id: 'phone', label: 'Phone', type: 'text' },
     { id: 'email', label: 'Email', type: 'text' },
+    { id: 'title', label: 'Position', type: 'text', placeholder: 'e.g. Project Manager, Purchasing…' },
     { id: 'notes', label: 'Notes', type: 'textarea' },
   ], async data => {
     const c = await api('POST', '/api/v2/contacts', data);
@@ -2756,6 +2839,7 @@ function actEditContact(id) {
       options: META.companies.map(co => ({ value: co.id, label: co.name })), value: c.company_id, placeholder: 'Type company name…' },
     { id: 'phone', label: 'Phone', type: 'text', value: c.phone },
     { id: 'email', label: 'Email', type: 'text', value: c.email },
+    { id: 'title', label: 'Position', type: 'text', value: c.title, placeholder: 'e.g. Project Manager, Purchasing…' },
     { id: 'notes', label: 'Notes', type: 'textarea', value: c.notes },
   ], async data => {
     await api('PATCH', `/api/v2/contacts/${c.id}`, data);
@@ -2814,6 +2898,7 @@ async function openContactProfile(id) {
   const body = `
     <div style="font-size:13px;color:var(--text-muted);line-height:1.7">
       ${c.company ? `<span onclick="closeProfileModal();openCompanyProfile(${c.company.id})" style="cursor:pointer;color:#2563eb;font-weight:600">🏢 ${esc(c.company.name)}</span><br>` : ''}
+      ${c.title ? `💼 ${esc(c.title)}<br>` : ''}
       ${c.phone ? `📞 ${esc(c.phone)}<br>` : ''}
       ${c.email ? `✉️ ${esc(c.email)}<br>` : ''}
       ${c.notes ? `📝 ${esc(c.notes)}` : ''}
@@ -2840,7 +2925,7 @@ async function openCompanyProfile(companyId) {
     <div style="font-weight:700;font-size:13px;margin:12px 0 4px">Contacts</div>
     <div class="card" style="padding:0;margin-bottom:12px">${contacts.length ? contacts.map(c => `
       <div class="proj-row" onclick="closeProfileModal();openContactProfile(${c.id})">
-        <div style="flex:1;min-width:0"><div class="proj-name" style="font-size:13px">${esc(c.full_name)}</div>
+        <div style="flex:1;min-width:0"><div class="proj-name" style="font-size:13px">${esc(c.full_name)}${c.title ? ` <span style="color:var(--text-muted);font-weight:400">— ${esc(c.title)}</span>` : ''}</div>
         <div class="proj-meta">${c.phone ? esc(c.phone) : ''}${c.email ? ` · ${esc(c.email)}` : ''}</div></div>
       </div>`).join('') : `<div style="padding:12px;text-align:center;color:var(--text-muted);font-size:13px">No contacts yet</div>`}
       <div style="padding:8px 14px"><a href="#" onclick="event.preventDefault();actNewContact(${companyId})" style="font-size:12px;color:#2563eb">+ Add contact at this company</a></div>
@@ -2854,8 +2939,8 @@ async function openCompanyProfile(companyId) {
 // that company, or add a brand-new one, without leaving the flyout.
 function bidCustomerContactsHtml(cust) {
   const chips = (cust.contacts || []).map(ct => `
-    <span class="v2-chip" style="background:#f8fafc;color:var(--text);border-color:var(--border)" onclick="openContactProfile(${ct.id})">
-      👤 ${esc(ct.full_name)}<button type="button" onclick="event.stopPropagation();actUnlinkContact(${cust.bid_customer_id},${ct.id})">✕</button>
+    <span class="v2-chip" style="background:#f8fafc;color:var(--text);border-color:var(--border)" onclick="openContactProfile(${ct.id})" ${ct.title ? `title="${esc(ct.title)}"` : ''}>
+      👤 ${esc(ct.full_name)}${ct.title ? ` <span style="color:var(--text-muted)">(${esc(ct.title)})</span>` : ''}<button type="button" onclick="event.stopPropagation();actUnlinkContact(${cust.bid_customer_id},${ct.id})">✕</button>
     </span>`).join('');
   return `<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:6px">
     ${chips}
@@ -2935,14 +3020,18 @@ async function actRemoveBidCustomer(bidCustomerId, name) {
 // ═══════════════════════════════════════════════════════════════════════════
 let JIS_PREVIEW = null;
 
-function actImportJIS() {
+// targetBidId: if set, this is "Start Bid" on an existing opportunity —
+// the JIS's fields get applied onto that bid (startBid) instead of
+// creating a brand-new one (createDirectBid). See renderJISReview's third
+// mode below.
+function actImportJIS(targetBidId) {
   document.getElementById('v2-form-overlay')?.remove();
   const ov = document.createElement('div');
   ov.className = 'v2-overlay'; ov.id = 'v2-form-overlay';
   ov.onclick = e => { if (e.target === ov) ov.remove(); };
   ov.innerHTML = `
     <div class="v2-modal" style="max-width:420px">
-      <div class="v2-modal-hd">📄 Import Bid from JIS<button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">✕</button></div>
+      <div class="v2-modal-hd">📄 ${targetBidId ? 'Start Bid from JIS' : 'Import Bid from JIS'}<button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">✕</button></div>
       <div class="v2-modal-bd">
         <p style="font-size:13px;color:var(--text-muted);margin:0">Upload a filled-out Job Information Sheet (.xlsx). Its "Title Sheet" tab will be read and matched against existing projects, team members, companies, and contacts — nothing is saved until you review and confirm.</p>
         <input type="file" id="jis-file-input" accept=".xlsx" style="font-size:13px">
@@ -2969,19 +3058,26 @@ function actImportJIS() {
       const preview = await api('POST', '/api/v2/jis/preview', { file_base64: base64 });
       JIS_PREVIEW = preview;
       ov.remove();
-      renderJISReview(preview);
+      renderJISReview(preview, targetBidId);
     } catch (e) { errEl.textContent = e.message; errEl.style.display = 'block'; }
   };
 }
 
-function renderJISReview(p) {
+function renderJISReview(p, targetBidId) {
   document.getElementById('v2-form-overlay')?.remove();
   const ov = document.createElement('div');
   ov.className = 'v2-overlay'; ov.id = 'v2-form-overlay';
   ov.onclick = e => { if (e.target === ov) ov.remove(); };
 
-  const isNewBid = !p.existing_bid;
-  const bidBanner = p.existing_bid
+  // Three modes: starting an existing opportunity from a JIS (targetBidId
+  // set from the bid card's "Start from JIS" button), enriching a bid # the
+  // JIS matched by coincidence, or creating a brand-new bid from scratch.
+  const startingExisting = !!targetBidId;
+  const isNewBid = !p.existing_bid && !startingExisting;
+  const editableFields = isNewBid || startingExisting;
+  const bidBanner = startingExisting
+    ? `<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:9px 12px;font-size:12.5px;color:#1e40af">Starting this opportunity as an active bid, using the details pulled from this JIS.</div>`
+    : p.existing_bid
     ? `<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:9px 12px;font-size:12.5px;color:#1e40af">
         This bid # already exists (<strong>${esc(p.existing_bid.bid_number)}</strong>, stage: ${STAGE[p.existing_bid.stage] || p.existing_bid.stage}) — this will <strong>enrich</strong> it (address, drawings, GC companies/contacts) without touching its stage, estimator, or due date.
       </div>`
@@ -2997,10 +3093,10 @@ function renderJISReview(p) {
       </div>
     </div>` : '';
 
-  const teamField = (label, jisInfo, fieldId) => isNewBid ? `
+  const teamField = (label, jisInfo, fieldId) => editableFields ? `
     <div class="v2-field"><label>${label}${jisInfo.jis_name ? ` <span style="font-weight:400;color:var(--text-muted)">(JIS: ${esc(jisInfo.jis_name)})</span>` : ''}</label>
       <select id="vf-${fieldId}">
-        <option value="">—</option>
+        <option value="">TBD</option>
         ${teamOpts().map(o => `<option value="${o.value}" ${jisInfo.matched?.id === o.value ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
       </select>
     </div>` : '';
@@ -3023,12 +3119,12 @@ function renderJISReview(p) {
 
   ov.innerHTML = `
     <div class="v2-modal" style="max-width:560px">
-      <div class="v2-modal-hd">📄 Review JIS Import<button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">✕</button></div>
+      <div class="v2-modal-hd">📄 ${startingExisting ? 'Start Bid from JIS' : 'Review JIS Import'}<button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">✕</button></div>
       <div class="v2-modal-bd">
         ${bidBanner}
         ${projectField}
-        <div class="v2-field"><label>Bid # ${isNewBid ? '<span class="req">*</span>' : ''}</label><input id="vf-jis_bid_number" type="text" value="${esc(p.bid_number || '')}" ${isNewBid ? '' : 'disabled'}></div>
-        <div class="v2-field"><label>Due Date</label><input id="vf-jis_due_date" type="date" value="${esc(p.due_date || '')}" ${isNewBid ? '' : 'disabled'}></div>
+        <div class="v2-field"><label>Bid # ${editableFields ? '<span class="req">*</span>' : ''}</label><input id="vf-jis_bid_number" type="text" value="${esc(p.bid_number || '')}" ${editableFields ? '' : 'disabled'}></div>
+        <div class="v2-field"><label>Due Date</label><input id="vf-jis_due_date" type="date" value="${esc(p.due_date || '')}" ${editableFields ? '' : 'disabled'}></div>
         <div class="v2-field"><label>Drawings</label><textarea id="vf-jis_drawings" rows="2" placeholder="Drawing set description…">${esc(p.drawings || '')}</textarea></div>
         <div class="v2-field"><label>Job Address</label>
           <input id="vf-jis_street" type="text" placeholder="Street" value="${esc(p.address?.street || '')}" style="margin-bottom:6px">
@@ -3046,7 +3142,7 @@ function renderJISReview(p) {
       <div class="v2-modal-err" id="jis-apply-err"></div>
       <div class="v2-modal-ft">
         <button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">Cancel</button>
-        <button class="v2-btn amber" id="jis-apply-btn">${isNewBid ? 'Create Bid' : 'Enrich Bid'}</button>
+        <button class="v2-btn amber" id="jis-apply-btn">${startingExisting ? 'Start Bid' : isNewBid ? 'Create Bid' : 'Enrich Bid'}</button>
       </div>
     </div>`;
   document.body.appendChild(ov);
@@ -3071,7 +3167,12 @@ function renderJISReview(p) {
         poc: gc.poc ? { contact_id: gc.poc.matched_contact?.id || null, jis_name: gc.poc.jis_name, phone: gc.poc.phone, email: gc.poc.email } : null,
       })),
     };
-    if (isNewBid) {
+    if (startingExisting) {
+      payload.target_bid_id = targetBidId;
+      payload.estimator_id = document.getElementById('vf-jis_estimator')?.value || null;
+      payload.salesperson_id = document.getElementById('vf-jis_salesperson')?.value || null;
+      if (!payload.bid_number) { errEl.textContent = 'Bid # is required'; errEl.style.display = 'block'; return; }
+    } else if (isNewBid) {
       const sel = COMBO_STATE['jis_project'] || [];
       payload.project_id = sel[0]?.id || null;
       payload.project_name = sel[0] && !sel[0].id ? sel[0].name : null;
@@ -3137,7 +3238,7 @@ async function openOnlinePanel() {
       <div class="v2-modal-bd">
         ${users.length ? users.map(u => `
           <div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border)">
-            <span class="initials-pill">${esc(u.initials)}</span>
+            <span class="initials-pill${u.role === 'sales' ? ' initials-pill-sales' : ''}">${esc(u.initials)}</span>
             <div style="flex:1;min-width:0">
               <div style="font-size:13px;font-weight:600">${esc(u.name)}</div>
               <div style="font-size:11px;color:var(--text-muted);text-transform:capitalize">${esc(u.role || '')}</div>

@@ -446,6 +446,13 @@ function require_(data, fields) {
   if (missing.length) throw new Error(`Missing required: ${missing.join(', ')}`);
 }
 
+// Bid/CO amounts may be negative (a change-order credit) but never exactly
+// zero — a $0 submission is almost always a data-entry mistake, not a real
+// value.
+function requireNonZeroAmount(amount) {
+  if (Number(amount) === 0) throw new Error('Amount cannot be $0 — enter a positive or negative value');
+}
+
 async function loadBid(id) {
   const { Bid } = getModels();
   const bid = await Bid.findById(Number(id)).lean();
@@ -520,18 +527,31 @@ async function updateSettingsV2(data) {
 
 // ── Opportunity creation ──────────────────────────────────────────────────────
 // Creates a Project (or attaches to an existing one) + an opportunity Bid.
-async function createOpportunity({ project_id, project_name, notes, created_by }) {
+async function createOpportunity({ project_id, project_name, notes, description, location, due_date, company_ids, new_companies, contact_ids, created_by }) {
   const M = getModels();
   let pid = project_id ? Number(project_id) : null;
   let isNewProject = false;
   if (!pid) {
     require_({ project_name }, ['project_name']);
     pid = await nextId('projects');
-    await M.Project.create({ _id: pid, name: project_name.trim(), created_by: created_by || null });
+    // description/location only apply when creating a brand-new project —
+    // attaching to an existing one leaves its own data alone.
+    await M.Project.create({ _id: pid, name: project_name.trim(), description: description || null, location: location || null, created_by: created_by || null });
     isNewProject = true;
   }
   const bidId = await nextId('bids');
-  await M.Bid.create({ _id: bidId, project_id: pid, stage: 'opportunity', notes: notes || null });
+  await M.Bid.create({ _id: bidId, project_id: pid, stage: 'opportunity', notes: notes || null, due_date: due_date || null });
+
+  const companyIds = await resolveCompanyIds(company_ids, new_companies);
+  for (const companyId of companyIds) await ensureBidCustomer(bidId, companyId);
+  // Contacts aren't scoped to a single customer this early — attach whichever
+  // ones were picked to every customer on the roster; refine per-customer
+  // later from the bid flyout (which already has that UI).
+  if (companyIds.length && contact_ids && contact_ids.length) {
+    const ids = contact_ids.map(Number);
+    await M.BidCustomer.updateMany({ bid_id: bidId }, { $addToSet: { contact_ids: { $each: ids } } });
+  }
+
   const actorId = created_by ? Number(created_by) : null;
   const proj = await M.Project.findById(pid).lean();
   if (isNewProject) {
@@ -539,7 +559,7 @@ async function createOpportunity({ project_id, project_name, notes, created_by }
   }
   await events.safeEmit('bid.created', {
     project_id: pid, bid_id: bidId, actor_id: actorId,
-    payload: { project_name: proj.name, stage: 'opportunity', estimator_id: null, salesperson_id: null, due_date: null },
+    payload: { project_name: proj.name, stage: 'opportunity', estimator_id: null, salesperson_id: null, due_date: due_date || null },
   });
   return { project_id: pid, bid_id: bidId };
 }
@@ -549,7 +569,7 @@ async function startBid(id, data, actorId) {
   const M = getModels();
   const bid = await loadBid(id);
   if (bid.stage !== 'opportunity') throw new Error(`Cannot start bid from stage '${bid.stage}'`);
-  require_(data, ['bid_number', 'estimator_id', 'salesperson_id', 'date_received', 'due_date']);
+  require_(data, ['bid_number', 'date_received', 'due_date']);
   const companyIds = await resolveCompanyIds(data.company_ids, data.new_companies);
   if (!companyIds.length) throw new Error('At least one customer company is required');
 
@@ -560,8 +580,9 @@ async function startBid(id, data, actorId) {
   await M.Bid.updateOne({ _id: bid._id }, { $set: {
     stage: 'active_bid',
     bid_number,
-    estimator_id: Number(data.estimator_id),
-    salesperson_id: Number(data.salesperson_id),
+    // Estimator/salesperson can be left TBD and assigned later.
+    estimator_id: data.estimator_id ? Number(data.estimator_id) : null,
+    salesperson_id: data.salesperson_id ? Number(data.salesperson_id) : null,
     sub_estimators: data.sub_estimators || [],
     date_received: data.date_received,
     due_date: data.due_date,
@@ -665,7 +686,7 @@ async function resolveCompanyIds(company_ids, new_companies) {
 // Contact.company_id is a real FK (no free-text company, unlike v1). Soft
 // delete via `active` — the field v2's schema already has for exactly this.
 function fmtContactBrief(c) {
-  return { id: c._id, first_name: c.first_name, last_name: c.last_name, full_name: [c.first_name, c.last_name].filter(Boolean).join(' ') || '(no name)', phone: c.phone, email: c.email };
+  return { id: c._id, first_name: c.first_name, last_name: c.last_name, full_name: [c.first_name, c.last_name].filter(Boolean).join(' ') || '(no name)', phone: c.phone, email: c.email, title: c.title };
 }
 async function fmtContact(c, companyById) {
   return { ...fmtContactBrief(c), company_id: c.company_id, company: companyById[c.company_id] || null, notes: c.notes, active: !!c.active };
@@ -699,7 +720,7 @@ async function createContact(data) {
     _id: id, company_id: companyId,
     first_name: data.first_name || null, last_name: data.last_name || null,
     phone: data.phone || null, email: data.email ? String(data.email).toLowerCase().trim() : null,
-    notes: data.notes || null, active: 1,
+    title: data.title || null, notes: data.notes || null, active: 1,
   });
   return getContactDetail(id);
 }
@@ -710,6 +731,7 @@ async function updateContact(id, data) {
   if ('last_name' in data) upd.last_name = data.last_name || null;
   if ('phone' in data) upd.phone = data.phone || null;
   if ('email' in data) upd.email = data.email ? String(data.email).toLowerCase().trim() : null;
+  if ('title' in data) upd.title = data.title || null;
   if ('notes' in data) upd.notes = data.notes || null;
   if (data.company_id) upd.company_id = Number(data.company_id);
   else if (data.new_company) upd.company_id = await resolveCompanyByName(data.new_company);
@@ -916,6 +938,7 @@ async function submitBid(id, data, actorId) {
   const bid = await loadBid(id);
   if (bid.stage !== 'active_bid') throw new Error(`Cannot submit from stage '${bid.stage}'`);
   require_(data, ['amount', 'jurisdiction', 'date_submitted', 'approved_by']);
+  requireNonZeroAmount(data.amount);
   const companyIds = await resolveCompanyIds(data.company_ids, data.new_companies);
   if (!companyIds.length) throw new Error('Pick at least one customer to submit to');
 
@@ -960,6 +983,7 @@ async function addSubmission(id, data) {
   const bid = await loadBid(id);
   if (bid.stage !== 'submitted') throw new Error(`Can only add submissions to a submitted bid (stage is '${bid.stage}')`);
   require_(data, ['amount', 'date_submitted', 'approved_by', 'submission_type']);
+  requireNonZeroAmount(data.amount);
   const companyId = data.company_id ? Number(data.company_id) : (data.new_company ? await resolveCompanyByName(data.new_company) : null);
   if (!companyId) throw new Error('Customer is required');
   await ensureBidCustomer(bid._id, companyId);
@@ -1048,7 +1072,10 @@ async function adminUpdate(entity, id, data) {
     if (!(f in data)) continue;
     let v = data[f] === '' ? null : data[f];
     if (NUMERIC_FK.has(f)) v = v ? Number(v) : null;
-    else if (f === 'amount') v = (v == null) ? null : Number(v);
+    else if (f === 'amount' || f === 'estimate_amount') {
+      v = (v == null) ? null : Number(v);
+      if (v != null) requireNonZeroAmount(v);
+    }
     else if (f === 'superseded' || f === 'is_current') v = v ? 1 : 0;
     upd[f] = v;
   }
@@ -1413,6 +1440,7 @@ async function submitCO(id, data, actorId) {
   const co = await loadCO(id);
   if (co.stage !== 'active_co') throw new Error(`Cannot submit CO from stage '${co.stage}'`);
   require_(data, ['estimate_amount', 'date_submitted', 'approved_by']);
+  requireNonZeroAmount(data.estimate_amount);
   const s = await getSettings();
   const next = addWorkingDays(data.date_submitted, s.fu_initial_days);
   await M.ChangeOrder.updateOne({ _id: co._id }, { $set: {
