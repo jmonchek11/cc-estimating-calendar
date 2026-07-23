@@ -61,50 +61,98 @@ async function sendMail({ to, subject, html }) {
 }
 
 // ── Base template ─────────────────────────────────────────────────────────────
+// The logo (same file as the login screen) is white-on-transparent, so it
+// only reads against a dark ground — hence the navy header rather than a
+// plain white one. accent-bar echoes the red/blue/star rule under the
+// wordmark in that same logo, the one visual through-line tying the email
+// back to the app itself.
 function base(content) {
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
 <style>
-  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;background:#f1f5f9;margin:0;padding:24px 16px}
-  .wrap{max-width:600px;margin:0 auto;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08)}
-  .hdr{background:#1e293b;padding:20px 28px}
-  .hdr h1{color:#fff;margin:0;font-size:17px;font-weight:700;letter-spacing:-.3px}
-  .hdr p{color:#94a3b8;margin:4px 0 0;font-size:12px}
-  .bdy{padding:24px 28px;color:#1e293b}
-  h2{font-size:18px;margin:0 0 14px;color:#0f172a}
-  p{margin:0 0 14px;font-size:14px;line-height:1.6;color:#475569}
-  table{width:100%;border-collapse:collapse;margin:14px 0}
-  th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#64748b;padding:7px 0;border-bottom:2px solid #e2e8f0}
-  td{padding:8px 0;font-size:14px;color:#334155;border-bottom:1px solid #f1f5f9;vertical-align:top}
-  td.lbl{font-size:12px;color:#64748b;width:110px;padding-right:12px}
-  .btn{display:inline-block;background:#2563eb;color:#fff!important;padding:11px 22px;border-radius:7px;text-decoration:none;font-size:14px;font-weight:600;margin-top:18px}
-  .pill{display:inline-block;padding:2px 9px;border-radius:12px;font-size:12px;font-weight:600}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;background:#e8ecf3;margin:0;padding:32px 16px}
+  .wrap{max-width:600px;margin:0 auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 1px 2px rgba(15,23,42,.04),0 12px 32px rgba(15,23,42,.10)}
+  .hdr{background:#0f172a;padding:28px 28px 24px;text-align:center}
+  .hdr img{width:180px;max-width:60%;height:auto;display:inline-block}
+  .accent-bar{height:4px;line-height:4px;font-size:0;background:linear-gradient(90deg,#5b8bb0 0%,#5b8bb0 33%,#dc2626 33%,#dc2626 50%,#2c4a6e 50%,#2c4a6e 67%,#dc2626 67%,#dc2626 84%,#5b8bb0 84%,#5b8bb0 100%)}
+  .bdy{padding:32px 28px 8px;color:#1e293b}
+  .icon-row td{border:none;padding:0;vertical-align:middle}
+  .icon-badge{width:38px;height:38px;border-radius:10px;display:block}
+  h2{font-size:19px;margin:0;color:#0f172a;font-weight:800;letter-spacing:-.2px}
+  p{margin:0 0 14px;font-size:14px;line-height:1.65;color:#475569}
+  table{width:100%;border-collapse:collapse;margin:16px 0}
+  th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#64748b;padding:7px 0;border-bottom:2px solid #eef1f6}
+  td{padding:9px 0;font-size:14px;color:#1e293b;border-bottom:1px solid #eef1f6;vertical-align:top}
+  td.lbl{font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:#94a3b8;width:112px;padding-right:12px}
+  .btn-row{margin:22px 0 8px}
+  .btn-row td{padding:0;border:none}
+  .btn-row td.gap{width:10px}
+  .btn{display:inline-block;background:#2563eb;color:#fff!important;padding:12px 22px;border-radius:9px;text-decoration:none;font-size:14px;font-weight:700;box-shadow:0 4px 10px rgba(37,99,235,.28)}
+  .btn-outline{display:inline-block;background:#fff;color:#1e293b!important;padding:11px 20px;border-radius:9px;text-decoration:none;font-size:14px;font-weight:700;border:1.5px solid #dbe1ea}
+  .pill{display:inline-block;padding:3px 10px;border-radius:99px;font-size:11.5px;font-weight:700}
   .pill-green{background:#dcfce7;color:#166534}
   .pill-red{background:#fee2e2;color:#991b1b}
   .pill-blue{background:#dbeafe;color:#1e40af}
   .pill-amber{background:#fef3c7;color:#92400e}
   .pill-gray{background:#f1f5f9;color:#475569}
-  .ftr{background:#f8fafc;padding:14px 28px;border-top:1px solid #e2e8f0;font-size:12px;color:#94a3b8;text-align:center}
-  .ftr a{color:#2563eb;text-decoration:none}
-  .section{margin-bottom:24px}
-  .section-title{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#64748b;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid #e2e8f0}
-  .bid-row{padding:10px 0;border-bottom:1px solid #f1f5f9}
-  .bid-name{font-weight:600;font-size:14px;color:#0f172a}
+  .ftr{background:#f8fafc;padding:18px 28px;border-top:1px solid #eef1f6;font-size:12px;color:#94a3b8;text-align:center}
+  .ftr a{color:#2563eb;text-decoration:none;font-weight:600}
+  .section{margin-bottom:26px}
+  .section-title{font-size:12.5px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:#64748b;margin-bottom:10px;padding-bottom:7px;border-bottom:1px solid #eef1f6}
+  .bid-row{padding:11px 0;border-bottom:1px solid #f4f6f9}
+  .bid-name{font-weight:700;font-size:14px;color:#0f172a}
   .bid-meta{font-size:12px;color:#64748b;margin-top:2px}
   .amount{font-weight:700;color:#166534}
   .overdue{color:#dc2626}
-  @media(max-width:480px){.bdy{padding:18px 16px}.hdr{padding:16px 18px}}
+  @media(max-width:480px){.bdy{padding:24px 18px 4px}.hdr{padding:22px 18px 18px}}
 </style></head><body>
 <div class="wrap">
-  <div class="hdr">
-    <h1>🏗️ LIS Estimating Calendar</h1>
-    <p>Liberty Integrated Solutions</p>
-  </div>
+  <div class="hdr"><img src="${APP_URL}/logo.png" alt="Liberty Integrated Solutions — Estimating Calendar"></div>
+  <div class="accent-bar">&nbsp;</div>
   <div class="bdy">${content}</div>
   <div class="ftr">
-    <a href="${APP_URL}">Open App</a> &nbsp;·&nbsp; LIS Estimating Calendar &nbsp;·&nbsp; libertyintegrated.com
+    <a href="${APP_URL}">Open App</a> &nbsp;·&nbsp; Estimating Calendar &nbsp;·&nbsp; libertyintegrated.com
   </div>
 </div>
 </body></html>`;
+}
+
+// Icon + heading, laid out as a table so Outlook's Word rendering engine
+// (no flexbox support) still lines them up instead of stacking.
+function iconHeading(iconUrl, text) {
+  return `<table class="icon-row" role="presentation" cellpadding="0" cellspacing="0" style="margin-bottom:16px"><tr>
+    <td style="width:38px"><img class="icon-badge" src="${iconUrl}" alt=""></td>
+    <td style="padding-left:12px"><h2>${text}</h2></td>
+  </tr></table>`;
+}
+
+// Two-up button row (primary action + an optional secondary one) — also a
+// table, same Outlook-safety reason as iconHeading.
+function buttonRow(primary, secondary) {
+  return `<table class="btn-row" role="presentation" cellpadding="0" cellspacing="0"><tr>
+    <td><a href="${primary.href}" class="btn">${primary.label}</a></td>
+    ${secondary ? `<td class="gap">&nbsp;</td><td><a href="${secondary.href}" class="btn-outline">${secondary.label}</a></td>` : ''}
+  </tr></table>`;
+}
+
+// "Add to Outlook" — Outlook Web's own compose-event deep link (no .ics
+// attachment involved, which matters here: an attachment is one more thing
+// a mail security gateway could flag, and we've already been burned once by
+// this exact recipient's filtering). All-day, since a bid due date is a
+// date, not a specific time.
+function outlookCalendarLink({ subject, dateStr, body }) {
+  if (!dateStr) return null;
+  const end = new Date(dateStr + 'T00:00:00');
+  end.setDate(end.getDate() + 1);
+  const params = new URLSearchParams({
+    path: '/calendar/action/compose',
+    rru: 'addevent',
+    allday: 'true',
+    startdt: dateStr,
+    enddt: end.toISOString().slice(0, 10),
+    subject: subject || 'Bid Due Date',
+    body: body || '',
+  });
+  return `https://outlook.office.com/calendar/0/deeplink/compose?${params.toString()}`;
 }
 
 function fmtCurrency(n) {
@@ -145,13 +193,22 @@ function emailAssigned(bid, recipientName, actorName, role) {
   // have these fields and fall back to the bare app URL.
   const hasDeepLink = bid.project_id && bid.bid_id;
   const link = hasDeepLink ? `${APP_URL}/#project/${bid.project_id}/bid/${bid.bid_id}` : APP_URL;
+  const label = bid.project_name || bid.bid_number || 'Unnamed';
+  const calLink = outlookCalendarLink({
+    subject: `Bid Due: ${label}`,
+    dateStr: bid.estimate_due_date,
+    body: [bid.bid_number ? `Bid #${bid.bid_number}` : null, bid.customer ? `Customer: ${bid.customer}` : null, link].filter(Boolean).join('\n'),
+  });
   return {
-    subject: `You've been added to a bid — ${bid.project_name || bid.bid_number || 'Unnamed'}`,
+    subject: `You've been added to a bid — ${label}`,
     html: base(`
-      <h2>📋 New Bid Assignment</h2>
+      ${iconHeading(`${APP_URL}/icon-active-bids.png`, 'New Bid Assignment')}
       <p>Hi <strong>${recipientName}</strong>, <strong>${actorName}</strong> has added you as ${roleText} on a bid.</p>
       ${bidTable(bid)}
-      <a href="${link}" class="btn">${hasDeepLink ? 'Open Bid' : 'Open App'}</a>
+      ${buttonRow(
+        { href: link, label: hasDeepLink ? 'Open Bid' : 'Open App' },
+        calLink ? { href: calLink, label: '📅 Add Due Date to Outlook' } : null
+      )}
     `),
   };
 }
