@@ -81,6 +81,43 @@ body {
 .logo-title { color: #f1f5f9; font-weight: 700; font-size: 14px; line-height: 1.2; }
 .logo-sub { color: var(--sidebar-text); font-size: 11px; }
 
+/* ── App switcher (jump to the other Liberty apps) ── */
+.app-switcher { padding: 10px 10px 12px; border-bottom: 1px solid #1e293b; margin-bottom: 6px; position: relative; }
+.switcher-btn {
+  width: 100%; display: flex; align-items: center; gap: 9px; background: var(--sidebar-hover-bg);
+  border: 1px solid #29344a; color: #e2e8f0; border-radius: 8px; padding: 8px 9px;
+  cursor: pointer; font: inherit; font-size: 12.5px; font-weight: 600; text-align: left;
+  transition: background .15s, border-color .15s;
+}
+.switcher-btn:hover { background: #243044; border-color: #334361; }
+.switcher-btn[aria-expanded="true"] { background: #243044; border-color: var(--primary); }
+.switcher-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--primary); flex-shrink: 0; box-shadow: 0 0 0 3px rgba(37,99,235,.22); }
+.switcher-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.switcher-chevron { color: var(--sidebar-text); flex-shrink: 0; transition: transform .15s; display: flex; }
+.switcher-btn[aria-expanded="true"] .switcher-chevron { transform: rotate(180deg); }
+
+.switcher-pop {
+  position: absolute; top: calc(100% + 6px); left: 10px; right: 10px; z-index: 20;
+  background: #152238; border: 1px solid #2a3752; border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.45); padding: 6px;
+  opacity: 0; transform: translateY(-4px) scale(.98); pointer-events: none;
+  transition: opacity .13s ease, transform .13s ease;
+}
+.switcher-pop.open { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
+.switcher-pop-label { font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #5b6b85; padding: 7px 9px 5px; }
+.app-tile { display: flex; align-items: center; gap: 10px; padding: 8px 9px; border-radius: 7px; color: #e2e8f0; text-decoration: none; cursor: pointer; position: relative; }
+.app-tile:hover { background: #1e2c47; }
+.app-tile .icon { width: 30px; height: 30px; border-radius: 7px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 14px; color: #fff; font-weight: 700; }
+.app-tile .body { flex: 1; min-width: 0; }
+.app-tile .name { font-size: 12.5px; font-weight: 600; line-height: 1.25; }
+.app-tile .role { font-size: 10.5px; color: #8291a8; line-height: 1.3; margin-top: 1px; }
+.app-tile .go { color: #5b6b85; flex-shrink: 0; display: flex; }
+.app-tile.current { background: #1c2b45; cursor: default; }
+.app-tile.current:hover { background: #1c2b45; }
+.app-tile.current .check { color: var(--sidebar-active-text); flex-shrink: 0; display: flex; }
+.switcher-pop-divider { height: 1px; background: #243149; margin: 5px 4px; }
+.switcher-pop-foot { font-size: 10.5px; color: #5b6b85; padding: 7px 9px 5px; display: flex; align-items: center; gap: 5px; }
+
 .nav-section-label {
   padding: 11px 16px 4px;
   font-size: 10px;
