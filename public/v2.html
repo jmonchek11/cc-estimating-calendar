@@ -1519,7 +1519,13 @@ function bidActions(b) {
                   <button class="v2-btn outline" onclick="actEditOpportunityDetails(${b.id})">📅 Due Date / Assign</button>
                   <button class="v2-btn gray" onclick="actCloseBid(${b.id})">Close</button>`;
     } else if (b.stage === 'active_bid') {
+      // "+ Add Submission" belongs here too, not just in 'submitted' — a
+      // reactivated bid (reactivateBid() deliberately leaves old submissions
+      // as history) lands back in active_bid with some/all customers already
+      // carrying a current submission, and Submit Bid only covers customers
+      // who don't have one yet.
       workflow = `<button class="v2-btn green" onclick="actSubmitBid(${b.id})">Submit Bid</button>
+                  <button class="v2-btn amber" onclick="actAddSubmission(${b.id})">+ Add Submission</button>
                   <button class="v2-btn outline" onclick="actAddCustomers(${b.id})">+ Customer</button>
                   <button class="v2-btn gray" onclick="actCloseBid(${b.id})">Close</button>`;
     } else if (b.stage === 'submitted') {

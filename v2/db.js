@@ -982,10 +982,14 @@ async function submitBid(id, data, actorId) {
 // ── Add another submission to a submitted bid ─────────────────────────────────
 // Another customer, or a best-and-final / scope change to a customer we already
 // submitted to (no new drawings). The new submission gets its own follow-up clock.
-async function addSubmission(id, data) {
+async function addSubmission(id, data, actorId) {
   const M = getModels();
   const bid = await loadBid(id);
-  if (bid.stage !== 'submitted') throw new Error(`Can only add submissions to a submitted bid (stage is '${bid.stage}')`);
+  // Also reachable from 'active_bid' — a reactivated bid (reactivateBid()
+  // deliberately leaves old submissions as history rather than clearing
+  // them) lands back here with some/all customers already carrying a
+  // current submission from before, and this is how you log the revision.
+  if (!['active_bid', 'submitted'].includes(bid.stage)) throw new Error(`Can only add submissions to an active or submitted bid (stage is '${bid.stage}')`);
   require_(data, ['amount', 'date_submitted', 'approved_by', 'submission_type']);
   requireNonZeroAmount(data.amount);
   const companyId = data.company_id ? Number(data.company_id) : (data.new_company ? await resolveCompanyByName(data.new_company) : null);
@@ -1008,7 +1012,29 @@ async function addSubmission(id, data) {
   });
   await recomputeBidHeadline(bid._id);
   await recomputeBidFollowup(bid._id);
-  return { bid_id: bid._id };
+
+  // Mirrors submitBid()'s own "flip to Submitted once every customer is
+  // covered" check — only relevant when called from 'active_bid'; a bid
+  // already in 'submitted' just stays there.
+  let stage = bid.stage;
+  if (bid.stage === 'active_bid') {
+    const [allCustomers, currentSubs] = await Promise.all([
+      M.BidCustomer.find({ bid_id: bid._id }).lean(),
+      M.BidSubmission.find({ bid_id: bid._id, is_current: 1 }).lean(),
+    ]);
+    const submittedCompanyIds = new Set(currentSubs.map(s => s.company_id));
+    const allSubmitted = allCustomers.length > 0 && allCustomers.every(bc => submittedCompanyIds.has(bc.company_id));
+    if (allSubmitted) {
+      stage = 'submitted';
+      await M.Bid.updateOne({ _id: bid._id }, { $set: { stage, updated_at: ts() } });
+      const proj = await M.Project.findById(bid.project_id).lean();
+      await events.safeEmit('bid.stage_changed', {
+        project_id: bid.project_id, bid_id: bid._id, actor_id: actorId || null,
+        payload: { from: 'active_bid', to: 'submitted', project_name: proj?.name || null },
+      });
+    }
+  }
+  return { bid_id: bid._id, stage };
 }
 
 // ── (submitted | closed) → active_bid/opportunity ("Reactivate") ──────────────
