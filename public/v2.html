@@ -601,21 +601,37 @@ const estimatorColor = (id) => id ? ESTIMATOR_PALETTE[Number(id) % ESTIMATOR_PAL
 let CAL_STATE = { year: new Date().getFullYear(), month: new Date().getMonth(), filter: 'all' };
 let CAL_DAY_MAP = {};
 
-async function fetchCalendarItems() {
+// mineOnly mirrors the rest of the Dashboard's "My View" toggle — filters to
+// bids/COs where the current user is estimator, salesperson, or a
+// sub-estimator, same rule used everywhere else "mine" is computed. The
+// standalone Calendar page calls this with no argument (always shows all).
+async function fetchCalendarItems(mineOnly) {
   const [opp, active, sub, activeCo, subCo] = await Promise.all([
     api('GET', '/api/v2/bid-list?stage=opportunity'), api('GET', '/api/v2/bid-list?stage=active_bid'), api('GET', '/api/v2/bid-list?stage=submitted'),
     api('GET', '/api/v2/co-list?stage=active_co'), api('GET', '/api/v2/co-list?stage=submitted_co'),
   ]);
-  return [
-    ...[...opp, ...active, ...sub].map(b => ({ kind: 'bid', id: b.id, project_id: b.project_id, title: b.project, label: b.bid_number, due_date: b.due_date, next_followup_date: b.next_followup_date, estimator: b.estimator, salesperson: b.salesperson, customer: (b.customers || []).join(', '), stage: b.stage })),
+  let items = [
+    ...[...opp, ...active, ...sub].map(b => ({ kind: 'bid', id: b.id, project_id: b.project_id, title: b.project, label: b.bid_number, due_date: b.due_date, next_followup_date: b.next_followup_date, walkthrough_date: b.walkthrough_date, walkthrough_time: b.walkthrough_time, estimator: b.estimator, salesperson: b.salesperson, sub_estimators: b.sub_estimators || [], customer: (b.customers || []).join(', '), stage: b.stage })),
     ...[...activeCo, ...subCo].map(c => ({ kind: 'co', id: c.id, project_id: c.project_id, title: `${c.co_number} — ${c.name}`, label: c.project, due_date: c.due_date, next_followup_date: c.next_followup_date, estimator: c.estimator, salesperson: c.salesperson, customer: null, stage: c.stage })),
   ];
+  if (mineOnly && CURRENT_USER) {
+    items = items.filter(it => it.estimator?.id === CURRENT_USER.id || it.salesperson?.id === CURRENT_USER.id || (it.sub_estimators || []).some(se => se.id === CURRENT_USER.id));
+  }
+  return items;
+}
+function fmtTimeShort(t) {
+  if (!t) return '';
+  const [h, m] = t.split(':').map(Number);
+  const period = h >= 12 ? 'p' : 'a';
+  const h12 = h % 12 || 12;
+  return m ? `${h12}:${String(m).padStart(2, '0')}${period}` : `${h12}${period}`;
 }
 function calendarLegendHtml() {
   const estimators = (META.team || []).filter(m => m.role === 'estimator');
   return [
     ...estimators.map(m => `<span class="cal-legend-item"><span class="cal-legend-dot" style="background:${estimatorColor(m.id)}"></span>${esc(m.initials)}</span>`),
     `<span class="cal-legend-item"><span class="cal-legend-dot" style="background:#1e293b;border:1px dashed #94a3b8"></span>Follow-up</span>`,
+    `<span class="cal-legend-item"><span class="cal-legend-dot" style="background:#0891b2"></span>🚶 Walk-through</span>`,
   ].join('');
 }
 function calendarControlsHtml(reRenderFn) {
@@ -675,6 +691,7 @@ function buildCalendarGrid(year, month, items, filter) {
   items.forEach(it => {
     if (filter !== 'followups_only') add(it.due_date, it, 'due');
     if (filter !== 'due_only') add(it.next_followup_date, it, 'fu');
+    if (filter !== 'followups_only') add(it.walkthrough_date, it, 'walkthrough');
   });
 
   const headers = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => `<div class="cal-hdr-cell">${d}</div>`).join('');
@@ -701,6 +718,11 @@ function buildCalendarGrid(year, month, items, filter) {
             style="background:${c}a6;border-left-color:${c};cursor:grab">
           <span class="cal-chip-txt">${esc(item.title)}</span>
           ${item.estimator ? `<span class="cal-chip-ini" style="color:#fff">${esc(item.estimator.initials)}</span>` : ''}
+        </div>`;
+      }
+      if (type === 'walkthrough') {
+        return `<div class="cal-chip" style="background:#0891b2a6;border-left-color:#0891b2">
+          <span class="cal-chip-txt">🚶 ${esc(item.title)}${item.walkthrough_time ? ' · ' + fmtTimeShort(item.walkthrough_time) : ''}</span>
         </div>`;
       }
       return `<div class="cal-chip cal-chip-fu"><span class="cal-chip-txt">📞 ${esc(item.title)}</span></div>`;
@@ -748,8 +770,8 @@ function openCalDayModal(dateStr) {
   if (!items.length) return;
   const label = new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
   const rows = items.map(({ item, type }) => {
-    const color = type === 'due' ? estimatorColor(item.estimator?.id) : '#64748b';
-    const typeLabel = type === 'due' ? '📐 Due date' : '📞 Follow-up';
+    const color = type === 'due' ? estimatorColor(item.estimator?.id) : type === 'walkthrough' ? '#0891b2' : '#64748b';
+    const typeLabel = type === 'due' ? '📐 Due date' : type === 'walkthrough' ? `🚶 Walk-through${item.walkthrough_time ? ' · ' + fmtTimeShort(item.walkthrough_time) : ''}` : '📞 Follow-up';
     return `<div class="proj-row" onclick="closeProfileModal();${item.kind === 'bid' ? `openBidFlyout(${item.project_id},${item.id})` : `openCoFlyout(${item.project_id},${item.id})`}">
       <div style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0;margin-top:5px"></div>
       <div style="flex:1;min-width:0">
@@ -1179,7 +1201,7 @@ async function renderDashboard() {
     await ensureMeta();
     if (DASH_MINE === null) DASH_MINE = defaultMine();
     const mine = DASH_MINE && CURRENT_USER;
-    [d, calItems] = await Promise.all([api('GET', '/api/v2/dashboard' + (mine ? '?mine_only=true' : '')), fetchCalendarItems()]);
+    [d, calItems] = await Promise.all([api('GET', '/api/v2/dashboard' + (mine ? '?mine_only=true' : '')), fetchCalendarItems(mine)]);
   } catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
   DASH_DATA = d;
 
@@ -2210,6 +2232,8 @@ function actEditBid(bidId) {
       { id: 'due_date', label: 'Due Date', type: 'date', value: b.due_date },
       { id: 'start_date', label: 'Start Date', type: 'date', value: b.start_date },
       { id: 'drawing_stage', label: 'Drawing Stage', type: 'text', value: b.drawing_stage },
+      { id: 'walkthrough_date', label: 'Jobsite Walk-through Date', type: 'date', value: b.walkthrough_date },
+      { id: 'walkthrough_time', label: 'Jobsite Walk-through Time', type: 'time', value: b.walkthrough_time },
     );
   } else if (showSubEst) {
     // Opportunity stage has no estimator/salesperson fields in this form at

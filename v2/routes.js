@@ -167,6 +167,17 @@ function notifyAssignmentDiff(bidId, oldBid, newData, actorId) {
   if (newSpId && newSpId !== oldBid?.salesperson_id) notify.notifyAssigned(bidId, newSpId, actorId, 'salesperson');
 }
 
+// A walk-through date/time being set for the first time, or changed to a
+// different value, announces once — same fire-and-forget pattern as
+// notifyAssignmentDiff above.
+function notifyWalkthroughDiff(bidId, oldBid, newData, actorId) {
+  const dateChanged = 'walkthrough_date' in newData && newData.walkthrough_date !== oldBid?.walkthrough_date;
+  const timeChanged = 'walkthrough_time' in newData && newData.walkthrough_time !== oldBid?.walkthrough_time;
+  if ((dateChanged || timeChanged) && (newData.walkthrough_date || oldBid?.walkthrough_date)) {
+    notify.notifyWalkthroughSet(bidId, actorId);
+  }
+}
+
 // Audit trail — admin-only, same gate as Data Health merges (visibility
 // into everyone's activity across the team).
 router.get('/api/v2/activity', requireAdmin, async (req, res) => {
@@ -204,7 +215,10 @@ router.post('/api/v2/bids/:id/submit',        t(req => v2db.submitBid(req.params
 router.patch('/api/v2/admin/:entity/:id',     requireAdminOrAssigned, t(async req => {
     const oldBid = req.params.entity === 'bid' ? await v2db.loadBid(req.params.id).catch(() => null) : null;
     const r = await v2db.adminUpdate(req.params.entity, req.params.id, req.body);
-    if (req.params.entity === 'bid') notifyAssignmentDiff(Number(req.params.id), oldBid, req.body, req.session.userId);
+    if (req.params.entity === 'bid') {
+      notifyAssignmentDiff(Number(req.params.id), oldBid, req.body, req.session.userId);
+      notifyWalkthroughDiff(Number(req.params.id), oldBid, req.body, req.session.userId);
+    }
     return r;
   },
   async (req) => {

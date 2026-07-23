@@ -136,25 +136,38 @@ function buttonRow(primary, secondary) {
   </tr></table></div>`;
 }
 
+// Pure string/integer arithmetic on a "YYYY-MM-DD" + "HH:MM" pair — deliberately
+// avoids the real Date object for this, since Date always resolves through
+// SOME timezone (the server's, usually UTC on Render) and these values are
+// meant to be taken as-is, wall-clock, in whatever timezone the recipient's
+// own calendar is in. Only used to add a duration for the calendar link's
+// end time, never to reinterpret the value in a different zone.
+function addMinutesToDateTime(dateStr, timeStr, minutes) {
+  const [h, m] = timeStr.split(':').map(Number);
+  const totalMin = h * 60 + m + minutes;
+  const dayOffset = Math.floor(totalMin / 1440);
+  const remMin = ((totalMin % 1440) + 1440) % 1440;
+  const d = new Date(dateStr + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + dayOffset);
+  return { date: d.toISOString().slice(0, 10), time: `${String(Math.floor(remMin / 60)).padStart(2, '0')}:${String(remMin % 60).padStart(2, '0')}` };
+}
+
 // "Add to Outlook" — Outlook Web's own compose-event deep link (no .ics
 // attachment involved, which matters here: an attachment is one more thing
 // a mail security gateway could flag, and we've already been burned once by
-// this exact recipient's filtering). All-day, since a due date is a date,
-// not a specific time.
-function outlookCalendarLink({ subject, dateStr, body }) {
+// this exact recipient's filtering). All-day when there's no specific time
+// (a due date is just a date); a real 1-hour timed event when there is
+// (a walk-through has an actual time on the clock).
+function outlookCalendarLink({ subject, dateStr, timeStr, durationMinutes = 60, body }) {
   if (!dateStr) return null;
-  const end = new Date(dateStr + 'T00:00:00');
-  end.setDate(end.getDate() + 1);
-  const params = new URLSearchParams({
-    path: '/calendar/action/compose',
-    rru: 'addevent',
-    allday: 'true',
-    startdt: dateStr,
-    enddt: end.toISOString().slice(0, 10),
-    subject: subject || 'Due Date',
-    body: body || '',
-  });
-  return `https://outlook.office.com/calendar/0/deeplink/compose?${params.toString()}`;
+  const params = { path: '/calendar/action/compose', rru: 'addevent', subject: subject || 'Estimating Calendar', body: body || '' };
+  if (timeStr) {
+    const end = addMinutesToDateTime(dateStr, timeStr, durationMinutes);
+    Object.assign(params, { startdt: `${dateStr}T${timeStr}:00`, enddt: `${end.date}T${end.time}:00` });
+  } else {
+    Object.assign(params, { allday: 'true', startdt: dateStr, enddt: addMinutesToDateTime(dateStr, '00:00', 24 * 60).date });
+  }
+  return `https://outlook.office.com/calendar/0/deeplink/compose?${new URLSearchParams(params).toString()}`;
 }
 
 // Every template that shows a single bid/CO ends with this — the primary
@@ -179,6 +192,14 @@ function fmtDate(d) {
   if (!d) return null;
   const [y, m, day] = d.split('-');
   return new Date(Number(y), Number(m) - 1, Number(day)).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function fmtTime(t) {
+  if (!t) return null;
+  const [h, m] = t.split(':').map(Number);
+  const period = h >= 12 ? 'PM' : 'AM';
+  const h12 = h % 12 || 12;
+  return `${h12}:${String(m).padStart(2, '0')} ${period}`;
 }
 
 function stageName(s) {
@@ -242,7 +263,7 @@ function emailAwarded(bid, actorName) {
       ${iconHeading(`${APP_URL}/icon-awarded.png`, 'Bid Awarded!')}
       <p><strong>${actorName}</strong> marked a bid as awarded${amtStr ? ` for <strong>${amtStr}</strong>` : ''}.</p>
       ${bidTable(bid)}
-      ${actionButtons(bid, { href: APP_URL, label: 'Open App' })}
+      ${buttonRow({ href: APP_URL, label: 'Open App' })}
     `),
   };
 }
@@ -256,6 +277,45 @@ function emailReminder(bid, reminder, recipientName) {
       ${bidTable(bid)}
       ${reminder.note ? `<div style="margin:14px 0;padding:12px 16px;background:#fffbeb;border-left:3px solid #f59e0b;border-radius:4px;font-size:14px;color:#78350f">${reminder.note}</div>` : ''}
       ${actionButtons(bid, { href: APP_URL, label: 'Open App' })}
+    `),
+  };
+}
+
+// Fires once, right when a walk-through date/time is set or rescheduled.
+function emailWalkthroughSet(bid, walkthroughDate, walkthroughTime, recipientName, actorName) {
+  const hasDeepLink = bid.project_id && bid.bid_id;
+  const link = hasDeepLink ? `${APP_URL}/#project/${bid.project_id}/bid/${bid.bid_id}` : APP_URL;
+  const label = bid.project_name || bid.bid_number || 'Unnamed';
+  const whenStr = fmtDate(walkthroughDate) + (walkthroughTime ? ` at ${fmtTime(walkthroughTime)}` : '');
+  const calLink = outlookCalendarLink({
+    subject: `Jobsite Walk-through: ${label}`,
+    dateStr: walkthroughDate, timeStr: walkthroughTime,
+    body: [bid.bid_number ? `Bid #${bid.bid_number}` : null, bid.customer ? `Customer: ${bid.customer}` : null, link].filter(Boolean).join('\n'),
+  });
+  return {
+    subject: `🚶 Jobsite Walk-through Scheduled — ${label}`,
+    html: base(`
+      ${iconHeading(`${APP_URL}/icon-walkthrough.png`, 'Jobsite Walk-through Scheduled')}
+      <p>Hi <strong>${recipientName}</strong>, <strong>${actorName}</strong> scheduled a jobsite walk-through for this bid — <strong>${whenStr}</strong>.</p>
+      ${bidTable(bid)}
+      ${buttonRow({ href: link, label: hasDeepLink ? 'Open Bid' : 'Open App' }, calLink ? { href: calLink, label: '📅 Add Walk-through to Outlook' } : null)}
+    `),
+  };
+}
+
+// Fires ~24 hours before, via the hourly cron in server.js.
+function emailWalkthroughReminder(bid, walkthroughDate, walkthroughTime, recipientName) {
+  const hasDeepLink = bid.project_id && bid.bid_id;
+  const link = hasDeepLink ? `${APP_URL}/#project/${bid.project_id}/bid/${bid.bid_id}` : APP_URL;
+  const label = bid.project_name || bid.bid_number || 'Unnamed';
+  const whenStr = walkthroughTime ? `tomorrow at ${fmtTime(walkthroughTime)}` : 'tomorrow';
+  return {
+    subject: `🚶 Walk-through Tomorrow — ${label}`,
+    html: base(`
+      ${iconHeading(`${APP_URL}/icon-walkthrough.png`, 'Walk-through Tomorrow')}
+      <p>Hi <strong>${recipientName}</strong>, reminder — the jobsite walk-through for this bid is <strong>${whenStr}</strong>.</p>
+      ${bidTable(bid)}
+      ${buttonRow({ href: link, label: hasDeepLink ? 'Open Bid' : 'Open App' })}
     `),
   };
 }
@@ -402,4 +462,4 @@ function emailIdeaStatusChanged(idea, newStatus) {
   };
 }
 
-module.exports = { sendMail, emailAssigned, emailFollowup, emailAwarded, emailReminder, emailDigest, emailIdeaSubmitted, emailIdeaStatusChanged };
+module.exports = { sendMail, emailAssigned, emailFollowup, emailAwarded, emailReminder, emailWalkthroughSet, emailWalkthroughReminder, emailDigest, emailIdeaSubmitted, emailIdeaStatusChanged };

@@ -64,6 +64,14 @@ const BidSchema = new mongoose.Schema({
   drawings:       { type: String, default: null },               // drawing SET description, e.g. "Rev 2 dated 5/1/26 prepared by XYZ Architects" — from the JIS title sheet, distinct from drawing_stage
   notes:          { type: String, default: null },
 
+  // Jobsite walk-through — optional, independent of due_date/stage. Both
+  // fields reset walkthrough_reminder_sent to false when either changes
+  // (see adminUpdate), so a rescheduled walk-through gets its 24h-before
+  // reminder again instead of silently keeping the old one's "already sent" flag.
+  walkthrough_date:          { type: String, default: null },
+  walkthrough_time:          { type: String, default: null },    // "HH:MM", 24-hour — reminder only fires when both date AND time are set
+  walkthrough_reminder_sent: { type: Boolean, default: false },
+
   // Denormalized "headline" snapshot of the bid's current submission — kept in
   // sync from BidSubmission (most-recent current submission, or the awarded
   // company's submission once awarded). Source of truth is the BidSubmission

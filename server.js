@@ -856,6 +856,30 @@ cron.schedule('5 7 * * *', async () => {
   }
 }, { timezone: 'America/New_York' });
 
+// Hourly — jobsite walk-through reminders, 24h before. Unlike the other
+// cron jobs (daily is fine for a date-only due date), a walk-through has a
+// specific time of day, so "24 hours before" only lands in the right window
+// if checked this often — see getBidsNeedingWalkthroughReminder's 1-hour bucket.
+cron.schedule('0 * * * *', async () => {
+  try {
+    const due = await v2db.getBidsNeedingWalkthroughReminder();
+    if (!due.length) return;
+    console.log(`[cron] walk-through reminders: ${due.length} bid(s) due`);
+    for (const bid of due) {
+      const shape = await v2notify.bidEmailShape(bid._id);
+      if (!shape) continue;
+      const recipients = await v2notify.bidRecipients(bid);
+      for (const r of recipients) {
+        const { subject, html } = mailer.emailWalkthroughReminder(shape, bid.walkthrough_date, bid.walkthrough_time, r.name);
+        await mailer.sendMail({ to: r.email, subject, html });
+      }
+      await v2db.markWalkthroughReminderSent(bid._id);
+    }
+  } catch (e) {
+    console.error('[cron] walk-through reminder error:', e.message);
+  }
+}, { timezone: 'America/New_York' });
+
 // Monday 6 AM ET — weekly digest to all users with email on file
 // Reads v2's data (v1's own getDigest is retired here to avoid sending two
 // separate digest emails as v2 becomes the system of record).

@@ -216,6 +216,8 @@ async function getProjectDetail(projectId) {
     start_date: b.start_date,
     date_received: b.date_received,
     due_date: b.due_date,
+    walkthrough_date: b.walkthrough_date,
+    walkthrough_time: b.walkthrough_time,
     estimate_amount: b.estimate_amount,
     jurisdiction: b.jurisdiction,
     date_submitted: b.date_submitted,
@@ -434,6 +436,24 @@ function addWorkingDays(dateStr, days) {
     if (!isWeekendOrHoliday(_isoUTC(d))) remaining--;
   }
   return _isoUTC(d);
+}
+
+// Everything else date-related in this app is a naive date-only string —
+// server-local vs. Eastern never matters because there's no time-of-day
+// involved. Walk-through TIME breaks that: "24 hours before 2pm" only lands
+// in the right hour if 2pm is actually understood as 2pm Eastern (where the
+// team is), not 2pm UTC (where Render's server clock is). No timezone
+// library needed — Intl's shortOffset gives the ET UTC-offset for a given
+// date (handles the EDT/EST switch automatically), then it's just arithmetic.
+function etOffsetMinutes(dateStr) {
+  const noonUTC = new Date(dateStr + 'T12:00:00Z');
+  const part = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', timeZoneName: 'shortOffset' }).formatToParts(noonUTC).find(p => p.type === 'timeZoneName')?.value || 'GMT-5';
+  const m = part.match(/GMT([+-]\d+)/);
+  return m ? Number(m[1]) * 60 : -300;
+}
+function etWallClockToUTCms(dateStr, timeStr) {
+  const naiveUTCms = new Date(`${dateStr}T${timeStr}:00Z`).getTime();
+  return naiveUTCms - etOffsetMinutes(dateStr) * 60000;
 }
 
 async function getSettings() {
@@ -1082,7 +1102,7 @@ const ADMIN_EDITABLE = {
   project:        ['name'],
   company:        ['name', 'city', 'state'],
   bid:            ['bid_number', 'estimator_id', 'salesperson_id', 'date_received', 'due_date', 'start_date',
-                   'drawing_stage', 'notes', 'jurisdiction', 'superseded'],
+                   'drawing_stage', 'notes', 'jurisdiction', 'superseded', 'walkthrough_date', 'walkthrough_time'],
   job:            ['job_number', 'pm_id', 'awarded_company_id', 'award_date'],
   change_order:   ['co_number', 'name', 'due_date', 'start_date', 'estimator_id', 'notes',
                    'estimate_amount', 'date_submitted', 'approved_by'],
@@ -1094,8 +1114,9 @@ async function adminUpdate(entity, id, data) {
   const M = getModels();
   const Model = { project: M.Project, company: M.Company, bid: M.Bid, job: M.Job, change_order: M.ChangeOrder, bid_submission: M.BidSubmission }[entity];
   if (!Model) throw new Error('Unknown entity: ' + entity);
-  // capture the pre-edit doc for project/company so renames can be recorded for replay
-  const before = (entity === 'project' || entity === 'company') ? await Model.findById(Number(id)).lean() : null;
+  // capture the pre-edit doc for project/company so renames can be recorded for
+  // replay, and for bid so a walk-through reschedule can be detected below.
+  const before = (entity === 'project' || entity === 'company' || entity === 'bid') ? await Model.findById(Number(id)).lean() : null;
   const allowed = ADMIN_EDITABLE[entity];
   const upd = { updated_at: ts() };
   for (const f of allowed) {
@@ -1108,6 +1129,12 @@ async function adminUpdate(entity, id, data) {
     }
     else if (f === 'superseded' || f === 'is_current') v = v ? 1 : 0;
     upd[f] = v;
+  }
+  // A rescheduled (or newly set) walk-through needs its own fresh 24h-before
+  // reminder — otherwise the old date's "already sent" flag would silently
+  // suppress the reminder for the new date/time.
+  if (entity === 'bid' && before && (('walkthrough_date' in upd && upd.walkthrough_date !== before.walkthrough_date) || ('walkthrough_time' in upd && upd.walkthrough_time !== before.walkthrough_time))) {
+    upd.walkthrough_reminder_sent = false;
   }
   const r = await Model.updateOne({ _id: Number(id) }, { $set: upd });
   if (!r.matchedCount) throw new Error(entity + ' not found');
@@ -1310,6 +1337,28 @@ async function getDueReminders() {
 async function markReminderEmailed(id) {
   const M = getModels();
   await M.Reminder.updateOne({ _id: Number(id) }, { $set: { emailed: 1 } });
+}
+
+// For the hourly walk-through-reminder cron — bids whose walk-through falls
+// in the 24-to-25-hours-from-now window (a 1-hour bucket, matching the
+// cron's own cadence, so nothing gets checked twice or skipped between runs).
+// Needs both date AND time set: a walk-through with no time has nothing to
+// be "24 hours before" of, so it's excluded rather than guessed at.
+async function getBidsNeedingWalkthroughReminder() {
+  const M = getModels();
+  const candidates = await M.Bid.find({
+    walkthrough_date: { $ne: null }, walkthrough_time: { $ne: null },
+    walkthrough_reminder_sent: { $ne: true }, superseded: { $ne: 1 },
+  }).lean();
+  const now = Date.now();
+  return candidates.filter(b => {
+    const hoursUntil = (etWallClockToUTCms(b.walkthrough_date, b.walkthrough_time) - now) / 3600000;
+    return hoursUntil <= 24 && hoursUntil > 23;
+  });
+}
+async function markWalkthroughReminderSent(bidId) {
+  const M = getModels();
+  await M.Bid.updateOne({ _id: Number(bidId) }, { $set: { walkthrough_reminder_sent: true, updated_at: ts() } });
 }
 
 // Notes — dateless, freeform, append-only log on a bid/opportunity or change
@@ -1715,6 +1764,7 @@ async function getBidList(stage) {
     sub_estimators: (b.sub_estimators || []).map(s => ({ ...(tm[s.estimator_id] || {}), scope: s.scope })),
     customers: [...new Set((custByBid[b._id] || []).filter(Boolean))],
     date_received: b.date_received, due_date: b.due_date,
+    walkthrough_date: b.walkthrough_date, walkthrough_time: b.walkthrough_time,
     estimate_amount: b.estimate_amount, date_submitted: b.date_submitted, next_followup_date: b.next_followup_date,
   }));
 }
@@ -2392,6 +2442,7 @@ module.exports = {
   createChangeOrder, submitCO, approveCO, notApproveCO, voidCO, reopenCO, reviseCO,
   _norm, resolveCompanyByName, ensureBidCustomer, teamMap,
   addReminder, dismissReminder, deleteReminder, getRemindersFor, getDueReminders, markReminderEmailed,
+  getBidsNeedingWalkthroughReminder, markWalkthroughReminderSent,
   addNote, deleteNote, getNotesFor,
   getDigest,
   getTeamV2, createTeamMemberV2, updateTeamMemberV2, updateSettingsV2, getSettings,
