@@ -1508,6 +1508,23 @@ async function actDeleteReminder(parentType, parentId, id) {
 // Bid editable by admin in these (non-terminal) stages
 const BID_EDITABLE_STAGES = ['opportunity', 'active_bid', 'submitted'];
 
+// Whichever of Submit Bid / + Add Submission actually applies right now —
+// not a stage question, a "does anyone still need a first submission"
+// question. A bid with no customers yet, or with at least one customer who
+// has never had a submission, needs Submit Bid; once every customer has a
+// current submission, only a revision (+ Add Submission) makes sense. This
+// covers both a fresh active_bid bid and a reactivated one the same way,
+// and also a 'submitted' bid that just had a new customer added to it (which
+// needs its own first submission even though the bid itself is past 'active_bid').
+function bidNeedsFirstSubmission(b) {
+  const submittedIds = new Set((b.submissions || []).filter(s => s.is_current).map(s => s.company?.id));
+  return !b.customers.length || b.customers.some(c => !submittedIds.has(c.id));
+}
+function submitOrAddSubmissionBtn(b) {
+  return bidNeedsFirstSubmission(b)
+    ? `<button class="v2-btn green" onclick="actSubmitBid(${b.id})">Submit Bid</button>`
+    : `<button class="v2-btn amber" onclick="actAddSubmission(${b.id})">+ Add Submission</button>`;
+}
 function bidActions(b) {
   // Superseded bids are inactive — no workflow buttons, but admins can still edit.
   let workflow = '';
@@ -1519,18 +1536,12 @@ function bidActions(b) {
                   <button class="v2-btn outline" onclick="actEditOpportunityDetails(${b.id})">📅 Due Date / Assign</button>
                   <button class="v2-btn gray" onclick="actCloseBid(${b.id})">Close</button>`;
     } else if (b.stage === 'active_bid') {
-      // "+ Add Submission" belongs here too, not just in 'submitted' — a
-      // reactivated bid (reactivateBid() deliberately leaves old submissions
-      // as history) lands back in active_bid with some/all customers already
-      // carrying a current submission, and Submit Bid only covers customers
-      // who don't have one yet.
-      workflow = `<button class="v2-btn green" onclick="actSubmitBid(${b.id})">Submit Bid</button>
-                  <button class="v2-btn amber" onclick="actAddSubmission(${b.id})">+ Add Submission</button>
+      workflow = `${submitOrAddSubmissionBtn(b)}
                   <button class="v2-btn outline" onclick="actAddCustomers(${b.id})">+ Customer</button>
                   <button class="v2-btn gray" onclick="actCloseBid(${b.id})">Close</button>`;
     } else if (b.stage === 'submitted') {
       // Follow-up / award / not-awarded are now per submission (on each submission row).
-      workflow = `<button class="v2-btn amber" onclick="actAddSubmission(${b.id})">+ Add Submission</button>
+      workflow = `${submitOrAddSubmissionBtn(b)}
                   <button class="v2-btn outline" onclick="actAddCustomers(${b.id})">+ Customer</button>
                   <button class="v2-btn blue" onclick="actReactivateBid(${b.id})">↻ Reactivate</button>`;
     } else if (b.stage === 'closed') {
