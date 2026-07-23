@@ -1903,13 +1903,35 @@ async function getDashboard(userId, mineOnly) {
 
   const myJobsPending = jobs.filter(j => !j.job_number).filter(isMyJob);
 
+  // Group the full YTD award list by calendar month (not just the top-8
+  // preview list below) so the Dashboard's "Awarded (YTD)" card can pop a
+  // month-by-month breakout — count + value per month, Jan through the
+  // current month, zero-filled so a quiet month still shows as $0/0.
+  const monthLabel = (ym) => new Date(ym + '-02').toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+  const byMonthMap = {};
+  const curYear = today.slice(0, 4);
+  for (let m = 1; m <= Number(today.slice(5, 7)); m++) {
+    const ym = `${curYear}-${String(m).padStart(2, '0')}`;
+    byMonthMap[ym] = { month: ym, label: monthLabel(ym), count: 0, value: 0, bids: [] };
+  }
+  awardedYTD.forEach(b => {
+    const ym = b.award_date.slice(0, 7);
+    if (!byMonthMap[ym]) byMonthMap[ym] = { month: ym, label: monthLabel(ym), count: 0, value: 0, bids: [] };
+    const bucket = byMonthMap[ym];
+    bucket.count++; bucket.value += (b.estimate_amount || 0);
+    bucket.bids.push({ id: b._id, project_id: b.project_id, bid_number: b.bid_number, project: pName[b.project_id], amount: b.estimate_amount, award_date: b.award_date, company: b.awarded_company_id ? coName[b.awarded_company_id] : null });
+  });
+  const byMonth = Object.values(byMonthMap).sort((a, b) => b.month.localeCompare(a.month))
+    .map(bucket => ({ ...bucket, bids: bucket.bids.sort((a, b) => (b.award_date || '').localeCompare(a.award_date || '')) }));
+
   return {
     mineOnly: !!uid,
     pipeline,
     activeCoCount: activeCos.length,
     submittedYTD: { count: submittedYTD.length },
     awardedYTD: { count: awardedYTD.length, value: awardedYTD.reduce((s, b) => s + (b.estimate_amount || 0), 0), missingAwardDate: awardedMissingDate,
-      list: awardedYTD.slice(0, 8).sort((a,b)=>(b.award_date||'').localeCompare(a.award_date||'')).map(b => ({ id: b._id, project_id: b.project_id, bid_number: b.bid_number, project: pName[b.project_id], amount: b.estimate_amount, award_date: b.award_date, company: b.awarded_company_id ? coName[b.awarded_company_id] : null })) },
+      list: awardedYTD.slice(0, 8).sort((a,b)=>(b.award_date||'').localeCompare(a.award_date||'')).map(b => ({ id: b._id, project_id: b.project_id, bid_number: b.bid_number, project: pName[b.project_id], amount: b.estimate_amount, award_date: b.award_date, company: b.awarded_company_id ? coName[b.awarded_company_id] : null })),
+      byMonth },
     overdueBidCount: overdueBids.length, overdueCoCount: overdueCos.length,
     dueSoon: dueSoon.slice(0, 15).map(b => ({ id: b._id, project_id: b.project_id, bid_number: b.bid_number, project: pName[b.project_id], due_date: b.due_date, stage: b.stage })),
     jobsPending: myJobsPending.length,

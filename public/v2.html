@@ -1165,6 +1165,7 @@ function renderProjectsBody() {
 // ── Dashboard page (v2 data) ──
 let DASH_MINE = null;   // "My View" is the default (except Admin/Oversight, who default to global); toggle switches it
 function setDashboardView(mine) { DASH_MINE = mine; renderDashboard(); }
+let DASH_DATA = null;   // last-rendered dashboard payload, kept around so the Awarded (YTD) card can pop its month breakout without a re-fetch
 
 async function renderDashboard() {
   VIEW = { name: 'dashboard' };
@@ -1178,6 +1179,7 @@ async function renderDashboard() {
     const mine = DASH_MINE && CURRENT_USER;
     [d, calItems] = await Promise.all([api('GET', '/api/v2/dashboard' + (mine ? '?mine_only=true' : '')), fetchCalendarItems()]);
   } catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
+  DASH_DATA = d;
 
   const stat = (label, value, sub, color, onclick) => `
     <div class="stat-card" style="${color ? `border-top:3px solid ${color}` : ''}${onclick ? ';cursor:pointer' : ''}"${onclick ? ` onclick="${onclick}"` : ''}>
@@ -1206,7 +1208,7 @@ async function renderDashboard() {
       ${stat('Active Bids', d.pipeline.active_bid, '', '#f59e0b', "renderBidList('active_bid')")}
       ${stat('Submitted (YTD)', d.submittedYTD.count, '', '#2563eb', "renderBidList('submitted')")}
       ${stat('Active Change Orders', d.activeCoCount, '', '#f97316', "renderCoList('active_co')")}
-      ${stat('Awarded (YTD)', d.awardedYTD.count, fmt$(d.awardedYTD.value) + (d.awardedYTD.missingAwardDate ? ` · ${d.awardedYTD.missingAwardDate} missing award date` : ''), '#16a34a')}
+      ${stat('Awarded (YTD)', d.awardedYTD.count, fmt$(d.awardedYTD.value) + (d.awardedYTD.missingAwardDate ? ` · ${d.awardedYTD.missingAwardDate} missing award date` : ''), '#16a34a', 'showAwardedByMonth()')}
       ${stat('Overdue Follow-ups', d.overdueBidCount + d.overdueCoCount, `${d.overdueBidCount} bid · ${d.overdueCoCount} CO`, (d.overdueBidCount+d.overdueCoCount) ? '#dc2626' : '#16a34a')}
       ${stat('Jobs awaiting Job #', d.jobsPending, DASH_MINE ? 'assigned to you' : 'from accounting', '#0891b2')}
     </div>
@@ -1237,6 +1239,53 @@ async function renderDashboard() {
       ${buildCalendarGrid(CAL_STATE.year, CAL_STATE.month, calItems, CAL_STATE.filter)}
       <div class="cal-legend">${calendarLegendHtml()}</div>
     </div>`;
+}
+
+// Month-by-month breakout for the Dashboard's "Awarded (YTD)" card — reuses
+// the byMonth buckets the API already computed, no extra fetch. Each row
+// expands in place to the bids awarded that month.
+const AWARDED_MONTHS_OPEN = new Set();
+function showAwardedByMonth() {
+  const d = DASH_DATA;
+  if (!d) return;
+  const months = d.awardedYTD.byMonth || [];
+  const ov = document.createElement('div');
+  ov.className = 'v2-overlay'; ov.id = 'v2-form-overlay';
+  ov.onclick = e => { if (e.target === ov) ov.remove(); };
+  ov.innerHTML = `
+    <div class="v2-modal" style="max-width:560px;max-height:85vh;overflow-y:auto">
+      <div class="v2-modal-hd">✅ Awarded — by month${d.mineOnly ? ' (My View)' : ''}<button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">✕</button></div>
+      <div class="v2-modal-bd" id="awarded-by-month-body">${awardedByMonthHtml(months)}</div>
+    </div>`;
+  document.body.appendChild(ov);
+}
+function awardedByMonthHtml(months) {
+  if (!months.length) return '<div style="font-size:13px;color:var(--text-muted)">No awards yet this year.</div>';
+  return months.map(m => {
+    const open = AWARDED_MONTHS_OPEN.has(m.month);
+    return `
+    <div style="border-bottom:1px solid var(--border);padding:10px 0">
+      <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="toggleAwardedMonth('${m.month}')">
+        <div style="font-size:13.5px;font-weight:700">${m.label}</div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:12px;color:var(--text-muted)">${m.count} awarded</span>
+          <span style="font-size:13px;font-weight:700;color:#16a34a">${fmt$(m.value)}</span>
+          <span style="font-size:11px;color:var(--text-muted)">${open ? '▲' : '▼'}</span>
+        </div>
+      </div>
+      ${open ? (m.bids.length ? m.bids.map(b => `
+        <div class="proj-row" onclick="document.getElementById('v2-form-overlay').remove();openBidFlyout(${b.project_id},${b.id})">
+          <div style="flex:1"><strong style="font-size:13px">${esc(b.project || '—')}</strong>
+            <span style="color:var(--text-muted);font-size:12px">${b.bid_number ? '#'+esc(b.bid_number) : ''}${b.company ? ' · '+esc(b.company) : ''}</span></div>
+          <span class="amount" style="font-size:12px">${fmt$(b.amount)}</span>
+        </div>`).join('') : '<div style="font-size:12px;color:var(--text-muted);padding:6px 0">No bids with an award date this month.</div>') : ''}
+    </div>`;
+  }).join('');
+}
+function toggleAwardedMonth(month) {
+  if (AWARDED_MONTHS_OPEN.has(month)) AWARDED_MONTHS_OPEN.delete(month); else AWARDED_MONTHS_OPEN.add(month);
+  const body = document.getElementById('awarded-by-month-body');
+  if (body) body.innerHTML = awardedByMonthHtml(DASH_DATA.awardedYTD.byMonth || []);
 }
 
 // ── Dedicated project page (full hierarchy on its own page) ───────────────────
@@ -3374,7 +3423,7 @@ function ideaCardHtml(i, isAdmin) {
         </div>
         <a href="#" onclick="event.preventDefault();toggleIdeaComments(${i.id})" style="font-size:11px;color:#2563eb;display:inline-block;margin-top:4px">💬 ${i.comments.length} comment${i.comments.length === 1 ? '' : 's'}</a>
         ${openComments ? `
-          <div style="margin-top:6px;padding:8px;background:var(--sidebar-hover-bg);border-radius:6px">
+          <div style="margin-top:6px;padding:8px;background:var(--bg);border-radius:6px">
             ${i.comments.map(c => `<div style="font-size:12px;margin-bottom:6px"><strong>${esc(c.user_name)}</strong> <span style="color:var(--text-muted);font-size:11px">${fmtHistoryTs(c.created_at)}</span><div>${esc(c.text)}</div></div>`).join('') || '<div style="font-size:12px;color:var(--text-muted)">No comments yet.</div>'}
             <div style="display:flex;gap:6px;margin-top:6px">
               <input id="idea-comment-${i.id}" type="text" placeholder="Add a comment…" style="flex:1;font-size:12px;padding:5px 8px;border:1px solid var(--border);border-radius:4px" onkeydown="if(event.key==='Enter')postIdeaComment(${i.id})">
