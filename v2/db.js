@@ -174,7 +174,10 @@ async function getProjectDetail(projectId) {
     M.BidCustomer.find({ bid_id: { $in: bidIds } }).lean(),
     M.BidSubmission.find({ bid_id: { $in: bidIds } }).sort({ date_submitted: 1, _id: 1 }).lean(),
   ]);
-  const allContactIds = [...new Set(bidCustomers.flatMap(bc => bc.contact_ids || []))];
+  // Walk-through site contacts are pulled in here too, even though they're
+  // often for a company that isn't one of the bid's actual customers (e.g. a
+  // GC's on-site super rather than the GC's office contact).
+  const allContactIds = [...new Set([...bidCustomers.flatMap(bc => bc.contact_ids || []), ...bids.map(b => b.walkthrough_contact_id).filter(Boolean)])];
   const contacts = allContactIds.length ? await M.Contact.find({ _id: { $in: allContactIds } }).lean() : [];
   const contactById = {}; contacts.forEach(c => { contactById[c._id] = fmtContactBrief(c); });
   const allReminders = await M.Reminder.find({
@@ -218,8 +221,8 @@ async function getProjectDetail(projectId) {
     due_date: b.due_date,
     walkthrough_date: b.walkthrough_date,
     walkthrough_time: b.walkthrough_time,
-    walkthrough_contact_name: b.walkthrough_contact_name,
-    walkthrough_contact_phone: b.walkthrough_contact_phone,
+    walkthrough_company: companyById[b.walkthrough_company_id] || null,
+    walkthrough_contact: contactById[b.walkthrough_contact_id] || null,
     estimate_amount: b.estimate_amount,
     jurisdiction: b.jurisdiction,
     date_submitted: b.date_submitted,
@@ -1103,9 +1106,11 @@ async function reactivateBid(id, data, actorId) {
 const ADMIN_EDITABLE = {
   project:        ['name'],
   company:        ['name', 'city', 'state'],
+  // Walk-through fields are NOT here — they go through the dedicated
+  // setWalkthrough()/POST .../walkthrough, which needs find-or-create logic
+  // for the site company/contact that this generic whitelist path can't do.
   bid:            ['bid_number', 'estimator_id', 'salesperson_id', 'date_received', 'due_date', 'start_date',
-                   'drawing_stage', 'notes', 'jurisdiction', 'superseded',
-                   'walkthrough_date', 'walkthrough_time', 'walkthrough_contact_name', 'walkthrough_contact_phone'],
+                   'drawing_stage', 'notes', 'jurisdiction', 'superseded'],
   job:            ['job_number', 'pm_id', 'awarded_company_id', 'award_date'],
   change_order:   ['co_number', 'name', 'due_date', 'start_date', 'estimator_id', 'notes',
                    'estimate_amount', 'date_submitted', 'approved_by'],
@@ -1117,9 +1122,8 @@ async function adminUpdate(entity, id, data) {
   const M = getModels();
   const Model = { project: M.Project, company: M.Company, bid: M.Bid, job: M.Job, change_order: M.ChangeOrder, bid_submission: M.BidSubmission }[entity];
   if (!Model) throw new Error('Unknown entity: ' + entity);
-  // capture the pre-edit doc for project/company so renames can be recorded for
-  // replay, and for bid so a walk-through reschedule can be detected below.
-  const before = (entity === 'project' || entity === 'company' || entity === 'bid') ? await Model.findById(Number(id)).lean() : null;
+  // capture the pre-edit doc for project/company so renames can be recorded for replay
+  const before = (entity === 'project' || entity === 'company') ? await Model.findById(Number(id)).lean() : null;
   const allowed = ADMIN_EDITABLE[entity];
   const upd = { updated_at: ts() };
   for (const f of allowed) {
@@ -1132,12 +1136,6 @@ async function adminUpdate(entity, id, data) {
     }
     else if (f === 'superseded' || f === 'is_current') v = v ? 1 : 0;
     upd[f] = v;
-  }
-  // A rescheduled (or newly set) walk-through needs its own fresh 24h-before
-  // reminder — otherwise the old date's "already sent" flag would silently
-  // suppress the reminder for the new date/time.
-  if (entity === 'bid' && before && (('walkthrough_date' in upd && upd.walkthrough_date !== before.walkthrough_date) || ('walkthrough_time' in upd && upd.walkthrough_time !== before.walkthrough_time))) {
-    upd.walkthrough_reminder_sent = false;
   }
   const r = await Model.updateOne({ _id: Number(id) }, { $set: upd });
   if (!r.matchedCount) throw new Error(entity + ' not found');
@@ -1340,6 +1338,46 @@ async function getDueReminders() {
 async function markReminderEmailed(id) {
   const M = getModels();
   await M.Reminder.updateOne({ _id: Number(id) }, { $set: { emailed: 1 } });
+}
+
+// Site contact is a real Company + Contact, found-or-created exactly like any
+// other company/contact picker in this app (resolveCompanyByName; a bare
+// name+phone becomes a new Contact under that company) — not free text,
+// so it's a real record other features (Contacts list, company profile)
+// can also see, not something only this one bid knows about.
+async function setWalkthrough(id, data, actorId) {
+  const M = getModels();
+  const bid = await loadBid(id);
+
+  let companyId = data.company_id ? Number(data.company_id) : null;
+  if (!companyId && data.new_company) companyId = await resolveCompanyByName(data.new_company);
+
+  let contactId = data.contact_id ? Number(data.contact_id) : null;
+  if (!contactId && companyId && data.new_contact_name) {
+    const [first, ...rest] = String(data.new_contact_name).trim().split(/\s+/);
+    contactId = await nextId('contacts');
+    await M.Contact.create({
+      _id: contactId, company_id: companyId,
+      first_name: first || null, last_name: rest.join(' ') || null,
+      phone: data.new_contact_phone || null, email: null, active: 1,
+    });
+  }
+
+  const upd = {
+    walkthrough_date: data.walkthrough_date || null,
+    walkthrough_time: data.walkthrough_time || null,
+    walkthrough_company_id: companyId,
+    walkthrough_contact_id: contactId,
+    updated_at: ts(),
+  };
+  // A rescheduled (or newly set) walk-through needs its own fresh 24h-before
+  // reminder — otherwise the old date's "already sent" flag would silently
+  // suppress the reminder for the new date/time.
+  if (upd.walkthrough_date !== bid.walkthrough_date || upd.walkthrough_time !== bid.walkthrough_time) {
+    upd.walkthrough_reminder_sent = false;
+  }
+  await M.Bid.updateOne({ _id: bid._id }, { $set: upd });
+  return { bid_id: bid._id };
 }
 
 // For the hourly walk-through-reminder cron — bids whose walk-through falls
@@ -2445,7 +2483,7 @@ module.exports = {
   createChangeOrder, submitCO, approveCO, notApproveCO, voidCO, reopenCO, reviseCO,
   _norm, resolveCompanyByName, ensureBidCustomer, teamMap,
   addReminder, dismissReminder, deleteReminder, getRemindersFor, getDueReminders, markReminderEmailed,
-  getBidsNeedingWalkthroughReminder, markWalkthroughReminderSent,
+  setWalkthrough, getBidsNeedingWalkthroughReminder, markWalkthroughReminderSent,
   addNote, deleteNote, getNotesFor,
   getDigest,
   getTeamV2, createTeamMemberV2, updateTeamMemberV2, updateSettingsV2, getSettings,

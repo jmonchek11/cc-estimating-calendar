@@ -77,6 +77,20 @@ async function bidRecipients(bid) {
   return (await Promise.all(ids.map(emailForV2Member))).filter(Boolean);
 }
 
+// Site contact is a real Company + Contact now (see setWalkthrough in
+// v2/db.js) — this resolves them for display, tagging the contact's name
+// with their company so "John Smith" reads as "John Smith (ABC Electric)"
+// rather than a bare name with no context.
+async function walkthroughContactInfo(bid) {
+  if (!bid.walkthrough_contact_id) return null;
+  const M = getModels();
+  const contact = await M.Contact.findById(Number(bid.walkthrough_contact_id)).lean();
+  if (!contact) return null;
+  const company = bid.walkthrough_company_id ? await M.Company.findById(Number(bid.walkthrough_company_id)).lean() : null;
+  const name = [contact.first_name, contact.last_name].filter(Boolean).join(' ') || null;
+  return { name: name && company ? `${name} (${company.name})` : name, phone: contact.phone || null };
+}
+
 // Fires once, right when a walk-through date/time is set or rescheduled —
 // notifyAssignmentDiff-style diff check lives in v2/routes.js; this just
 // sends once it's confirmed there's something new to announce.
@@ -89,7 +103,7 @@ async function notifyWalkthroughSet(bidId, actorId) {
     if (!shape) return;
     const actor = actorId ? await maindb.getMember(actorId) : null;
     const recipients = await bidRecipients(bid);
-    const contact = { name: bid.walkthrough_contact_name, phone: bid.walkthrough_contact_phone };
+    const contact = await walkthroughContactInfo(bid);
     for (const r of recipients) {
       const { subject, html } = mailer.emailWalkthroughSet(shape, bid.walkthrough_date, bid.walkthrough_time, r.name, actor?.name || 'A team member', contact);
       await mailer.sendMail({ to: r.email, subject, html });
@@ -128,4 +142,4 @@ async function emailShapeForReminder(reminder) {
   return reminder.parent_type === 'change_order' ? coEmailShape(reminder.parent_id) : bidEmailShape(reminder.parent_id);
 }
 
-module.exports = { bidEmailShape, coEmailShape, emailShapeForReminder, notifyAwarded, notifyAssigned, notifyWalkthroughSet, bidRecipients, emailForV2Member };
+module.exports = { bidEmailShape, coEmailShape, emailShapeForReminder, notifyAwarded, notifyAssigned, notifyWalkthroughSet, bidRecipients, walkthroughContactInfo, emailForV2Member };

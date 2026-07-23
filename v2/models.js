@@ -70,8 +70,8 @@ const BidSchema = new mongoose.Schema({
   // reminder again instead of silently keeping the old one's "already sent" flag.
   walkthrough_date:          { type: String, default: null },
   walkthrough_time:          { type: String, default: null },    // "HH:MM", 24-hour — reminder only fires when both date AND time are set
-  walkthrough_contact_name:  { type: String, default: null },    // site contact — free text, not a Contact FK (often a super/foreman not in the Contacts db)
-  walkthrough_contact_phone: { type: String, default: null },
+  walkthrough_company_id:    { type: Number, default: null },    // FK -> Company — site contact's company, found-or-created same as any other company field
+  walkthrough_contact_id:    { type: Number, default: null },    // FK -> Contact
   walkthrough_reminder_sent: { type: Boolean, default: false },
 
   // Denormalized "headline" snapshot of the bid's current submission — kept in

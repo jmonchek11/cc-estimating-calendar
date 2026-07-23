@@ -1477,9 +1477,11 @@ function bidNode(b) {
 // walk-through is genuinely hard to miss when scanning a bid card.
 function walkthroughHtml(b) {
   if (!b.walkthrough_date) return '';
+  const contact = b.walkthrough_contact;
+  const company = b.walkthrough_company;
   return `<div class="v2-fu" style="background:#ecfeff;border:1px solid #a5f3fc;border-radius:6px;padding:8px 10px;margin-top:6px">
     <div style="font-weight:700;color:#0e7490;font-size:12px">🚶 Walk-through: ${fmtD(b.walkthrough_date)}${b.walkthrough_time ? ' · ' + fmtTimeShort(b.walkthrough_time) : ''}</div>
-    ${(b.walkthrough_contact_name || b.walkthrough_contact_phone) ? `<div style="font-size:11.5px;color:#155e75;margin-top:2px">Site contact: ${esc(b.walkthrough_contact_name || '—')}${b.walkthrough_contact_phone ? ' · ' + esc(b.walkthrough_contact_phone) : ''}</div>` : ''}
+    ${(contact || company) ? `<div style="font-size:11.5px;color:#155e75;margin-top:2px">Site contact: ${contact ? esc(contact.full_name) : '—'}${company ? ' · ' + esc(company.name) : ''}${contact?.phone ? ' · ' + esc(contact.phone) : ''}</div>` : ''}
   </div>`;
 }
 
@@ -2272,18 +2274,65 @@ function actEditBid(bidId) {
   }
 }
 
-// Its own dedicated action rather than a few fields buried in Edit Bid — the
-// estimating team specifically asked for this to be easy to find, not just
-// another line in a long form. Site contact is free text (not a Contact FK):
-// often a super/foreman on-site who isn't in the Contacts database at all.
-function actSetWalkthrough(bidId) {
+// The site contact is a real Company + Contact (found-or-create, same as any
+// other company/contact picker in the app — e.g. + Add Customer), not free
+// text: it's a real record the Contacts list and company profile can also
+// see. Company picks first; the contact list below it depends on which
+// company is selected, same dependent-picker pattern as New Opportunity's
+// per-customer contacts.
+function renderWalkthroughContactPicker(contactsByCompany, preselectContactId) {
+  const container = document.getElementById('custom-walkthrough_contact_section');
+  if (!container) return;
+  const selected = (COMBO_STATE['walkthrough_company_id'] || [])[0];
+  if (!selected) {
+    container.innerHTML = `<div class="v2-field"><label>Site Contact</label><div style="font-size:12px;color:var(--text-muted)">Pick a site company above first.</div></div>`;
+    return;
+  }
+  const contacts = selected.id ? (contactsByCompany[selected.id] || []) : [];
+  container.innerHTML = `<div class="v2-field"><label>Site Contact</label>
+    ${contacts.length ? `<select id="wt-contact-select" onchange="document.getElementById('wt-new-contact-fields').style.display=this.value?'none':'flex'">
+        <option value="">— Someone new —</option>
+        ${contacts.map(c => `<option value="${c.id}" ${c.id === preselectContactId ? 'selected' : ''}>${esc(c.full_name)}${c.title ? ` (${esc(c.title)})` : ''}</option>`).join('')}
+      </select>`
+      : `<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">${selected.id ? `No contacts on file yet for ${esc(selected.name)}.` : 'New company — add the contact below.'}</div>`}
+    <div id="wt-new-contact-fields" style="margin-top:8px;display:${contacts.some(c => c.id === preselectContactId) ? 'none' : 'flex'};flex-direction:column;gap:6px">
+      <input id="wt-new-contact-name" type="text" placeholder="Contact name">
+      <input id="wt-new-contact-phone" type="text" placeholder="Phone">
+    </div>
+  </div>`;
+}
+// Its own dedicated action rather than a couple of fields buried in Edit Bid
+// — the estimating team specifically asked for this to be easy to find, not
+// just another line in a long form.
+async function actSetWalkthrough(bidId) {
   const b = DETAIL_CACHE[OPEN_PROJECT]?.bids.find(x => x.id === bidId) || {};
+  const preselectContactId = b.walkthrough_contact?.id ?? null;
+  let contactsByCompany = {};
+  try {
+    const contacts = await api('GET', '/api/v2/contacts');
+    contacts.forEach(c => { if (c.company_id) (contactsByCompany[c.company_id] = contactsByCompany[c.company_id] || []).push(c); });
+  } catch { /* per-company contact lists just come up empty if this fails */ }
+
   showForm('🚶 Jobsite Walk-through', [
     { id: 'walkthrough_date', label: 'Date', type: 'date', value: b.walkthrough_date },
     { id: 'walkthrough_time', label: 'Time', type: 'time', value: b.walkthrough_time },
-    { id: 'walkthrough_contact_name', label: 'Site Contact Name', type: 'text', value: b.walkthrough_contact_name },
-    { id: 'walkthrough_contact_phone', label: 'Site Contact Phone', type: 'text', value: b.walkthrough_contact_phone },
-  ], data => api('PATCH', `/api/v2/admin/bid/${bidId}`, data), b.walkthrough_date ? 'Update Walk-through' : 'Schedule Walk-through', 'blue');
+    { id: 'walkthrough_company_id', label: 'Site Company', type: 'company', multi: false, newKey: 'new_company', options: companyOpts(),
+      value: b.walkthrough_company?.id, placeholder: 'Type company name…',
+      onChange: () => renderWalkthroughContactPicker(contactsByCompany) },
+    { id: 'walkthrough_contact_section', type: 'custom' },
+  ], data => {
+    const sel = document.getElementById('wt-contact-select');
+    const contact_id = sel?.value ? Number(sel.value) : null;
+    return api('POST', `/api/v2/bids/${bidId}/walkthrough`, {
+      walkthrough_date: data.walkthrough_date, walkthrough_time: data.walkthrough_time,
+      company_id: data.walkthrough_company_id, new_company: data.new_company,
+      contact_id,
+      new_contact_name: contact_id ? null : document.getElementById('wt-new-contact-name')?.value?.trim() || null,
+      new_contact_phone: contact_id ? null : document.getElementById('wt-new-contact-phone')?.value?.trim() || null,
+    });
+  }, b.walkthrough_date ? 'Update Walk-through' : 'Schedule Walk-through', 'blue');
+
+  renderWalkthroughContactPicker(contactsByCompany, preselectContactId);
 }
 
 function subEstimatorListHtml(bidId, b) {
