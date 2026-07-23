@@ -869,8 +869,9 @@ cron.schedule('0 * * * *', async () => {
       const shape = await v2notify.bidEmailShape(bid._id);
       if (!shape) continue;
       const recipients = await v2notify.bidRecipients(bid);
+      const contact = { name: bid.walkthrough_contact_name, phone: bid.walkthrough_contact_phone };
       for (const r of recipients) {
-        const { subject, html } = mailer.emailWalkthroughReminder(shape, bid.walkthrough_date, bid.walkthrough_time, r.name);
+        const { subject, html } = mailer.emailWalkthroughReminder(shape, bid.walkthrough_date, bid.walkthrough_time, r.name, contact);
         await mailer.sendMail({ to: r.email, subject, html });
       }
       await v2db.markWalkthroughReminderSent(bid._id);

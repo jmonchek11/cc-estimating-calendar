@@ -89,8 +89,9 @@ async function notifyWalkthroughSet(bidId, actorId) {
     if (!shape) return;
     const actor = actorId ? await maindb.getMember(actorId) : null;
     const recipients = await bidRecipients(bid);
+    const contact = { name: bid.walkthrough_contact_name, phone: bid.walkthrough_contact_phone };
     for (const r of recipients) {
-      const { subject, html } = mailer.emailWalkthroughSet(shape, bid.walkthrough_date, bid.walkthrough_time, r.name, actor?.name || 'A team member');
+      const { subject, html } = mailer.emailWalkthroughSet(shape, bid.walkthrough_date, bid.walkthrough_time, r.name, actor?.name || 'A team member', contact);
       await mailer.sendMail({ to: r.email, subject, html });
     }
   } catch (e) { console.error('[v2 notify] walkthrough-set email failed:', e.message); }

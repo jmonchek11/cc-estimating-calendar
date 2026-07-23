@@ -281,8 +281,15 @@ function emailReminder(bid, reminder, recipientName) {
   };
 }
 
+function walkthroughContactLine(contact) {
+  if (!contact?.name && !contact?.phone) return '';
+  return `<div style="margin:14px 0;padding:12px 16px;background:#ecfeff;border-left:3px solid #0891b2;border-radius:4px;font-size:14px;color:#0e7490">
+    <strong>Site contact:</strong> ${contact.name || '—'}${contact.phone ? ` · ${contact.phone}` : ''}
+  </div>`;
+}
+
 // Fires once, right when a walk-through date/time is set or rescheduled.
-function emailWalkthroughSet(bid, walkthroughDate, walkthroughTime, recipientName, actorName) {
+function emailWalkthroughSet(bid, walkthroughDate, walkthroughTime, recipientName, actorName, contact) {
   const hasDeepLink = bid.project_id && bid.bid_id;
   const link = hasDeepLink ? `${APP_URL}/#project/${bid.project_id}/bid/${bid.bid_id}` : APP_URL;
   const label = bid.project_name || bid.bid_number || 'Unnamed';
@@ -290,7 +297,7 @@ function emailWalkthroughSet(bid, walkthroughDate, walkthroughTime, recipientNam
   const calLink = outlookCalendarLink({
     subject: `Jobsite Walk-through: ${label}`,
     dateStr: walkthroughDate, timeStr: walkthroughTime,
-    body: [bid.bid_number ? `Bid #${bid.bid_number}` : null, bid.customer ? `Customer: ${bid.customer}` : null, link].filter(Boolean).join('\n'),
+    body: [bid.bid_number ? `Bid #${bid.bid_number}` : null, bid.customer ? `Customer: ${bid.customer}` : null, contact?.name ? `Site contact: ${contact.name}${contact.phone ? ' (' + contact.phone + ')' : ''}` : null, link].filter(Boolean).join('\n'),
   });
   return {
     subject: `🚶 Jobsite Walk-through Scheduled — ${label}`,
@@ -298,13 +305,14 @@ function emailWalkthroughSet(bid, walkthroughDate, walkthroughTime, recipientNam
       ${iconHeading(`${APP_URL}/icon-walkthrough.png`, 'Jobsite Walk-through Scheduled')}
       <p>Hi <strong>${recipientName}</strong>, <strong>${actorName}</strong> scheduled a jobsite walk-through for this bid — <strong>${whenStr}</strong>.</p>
       ${bidTable(bid)}
+      ${walkthroughContactLine(contact)}
       ${buttonRow({ href: link, label: hasDeepLink ? 'Open Bid' : 'Open App' }, calLink ? { href: calLink, label: '📅 Add Walk-through to Outlook' } : null)}
     `),
   };
 }
 
 // Fires ~24 hours before, via the hourly cron in server.js.
-function emailWalkthroughReminder(bid, walkthroughDate, walkthroughTime, recipientName) {
+function emailWalkthroughReminder(bid, walkthroughDate, walkthroughTime, recipientName, contact) {
   const hasDeepLink = bid.project_id && bid.bid_id;
   const link = hasDeepLink ? `${APP_URL}/#project/${bid.project_id}/bid/${bid.bid_id}` : APP_URL;
   const label = bid.project_name || bid.bid_number || 'Unnamed';
@@ -315,6 +323,7 @@ function emailWalkthroughReminder(bid, walkthroughDate, walkthroughTime, recipie
       ${iconHeading(`${APP_URL}/icon-walkthrough.png`, 'Walk-through Tomorrow')}
       <p>Hi <strong>${recipientName}</strong>, reminder — the jobsite walk-through for this bid is <strong>${whenStr}</strong>.</p>
       ${bidTable(bid)}
+      ${walkthroughContactLine(contact)}
       ${buttonRow({ href: link, label: hasDeepLink ? 'Open Bid' : 'Open App' })}
     `),
   };

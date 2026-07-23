@@ -1466,9 +1466,21 @@ function bidNode(b) {
         ${(b.followups || []).length ? `<div class="v2-fu"><div style="font-weight:600;color:var(--text);margin-bottom:3px">Follow-ups</div>${b.followups.map(fuRow).join('')}</div>` : ''}
         ${remindersHtml('bid', b.id, b.reminders)}
         ${notesHtml('bid', b.id, b.notes_log)}
+        ${walkthroughHtml(b)}
         ${bidActions(b)}
       </div>
     </div>`;
+}
+
+// A standalone highlighted box, same visual weight as Reminders/Notes below
+// it — not just a line buried in the description text — so a scheduled
+// walk-through is genuinely hard to miss when scanning a bid card.
+function walkthroughHtml(b) {
+  if (!b.walkthrough_date) return '';
+  return `<div class="v2-fu" style="background:#ecfeff;border:1px solid #a5f3fc;border-radius:6px;padding:8px 10px;margin-top:6px">
+    <div style="font-weight:700;color:#0e7490;font-size:12px">🚶 Walk-through: ${fmtD(b.walkthrough_date)}${b.walkthrough_time ? ' · ' + fmtTimeShort(b.walkthrough_time) : ''}</div>
+    ${(b.walkthrough_contact_name || b.walkthrough_contact_phone) ? `<div style="font-size:11.5px;color:#155e75;margin-top:2px">Site contact: ${esc(b.walkthrough_contact_name || '—')}${b.walkthrough_contact_phone ? ' · ' + esc(b.walkthrough_contact_phone) : ''}</div>` : ''}
+  </div>`;
 }
 
 // Reminders — polymorphic (bid or change_order). A personal tickler separate
@@ -1578,7 +1590,9 @@ function bidActions(b) {
   const canEditBid = CURRENT_USER?.is_admin || CURRENT_USER?.id === b.estimator?.id || CURRENT_USER?.id === b.salesperson?.id;
   const adminBtn = (canEditBid && BID_EDITABLE_STAGES.includes(b.stage))
     ? `<button class="v2-btn outline" onclick="actEditBid(${b.id})">✏️ Edit</button>` : '';
-  const all = [workflow, adminBtn].filter(Boolean).join('');
+  const walkthroughBtn = (canEditBid && !b.superseded && BID_EDITABLE_STAGES.includes(b.stage))
+    ? `<button class="v2-btn" style="background:#0891b2;color:#fff" onclick="actSetWalkthrough(${b.id})">🚶 ${b.walkthrough_date ? 'Edit' : 'Set'} Walk-through</button>` : '';
+  const all = [workflow, walkthroughBtn, adminBtn].filter(Boolean).join('');
   return all ? `<div class="v2-actions">${all}</div>` : '';
 }
 
@@ -2232,9 +2246,10 @@ function actEditBid(bidId) {
       { id: 'due_date', label: 'Due Date', type: 'date', value: b.due_date },
       { id: 'start_date', label: 'Start Date', type: 'date', value: b.start_date },
       { id: 'drawing_stage', label: 'Drawing Stage', type: 'text', value: b.drawing_stage },
-      { id: 'walkthrough_date', label: 'Jobsite Walk-through Date', type: 'date', value: b.walkthrough_date },
-      { id: 'walkthrough_time', label: 'Jobsite Walk-through Time', type: 'time', value: b.walkthrough_time },
     );
+    // Walk-through has its own dedicated action (🚶 button in the actions row,
+    // plus a visible line on the bid card) rather than living buried in here —
+    // it's easy to miss as just another field in a long edit form.
   } else if (showSubEst) {
     // Opportunity stage has no estimator/salesperson fields in this form at
     // all (nothing's been assigned yet) — sub-estimators just go first.
@@ -2255,6 +2270,20 @@ function actEditBid(bidId) {
     const container = document.getElementById('custom-sub_est_section');
     if (container) container.outerHTML = subEstimatorSectionHtml(bidId, b);
   }
+}
+
+// Its own dedicated action rather than a few fields buried in Edit Bid — the
+// estimating team specifically asked for this to be easy to find, not just
+// another line in a long form. Site contact is free text (not a Contact FK):
+// often a super/foreman on-site who isn't in the Contacts database at all.
+function actSetWalkthrough(bidId) {
+  const b = DETAIL_CACHE[OPEN_PROJECT]?.bids.find(x => x.id === bidId) || {};
+  showForm('🚶 Jobsite Walk-through', [
+    { id: 'walkthrough_date', label: 'Date', type: 'date', value: b.walkthrough_date },
+    { id: 'walkthrough_time', label: 'Time', type: 'time', value: b.walkthrough_time },
+    { id: 'walkthrough_contact_name', label: 'Site Contact Name', type: 'text', value: b.walkthrough_contact_name },
+    { id: 'walkthrough_contact_phone', label: 'Site Contact Phone', type: 'text', value: b.walkthrough_contact_phone },
+  ], data => api('PATCH', `/api/v2/admin/bid/${bidId}`, data), b.walkthrough_date ? 'Update Walk-through' : 'Schedule Walk-through', 'blue');
 }
 
 function subEstimatorListHtml(bidId, b) {
