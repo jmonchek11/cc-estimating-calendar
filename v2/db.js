@@ -1291,6 +1291,49 @@ async function logFollowupV2(data) {
   return { followup_id: fu._id, next_followup_date: next };
 }
 
+const FOLLOWUP_EDITABLE = ['followup_date', 'contact_method', 'customer_contact', 'notes', 'outcome', 'next_followup_date'];
+
+// Fixing a mis-logged follow-up (wrong contact, typo in notes, wrong outcome)
+// after the fact — not exposed until now since there was no correction path
+// at all, just logFollowupV2 above. If this happens to be the MOST RECENT
+// follow-up for its parent, its (possibly just-edited) next_followup_date is
+// rolled back up to the parent exactly like logFollowupV2 does at creation —
+// otherwise a corrected outcome/date wouldn't show up on the dashboard/
+// calendar, which still reflects whatever the mistaken original said.
+async function updateFollowup(id, data, actorId) {
+  const M = getModels();
+  const fu = await M.Followup.findById(Number(id)).lean();
+  if (!fu) throw new Error('Follow-up not found');
+
+  if (actorId) {
+    const actor = await M.TeamMember.findById(Number(actorId)).lean();
+    if (!actor?.is_admin && actor?._id !== fu.contacted_by) {
+      throw new Error('Only an admin or whoever logged this follow-up can edit it');
+    }
+  }
+
+  const upd = { updated_at: ts() };
+  for (const f of FOLLOWUP_EDITABLE) {
+    if (!(f in data)) continue;
+    upd[f] = data[f] === '' ? null : data[f];
+  }
+  await M.Followup.updateOne({ _id: fu._id }, { $set: upd });
+
+  const siblings = await M.Followup.find({ parent_type: fu.parent_type, parent_id: fu.parent_id }).sort({ followup_date: -1, _id: -1 }).lean();
+  if (siblings[0]?._id === fu._id) {
+    const nextDate = 'next_followup_date' in upd ? upd.next_followup_date : fu.next_followup_date;
+    if (fu.parent_type === 'bid_submission') {
+      await M.BidSubmission.updateOne({ _id: fu.parent_id }, { $set: { next_followup_date: nextDate, updated_at: ts() } });
+      const sub = await M.BidSubmission.findById(fu.parent_id).lean();
+      if (sub) await recomputeBidFollowup(sub.bid_id);
+    } else {
+      const Model = fu.parent_type === 'bid' ? M.Bid : M.ChangeOrder;
+      await Model.updateOne({ _id: fu.parent_id }, { $set: { next_followup_date: nextDate, updated_at: ts() } });
+    }
+  }
+  return { id: fu._id };
+}
+
 // ── Reminders (polymorphic — bid or change_order) ─────────────────────────────
 async function addReminder(parentType, parentId, { note, remind_on }) {
   if (!remind_on) throw new Error('remind_on required');
@@ -2478,7 +2521,7 @@ module.exports = {
   createOpportunity, createDirectBid, startBid, submitBid, addSubmission, reactivateBid, addBidCustomers, updateOpportunity, adminUpdate,
   getContacts, getContactDetail, createContact, updateContact, deleteContact, getContactBids, getCompanyBids,
   addBidCustomerContact, removeBidCustomerContact,
-  awardSubmission, notAwardSubmission, closeBid, logFollowupV2,
+  awardSubmission, notAwardSubmission, closeBid, logFollowupV2, updateFollowup,
   createLegacyJob, updateJob,
   createChangeOrder, submitCO, approveCO, notApproveCO, voidCO, reopenCO, reviseCO,
   _norm, resolveCompanyByName, ensureBidCustomer, teamMap,

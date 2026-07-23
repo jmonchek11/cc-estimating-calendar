@@ -318,6 +318,8 @@ router.delete('/api/v2/bid-customers/:id/contacts/:contactId', t(req => v2db.rem
 
 // ── Follow-ups (bid_submission or change_order parent) ────────────────────────
 router.post('/api/v2/followups',              t(req => v2db.logFollowupV2({ ...req.body, contacted_by: req.body.contacted_by || req.session.userId })));
+router.patch('/api/v2/followups/:id',          t(req => v2db.updateFollowup(req.params.id, req.body, req.session.userId),
+  (req) => ({ action: 'followup.edit', summary: `Corrected a follow-up entry (#${req.params.id})`, entity_type: 'followup', entity_id: Number(req.params.id) })));
 
 // ── Reminders (polymorphic — bid or change_order) ─────────────────────────────
 router.get('/api/v2/reminders',                async (req, res) => { try { res.json(await v2db.getRemindersFor(req.query.parent_type, req.query.parent_id)); } catch (e) { res.status(500).json({ error: e.message }); } });

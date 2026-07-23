@@ -1724,6 +1724,9 @@ function submissionRow(s, bid) {
 }
 
 function fuRow(f) {
+  // Whoever actually logged this one (or an admin) can fix a mistake in it —
+  // matches the server-side check in updateFollowup.
+  const canEdit = CURRENT_USER?.is_admin || (CURRENT_USER?.id && CURRENT_USER.id === f.contacted_by?.id);
   return `<div class="v2-fu-row">
     ${fmtD(f.followup_date)} — ${ini(f.contacted_by)}
     ${METHOD[f.contact_method] || ''} w/ <strong>${esc(f.customer_contact || '?')}</strong>:
@@ -1732,6 +1735,7 @@ function fuRow(f) {
     ${f.outcome === 'awarded' ? '<span style="color:#16a34a;font-weight:700">→ AWARDED</span>' : ''}
     ${f.outcome === 'approved' ? '<span style="color:#16a34a;font-weight:700">→ APPROVED</span>' : ''}
     ${f.outcome === 'not_awarded' ? '<span class="overdue-txt">→ NOT AWARDED</span>' : ''}
+    ${canEdit ? `<a href="#" onclick="event.preventDefault();actEditFollowup(${f.id})" style="font-size:11px;margin-left:4px">✏️</a>` : ''}
   </div>`;
 }
 
@@ -2405,6 +2409,40 @@ function actEditSubmission(subId) {
       options: [{ value: 1, label: 'Yes — current' }, { value: 0, label: 'No — superseded' }] },
     { id: 'notes', label: 'Notes', type: 'textarea', value: s.notes },
   ], data => api('PATCH', `/api/v2/admin/bid_submission/${subId}`, data), 'Save Changes');
+}
+
+// A follow-up can live on a bid, a change order, or a submission — search all
+// three rather than needing the caller to know which.
+function findFollowup(fuId) {
+  const d = DETAIL_CACHE[OPEN_PROJECT];
+  if (!d) return null;
+  for (const b of d.bids) {
+    const f = (b.followups || []).find(x => x.id === fuId); if (f) return f;
+    for (const s of (b.submissions || [])) { const sf = (s.followups || []).find(x => x.id === fuId); if (sf) return sf; }
+  }
+  for (const j of d.jobs) { const f = j.change_orders.flatMap(co => co.followups || []).find(x => x.id === fuId); if (f) return f; }
+  return null;
+}
+
+// Fixing something mis-logged (wrong contact, typo, wrong outcome) — not a
+// new entry, so it skips logFollowupV2's "restart the timer" behavior;
+// editing next_followup_date directly here is the escape hatch for anyone
+// who genuinely needs to correct that too.
+function actEditFollowup(fuId) {
+  const f = findFollowup(fuId) || {};
+  showForm('✏️ Edit Follow-up', [
+    { id: 'followup_date', label: 'Date', type: 'date', required: true, value: f.followup_date },
+    { id: 'contact_method', label: 'How were they contacted?', type: 'select', required: true, value: f.contact_method, options: [
+      { value: 'phone', label: '📞 Phone call' }, { value: 'email', label: '✉️ Email' },
+      { value: 'in_person', label: '🤝 In person' }, { value: 'other', label: 'Other' } ] },
+    { id: 'customer_contact', label: 'Who was contacted?', type: 'text', required: true, value: f.customer_contact },
+    { id: 'notes', label: 'What was discussed?', type: 'textarea', required: true, value: f.notes },
+    { id: 'outcome', label: 'Outcome', type: 'select', value: f.outcome, options: [
+      { value: 'no_decision', label: 'No decision yet' }, { value: 'awarded', label: 'Awarded' },
+      { value: 'not_awarded', label: 'Not awarded' }, { value: 'approved', label: 'Approved' },
+      { value: 'not_approved', label: 'Not approved' }, { value: 'other', label: 'Other' } ] },
+    { id: 'next_followup_date', label: 'Next Follow-up Date', type: 'date', value: f.next_followup_date },
+  ], data => api('PATCH', `/api/v2/followups/${fuId}`, data), 'Save Changes');
 }
 
 function actEditJob(jobId) {

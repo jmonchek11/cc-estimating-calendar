@@ -229,6 +229,7 @@ const FollowupSchema = new mongoose.Schema({
   outcome:          { type: String, enum: ['no_decision', 'awarded', 'not_awarded', 'approved', 'not_approved', 'other'], default: 'no_decision' },
   next_followup_date: { type: String, default: null },
   created_at: { type: String, default: ts },
+  updated_at: { type: String, default: null },   // set only when edited after logging (updateFollowup) — stays null on entries never corrected
 }, opts);
 
 const ReminderSchema = new mongoose.Schema({
