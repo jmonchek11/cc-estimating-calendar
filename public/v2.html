@@ -2397,7 +2397,7 @@ function findSubmission(subId) {
 
 function actEditSubmission(subId) {
   const s = findSubmission(subId) || {};
-  showForm('✏️ Edit Submission (admin)', [
+  const fields = [
     { id: 'amount', label: 'Amount $', type: 'currency', required: true, value: s.amount },
     { id: 'date_submitted', label: 'Date Submitted', type: 'date', required: true, value: s.date_submitted },
     { id: 'approved_by', label: 'Approved By', type: 'select', required: true, value: s.approved_by, options: nameOpts(['estimator', 'sales']) },
@@ -2408,7 +2408,14 @@ function actEditSubmission(subId) {
     { id: 'is_current', label: 'Current?', type: 'select', value: s.is_current ? 1 : 0,
       options: [{ value: 1, label: 'Yes — current' }, { value: 0, label: 'No — superseded' }] },
     { id: 'notes', label: 'Notes', type: 'textarea', value: s.notes },
-  ], data => api('PATCH', `/api/v2/admin/bid_submission/${subId}`, data), 'Save Changes');
+  ];
+  // The red customer-feedback line shown on a Not Awarded submission (set
+  // when marking it Not Awarded) was never actually editable afterward —
+  // only this generic Notes field was, which people kept mistaking for it.
+  if (s.outcome === 'not_awarded') {
+    fields.push({ id: 'not_awarded_notes', label: 'Customer Feedback (shown in red on the card)', type: 'textarea', value: s.not_awarded_notes });
+  }
+  showForm('✏️ Edit Submission (admin)', fields, data => api('PATCH', `/api/v2/admin/bid_submission/${subId}`, data), 'Save Changes');
 }
 
 // A follow-up can live on a bid, a change order, or a submission — search all

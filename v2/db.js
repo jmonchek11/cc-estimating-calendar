@@ -1114,7 +1114,7 @@ const ADMIN_EDITABLE = {
   job:            ['job_number', 'pm_id', 'awarded_company_id', 'award_date'],
   change_order:   ['co_number', 'name', 'due_date', 'start_date', 'estimator_id', 'notes',
                    'estimate_amount', 'date_submitted', 'approved_by'],
-  bid_submission: ['company_id', 'amount', 'date_submitted', 'approved_by', 'submission_type', 'notes', 'is_current'],
+  bid_submission: ['company_id', 'amount', 'date_submitted', 'approved_by', 'submission_type', 'notes', 'is_current', 'not_awarded_notes'],
 };
 const NUMERIC_FK = new Set(['estimator_id', 'salesperson_id', 'pm_id', 'awarded_company_id', 'company_id']);
 
