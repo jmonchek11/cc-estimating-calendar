@@ -55,7 +55,7 @@ async function bidEmailShape(bidId) {
 // on a bid — let them know, with a link back into the app. Sends even when
 // the actor assigned themselves — used deliberately for testing, and the
 // team decided a confirmation email is still useful either way.
-async function notifyAssigned(bidId, recipientId, actorId, role) {
+async function notifyAssigned(bidId, recipientId, actorId, role, scope) {
   try {
     if (!recipientId) return;
     const recipient = await emailForV2Member(recipientId);
@@ -63,7 +63,7 @@ async function notifyAssigned(bidId, recipientId, actorId, role) {
     const shape = await bidEmailShape(bidId);
     if (!shape) return;
     const actor = actorId ? await maindb.getMember(actorId) : null;
-    const { subject, html } = mailer.emailAssigned(shape, recipient.name, actor?.name || 'A team member', role);
+    const { subject, html } = mailer.emailAssigned(shape, recipient.name, actor?.name || 'A team member', role, scope);
     await mailer.sendMail({ to: recipient.email, subject, html });
   } catch (e) { console.error('[v2 notify] assigned email failed:', e.message); }
 }

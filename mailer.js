@@ -83,7 +83,7 @@ function base(content) {
   th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#64748b;padding:7px 0;border-bottom:2px solid #eef1f6}
   td{padding:9px 0;font-size:14px;color:#1e293b;border-bottom:1px solid #eef1f6;vertical-align:top}
   td.lbl{font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:#94a3b8;width:112px;padding-right:12px}
-  .btn-row{margin:22px 0 8px}
+  .btn-row-wrap{text-align:center;margin:22px 0 8px}
   .btn-row td{padding:0;border:none}
   .btn-row td.gap{width:10px}
   .btn{display:inline-block;background:#2563eb;color:#fff!important;padding:12px 22px;border-radius:9px;text-decoration:none;font-size:14px;font-weight:700;box-shadow:0 4px 10px rgba(37,99,235,.28)}
@@ -125,20 +125,22 @@ function iconHeading(iconUrl, text) {
   </tr></table>`;
 }
 
-// Two-up button row (primary action + an optional secondary one) — also a
-// table, same Outlook-safety reason as iconHeading.
+// Two-up button row (primary action + an optional secondary one) — a
+// centered table, so Outlook's Word rendering engine (no flexbox, and
+// unreliable margin:auto on tables) still centers it; align="center" is
+// the belt-and-suspenders attribute form Word actually honors.
 function buttonRow(primary, secondary) {
-  return `<table class="btn-row" role="presentation" cellpadding="0" cellspacing="0"><tr>
+  return `<div class="btn-row-wrap"><table class="btn-row" role="presentation" align="center" cellpadding="0" cellspacing="0"><tr>
     <td><a href="${primary.href}" class="btn">${primary.label}</a></td>
     ${secondary ? `<td class="gap">&nbsp;</td><td><a href="${secondary.href}" class="btn-outline">${secondary.label}</a></td>` : ''}
-  </tr></table>`;
+  </tr></table></div>`;
 }
 
 // "Add to Outlook" — Outlook Web's own compose-event deep link (no .ics
 // attachment involved, which matters here: an attachment is one more thing
 // a mail security gateway could flag, and we've already been burned once by
-// this exact recipient's filtering). All-day, since a bid due date is a
-// date, not a specific time.
+// this exact recipient's filtering). All-day, since a due date is a date,
+// not a specific time.
 function outlookCalendarLink({ subject, dateStr, body }) {
   if (!dateStr) return null;
   const end = new Date(dateStr + 'T00:00:00');
@@ -149,10 +151,23 @@ function outlookCalendarLink({ subject, dateStr, body }) {
     allday: 'true',
     startdt: dateStr,
     enddt: end.toISOString().slice(0, 10),
-    subject: subject || 'Bid Due Date',
+    subject: subject || 'Due Date',
     body: body || '',
   });
   return `https://outlook.office.com/calendar/0/deeplink/compose?${params.toString()}`;
+}
+
+// Every template that shows a single bid/CO ends with this — the primary
+// "open it" action, plus an "Add to Outlook" button whenever there's a due
+// date to attach (per-template callers no longer need to build the
+// calendar link by hand).
+function actionButtons(bid, primary) {
+  const calLink = bid?.estimate_due_date ? outlookCalendarLink({
+    subject: `Due: ${bid.project_name || bid.bid_number || 'Estimating Calendar'}`,
+    dateStr: bid.estimate_due_date,
+    body: [bid.bid_number ? `Bid #${bid.bid_number}` : null, bid.customer ? `Customer: ${bid.customer}` : null, primary.href].filter(Boolean).join('\n'),
+  }) : null;
+  return buttonRow(primary, calLink ? { href: calLink, label: '📅 Add Due Date to Outlook' } : null);
 }
 
 function fmtCurrency(n) {
@@ -186,7 +201,7 @@ function bidTable(bid) {
 
 // ── Email builders ─────────────────────────────────────────────────────────────
 
-function emailAssigned(bid, recipientName, actorName, role) {
+function emailAssigned(bid, recipientName, actorName, role, scope) {
   const roleText = role === 'salesperson' ? 'the salesperson' : role === 'sub_estimator' ? 'a sub-estimator' : 'an estimator';
   // Deep-links straight to the bid's flyout when the caller's shape includes
   // ids (v2's bidEmailShape does); older/v1-shaped bid objects just don't
@@ -194,21 +209,13 @@ function emailAssigned(bid, recipientName, actorName, role) {
   const hasDeepLink = bid.project_id && bid.bid_id;
   const link = hasDeepLink ? `${APP_URL}/#project/${bid.project_id}/bid/${bid.bid_id}` : APP_URL;
   const label = bid.project_name || bid.bid_number || 'Unnamed';
-  const calLink = outlookCalendarLink({
-    subject: `Bid Due: ${label}`,
-    dateStr: bid.estimate_due_date,
-    body: [bid.bid_number ? `Bid #${bid.bid_number}` : null, bid.customer ? `Customer: ${bid.customer}` : null, link].filter(Boolean).join('\n'),
-  });
   return {
     subject: `You've been added to a bid — ${label}`,
     html: base(`
       ${iconHeading(`${APP_URL}/icon-active-bids.png`, 'New Bid Assignment')}
-      <p>Hi <strong>${recipientName}</strong>, <strong>${actorName}</strong> has added you as ${roleText} on a bid.</p>
+      <p>Hi <strong>${recipientName}</strong>, <strong>${actorName}</strong> has added you as ${roleText} on a bid${role === 'sub_estimator' && scope ? ` — scope: <strong>${scope}</strong>` : ''}.</p>
       ${bidTable(bid)}
-      ${buttonRow(
-        { href: link, label: hasDeepLink ? 'Open Bid' : 'Open App' },
-        calLink ? { href: calLink, label: '📅 Add Due Date to Outlook' } : null
-      )}
+      ${actionButtons(bid, { href: link, label: hasDeepLink ? 'Open Bid' : 'Open App' })}
     `),
   };
 }
@@ -217,12 +224,12 @@ function emailFollowup(bid, note, nextDate, loggedByName) {
   return {
     subject: `Follow-up logged — ${bid.project_name || bid.bid_number || 'Unnamed'}`,
     html: base(`
-      <h2>📝 Follow-up Logged</h2>
+      ${iconHeading(`${APP_URL}/icon-followup.png`, 'Follow-up Logged')}
       <p><strong>${loggedByName}</strong> logged a follow-up on a bid you're involved with.</p>
       ${bidTable(bid)}
       ${note ? `<div style="margin:14px 0;padding:12px 16px;background:#f8fafc;border-left:3px solid #cbd5e1;border-radius:4px;font-size:14px;color:#475569;font-style:italic">"${note}"</div>` : ''}
       ${nextDate ? `<p style="margin-top:12px">Next follow-up scheduled: <strong>${fmtDate(nextDate)}</strong></p>` : ''}
-      <a href="${APP_URL}" class="btn">Open App</a>
+      ${actionButtons(bid, { href: APP_URL, label: 'Open App' })}
     `),
   };
 }
@@ -232,10 +239,10 @@ function emailAwarded(bid, actorName) {
   return {
     subject: `🎉 Bid Awarded — ${bid.project_name || bid.bid_number || 'Unnamed'}`,
     html: base(`
-      <h2>🎉 Bid Awarded!</h2>
+      ${iconHeading(`${APP_URL}/icon-awarded.png`, 'Bid Awarded!')}
       <p><strong>${actorName}</strong> marked a bid as awarded${amtStr ? ` for <strong>${amtStr}</strong>` : ''}.</p>
       ${bidTable(bid)}
-      <a href="${APP_URL}" class="btn">Open App</a>
+      ${actionButtons(bid, { href: APP_URL, label: 'Open App' })}
     `),
   };
 }
@@ -244,11 +251,11 @@ function emailReminder(bid, reminder, recipientName) {
   return {
     subject: `⏰ Reminder — ${bid.project_name || bid.bid_number || 'Unnamed'}`,
     html: base(`
-      <h2>⏰ Bid Reminder</h2>
+      ${iconHeading(`${APP_URL}/icon-reminder.png`, 'Bid Reminder')}
       <p>Hi <strong>${recipientName}</strong>, you have a reminder due today.</p>
       ${bidTable(bid)}
       ${reminder.note ? `<div style="margin:14px 0;padding:12px 16px;background:#fffbeb;border-left:3px solid #f59e0b;border-radius:4px;font-size:14px;color:#78350f">${reminder.note}</div>` : ''}
-      <a href="${APP_URL}" class="btn">Open App</a>
+      ${actionButtons(bid, { href: APP_URL, label: 'Open App' })}
     `),
   };
 }
@@ -312,7 +319,7 @@ function emailDigest(digest) {
   return {
     subject: `📊 Weekly Estimating Digest — ${today}`,
     html: base(`
-      <h2>📊 Weekly Digest</h2>
+      ${iconHeading(`${APP_URL}/icon-digest.png`, 'Weekly Digest')}
       <p style="color:#64748b">${today}</p>
 
       <div class="section">
@@ -357,26 +364,27 @@ function emailDigest(digest) {
         ${overdueRows(digest.overdueFollowups)}
       </div>
 
-      <a href="${APP_URL}" class="btn">Open App</a>
+      ${buttonRow({ href: APP_URL, label: 'Open App' })}
     `),
   };
 }
 
 const IDEA_STATUS_LABEL = { new: 'New', reviewed: 'Reviewed', done: 'Done', wontfix: "Won't Fix" };
 const IDEA_TYPE_ICON = t => t === 'issue' ? '🐛 Bug/Issue' : '💡 Idea/Enhancement';
+const ideaIconUrl = t => `${APP_URL}/${t === 'issue' ? 'icon-issue' : 'icon-idea'}.png`;
 
 function emailIdeaSubmitted(idea, submitterName) {
   return {
     subject: `${idea.type === 'issue' ? '🐛' : '💡'} New ${idea.type === 'issue' ? 'bug report' : 'idea'} — ${idea.title}`,
     html: base(`
-      <h2>${IDEA_TYPE_ICON(idea.type)}</h2>
+      ${iconHeading(ideaIconUrl(idea.type), IDEA_TYPE_ICON(idea.type))}
       <p><strong>${submitterName || 'Someone'}</strong> just submitted a new ${idea.type === 'issue' ? 'bug report' : 'idea'}.</p>
       <table>
         <tr><td class="lbl">Title</td><td><strong>${idea.title}</strong></td></tr>
         ${idea.body ? `<tr><td class="lbl">Details</td><td>${idea.body}</td></tr>` : ''}
         ${idea.page ? `<tr><td class="lbl">Page</td><td>${idea.page}</td></tr>` : ''}
       </table>
-      <a href="${APP_URL}" class="btn">Open App</a>
+      ${buttonRow({ href: APP_URL, label: 'Open App' })}
     `),
   };
 }
@@ -387,9 +395,9 @@ function emailIdeaStatusChanged(idea, newStatus) {
   return {
     subject: `${IDEA_TYPE_ICON(idea.type).split(' ')[0]} Your ${idea.type === 'issue' ? 'bug report' : 'idea'} was marked "${label}" — ${idea.title}`,
     html: base(`
-      <h2>Update on your ${idea.type === 'issue' ? 'bug report' : 'idea'}</h2>
+      ${iconHeading(ideaIconUrl(idea.type), `Update on your ${idea.type === 'issue' ? 'bug report' : 'idea'}`)}
       <p><strong>${idea.title}</strong> is now <span class="pill ${pillClass}">${label}</span>.</p>
-      <a href="${APP_URL}" class="btn">Open App</a>
+      ${buttonRow({ href: APP_URL, label: 'Open App' })}
     `),
   };
 }
