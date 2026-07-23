@@ -349,9 +349,10 @@ app.put('/api/bids/:id', async (req, res) => {
         const actor = req.session.userId ? await db.getMember(req.session.userId) : null;
         const actorName = actor?.name || 'A team member';
 
-        // Assignment — estimator changed to a new person
+        // Assignment — estimator changed to a new person (emails even when
+        // the actor assigned themselves — see mailer.js emailAssigned callers)
         const newEstId = req.body.estimator_id != null ? Number(req.body.estimator_id) : undefined;
-        if (newEstId && newEstId !== oldBid?.estimator_id && newEstId !== actor?.id) {
+        if (newEstId && newEstId !== oldBid?.estimator_id) {
           const recipient = await db.getMember(newEstId);
           if (recipient?.email) {
             const { subject, html } = mailer.emailAssigned(updated, recipient.name, actorName, 'estimator');
@@ -361,7 +362,7 @@ app.put('/api/bids/:id', async (req, res) => {
 
         // Assignment — salesperson changed to a new person
         const newSpId = req.body.salesperson_id != null ? Number(req.body.salesperson_id) : undefined;
-        if (newSpId && newSpId !== oldBid?.salesperson_id && newSpId !== actor?.id) {
+        if (newSpId && newSpId !== oldBid?.salesperson_id) {
           const recipient = await db.getMember(newSpId);
           if (recipient?.email) {
             const { subject, html } = mailer.emailAssigned(updated, recipient.name, actorName, 'salesperson');

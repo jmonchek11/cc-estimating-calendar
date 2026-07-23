@@ -52,11 +52,12 @@ async function bidEmailShape(bidId) {
 }
 
 // Someone was just added/changed as estimator, salesperson, or sub-estimator
-// on a bid — let them know, with a link back into the app. Never emails the
-// person who made the change (assigning yourself isn't news).
+// on a bid — let them know, with a link back into the app. Sends even when
+// the actor assigned themselves — used deliberately for testing, and the
+// team decided a confirmation email is still useful either way.
 async function notifyAssigned(bidId, recipientId, actorId, role) {
   try {
-    if (!recipientId || Number(recipientId) === Number(actorId)) return;
+    if (!recipientId) return;
     const recipient = await emailForV2Member(recipientId);
     if (!recipient?.email) return;
     const shape = await bidEmailShape(bidId);

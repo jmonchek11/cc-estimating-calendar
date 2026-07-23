@@ -139,7 +139,7 @@ function bidTable(bid) {
 // ── Email builders ─────────────────────────────────────────────────────────────
 
 function emailAssigned(bid, recipientName, actorName, role) {
-  const roleLabel = role === 'salesperson' ? 'salesperson' : 'estimator';
+  const roleText = role === 'salesperson' ? 'the salesperson' : role === 'sub_estimator' ? 'a sub-estimator' : 'an estimator';
   // Deep-links straight to the bid's flyout when the caller's shape includes
   // ids (v2's bidEmailShape does); older/v1-shaped bid objects just don't
   // have these fields and fall back to the bare app URL.
@@ -149,7 +149,7 @@ function emailAssigned(bid, recipientName, actorName, role) {
     subject: `You've been added to a bid — ${bid.project_name || bid.bid_number || 'Unnamed'}`,
     html: base(`
       <h2>📋 New Bid Assignment</h2>
-      <p>Hi <strong>${recipientName}</strong>, <strong>${actorName}</strong> has added you as ${roleLabel === 'salesperson' ? 'the salesperson' : 'an estimator'} on a bid.</p>
+      <p>Hi <strong>${recipientName}</strong>, <strong>${actorName}</strong> has added you as ${roleText} on a bid.</p>
       ${bidTable(bid)}
       <a href="${link}" class="btn">${hasDeepLink ? 'Open Bid' : 'Open App'}</a>
     `),

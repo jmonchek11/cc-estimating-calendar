@@ -248,7 +248,7 @@ router.patch('/api/v2/bids/:id/opportunity',  t(async req => {
   async (req) => ({ action: 'bid.opportunity_edit', summary: `Edited opportunity ${await v2db.bidLabel(req.params.id)} (${Object.keys(req.body).join(', ')})`, entity_type: 'bid', entity_id: Number(req.params.id) })));
 router.post('/api/v2/bids/:id/sub-estimators',   t(async req => {
     const r = await v2db.addSubEstimator(req.params.id, req.body, await actorOf(req));
-    if (req.body.estimator_id) notify.notifyAssigned(Number(req.params.id), Number(req.body.estimator_id), req.session.userId, 'estimator');
+    if (req.body.estimator_id) notify.notifyAssigned(Number(req.params.id), Number(req.body.estimator_id), req.session.userId, 'sub_estimator');
     return r;
   }));
 router.delete('/api/v2/bids/:id/sub-estimators', t(async req => v2db.removeSubEstimator(req.params.id, req.body.estimator_id, req.body.scope, await actorOf(req))));
