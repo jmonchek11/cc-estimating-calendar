@@ -81,4 +81,4 @@ async function safeEmit(type, fields) {
   }
 }
 
-module.exports = { emit, safeEmit, getModel, ensureIndexes };
+module.exports = { emit, safeEmit, getModel, ensureIndexes, getConnection };

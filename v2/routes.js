@@ -10,6 +10,7 @@ const v2db = require('./db');
 const jis = require('./jis');
 const notify = require('./notify');
 const maindb = require('../db');   // v1 db — for the logged-in user's admin flag
+const directory = require('./directory');
 
 const router = express.Router();
 
@@ -117,7 +118,10 @@ router.get('/api/v2/meta', async (req, res) => {
       // so m.id is directly comparable to v2's bid.estimator_id/salesperson_id
       // ("mine only" etc) — no cross-database name bridging needed anymore.
       const m = await maindb.getMember(req.session.userId);
-      if (m) current_user = { id: m.id, name: m.name, is_admin: !!m.is_admin, role: m.role };
+      if (m) {
+        const liberty_apps = await directory.getMyApps({ ms_oid: m.ms_oid, email: m.email });
+        current_user = { id: m.id, name: m.name, is_admin: !!m.is_admin, role: m.role, liberty_apps };
+      }
     } catch { /* ignore — current_user stays null */ }
     res.json({ ...meta, current_user });
   } catch (e) { res.status(500).json({ error: e.message }); }

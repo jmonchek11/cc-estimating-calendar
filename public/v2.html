@@ -161,38 +161,7 @@
       <div class="sidebar-header">
         <div class="logo"><img src="logo.png" alt="Liberty Integrated Solutions" style="width:100%;max-width:213px;object-fit:contain;padding:4px 0" /></div>
       </div>
-      <div class="app-switcher">
-        <button class="switcher-btn" id="app-switcher-btn" aria-expanded="false" onclick="toggleAppSwitcher()">
-          <span class="switcher-dot"></span>
-          <span class="switcher-label">Estimating Calendar</span>
-          <span class="switcher-chevron"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
-        </button>
-        <div class="switcher-pop" id="app-switcher-pop">
-          <div class="switcher-pop-label">Liberty Apps</div>
-          <div class="app-tile current">
-            <div class="icon" style="background:linear-gradient(135deg,#2563eb,#1d4ed8)">📋</div>
-            <div class="body"><div class="name">Estimating Calendar</div><div class="role">Bids, jobs &amp; change orders</div></div>
-            <span class="check"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>
-          </div>
-          <a class="app-tile" href="https://manpower-board.onrender.com" target="_blank" rel="noopener">
-            <div class="icon" style="background:linear-gradient(135deg,#d97706,#b45309)">👷</div>
-            <div class="body"><div class="name">Manpower Board</div><div class="role">Crew scheduling</div></div>
-            <span class="go"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></span>
-          </a>
-          <a class="app-tile" href="https://project-lifecycle-3zci.onrender.com" target="_blank" rel="noopener">
-            <div class="icon" style="background:linear-gradient(135deg,#16a34a,#15803d)">🏗️</div>
-            <div class="body"><div class="name">PC Lifecycle Tool</div><div class="role">11-phase project tracker</div></div>
-            <span class="go"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></span>
-          </a>
-          <a class="app-tile" href="https://libertyhub.onrender.com" target="_blank" rel="noopener">
-            <div class="icon" style="background:linear-gradient(135deg,#7c3aed,#6d28d9)">🏠</div>
-            <div class="body"><div class="name">Liberty Hub</div><div class="role">Portal &amp; team directory</div></div>
-            <span class="go"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></span>
-          </a>
-          <div class="switcher-pop-divider"></div>
-          <div class="switcher-pop-foot">↗ opens in a new tab</div>
-        </div>
-      </div>
+      <div class="app-switcher" id="app-switcher"></div>
       <div class="sidebar-search-wrap">
         <div class="sidebar-search-inner">
           <span class="sidebar-search-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>
@@ -317,6 +286,7 @@ async function ensureMeta() {
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
   META = data; CURRENT_USER = META.current_user;
+  renderAppSwitcher();
 }
 
 // Tracks the current page so post-action refresh() re-renders the right view
@@ -3383,6 +3353,53 @@ function timeAgo(dateStr) {
   if (mins < 60) return `${mins} min ago`;
   const hrs = Math.round(mins / 60);
   return `${hrs} hr${hrs !== 1 ? 's' : ''} ago`;
+}
+// Every Liberty app the switcher knows about. `always: true` means it shows
+// regardless of grants (this app, since you're demonstrably logged into it
+// already on the legacy TeamMember store; and the Hub, which is the portal
+// that manages everyone's `apps` grants in the first place, not one of the
+// gated apps itself — see docs/PLATFORM_CONTEXT.md). Everything else only
+// shows if 'key' is in CURRENT_USER.liberty_apps, the array the Hub controls
+// per person — so PC Lifecycle Tool being unfinished just means nobody's
+// been granted 'pc_tool' yet, no separate flag needed here.
+const LIBERTY_APPS = [
+  { key: 'estimating', name: 'Estimating Calendar', role: 'Bids, jobs & change orders', icon: 'ec-favicon.png', always: true },
+  { key: 'manpower', name: 'Manpower Board', role: 'Crew scheduling', icon: 'mb-favicon.png', url: 'https://manpower-board.onrender.com' },
+  { key: 'pc_tool', name: 'PC Lifecycle Tool', role: '11-phase project tracker', emoji: '🏗️', color: 'linear-gradient(135deg,#16a34a,#15803d)', url: 'https://project-lifecycle-3zci.onrender.com' },
+  { key: 'hub', name: 'Liberty Hub', role: 'Portal & team directory', emoji: '🏠', color: 'linear-gradient(135deg,#7c3aed,#6d28d9)', url: 'https://libertyhub.onrender.com', always: true },
+];
+function renderAppSwitcher() {
+  const wrap = document.getElementById('app-switcher');
+  if (!wrap) return;
+  const granted = (CURRENT_USER && CURRENT_USER.liberty_apps) || [];
+  const visible = LIBERTY_APPS.filter(a => a.always || granted.includes(a.key));
+  const iconInner = a => a.icon ? `<img src="${a.icon}" alt="">` : a.emoji;
+  const iconStyle = a => a.icon ? '' : ` style="background:${a.color}"`;
+  const current = visible.find(a => a.key === 'estimating');
+  wrap.innerHTML = `
+    <button class="switcher-btn" id="app-switcher-btn" aria-expanded="false" onclick="toggleAppSwitcher()">
+      <span class="switcher-icon">${current ? iconInner(current) : ''}</span>
+      <span class="switcher-label">Estimating Calendar</span>
+      <span class="switcher-chevron"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
+    </button>
+    <div class="switcher-pop" id="app-switcher-pop">
+      <div class="switcher-pop-label">Liberty Apps</div>
+      ${visible.map(a => {
+        const isCurrent = a.key === 'estimating';
+        const tag = isCurrent ? 'div' : 'a';
+        const attrs = isCurrent ? '' : `href="${a.url}" target="_blank" rel="noopener"`;
+        const trailing = isCurrent
+          ? `<span class="check"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>`
+          : `<span class="go"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></span>`;
+        return `<${tag} class="app-tile${isCurrent ? ' current' : ''}" ${attrs}>
+          <div class="icon"${iconStyle(a)}>${iconInner(a)}</div>
+          <div class="body"><div class="name">${esc(a.name)}</div><div class="role">${esc(a.role)}</div></div>
+          ${trailing}
+        </${tag}>`;
+      }).join('')}
+      <div class="switcher-pop-divider"></div>
+      <div class="switcher-pop-foot">↗ opens in a new tab</div>
+    </div>`;
 }
 function toggleAppSwitcher() {
   const btn = document.getElementById('app-switcher-btn');

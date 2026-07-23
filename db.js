@@ -35,6 +35,7 @@ function formatMember(m) {
     role: o.role,
     active: o.active,
     email: o.email || null,
+    ms_oid: o.ms_oid || null,
     is_admin: o.is_admin || false,
     must_change_password: o.must_change_password !== false,
     created_at: o.created_at
