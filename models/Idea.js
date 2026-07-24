@@ -24,6 +24,12 @@ const schema = new mongoose.Schema({
   // removed entirely when they un-vote, rather than stored as 0.
   votes:        { type: Map, of: Number, default: {} },
   comments:     { type: [CommentSchema], default: [] },
+  // Screenshots attached at submission — data URIs (already resized/compressed
+  // client-side). Stored inline rather than in separate object storage: at
+  // this app's volume (a handful of reports a week, each ~100-300KB after
+  // compression) that's negligible against Atlas's storage, and it avoids
+  // standing up a second piece of infrastructure for it.
+  images:       { type: [String], default: [] },
   created_at:   String,
   updated_at:   String,
 }, { _id: false, versionKey: false });

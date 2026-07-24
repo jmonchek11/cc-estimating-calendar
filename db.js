@@ -960,7 +960,20 @@ async function getOnlineUsers() {
 
 // ── Ideas / feedback ──────────────────────────────────────────────────────────
 
+// Images arrive as data URIs, already resized/compressed client-side — this
+// just enforces a hard ceiling server-side too (count + size), since the
+// client-side cap is a courtesy, not a guarantee, for anyone hitting the API
+// directly.
+const IDEA_MAX_IMAGES = 3;
+const IDEA_MAX_IMAGE_BYTES = 4 * 1024 * 1024; // ~4MB decoded, generous headroom over a compressed screenshot
+
 async function submitIdea(data) {
+  const images = Array.isArray(data.images) ? data.images.slice(0, IDEA_MAX_IMAGES) : [];
+  for (const img of images) {
+    if (typeof img !== 'string' || !img.startsWith('data:image/')) throw new Error('Invalid image data');
+    const approxBytes = img.length * 0.75;
+    if (approxBytes > IDEA_MAX_IMAGE_BYTES) throw new Error('Image too large (max ~4MB each)');
+  }
   const id = await nextId('ideas');
   const now = nowStr();
   await Idea.create({
@@ -971,6 +984,7 @@ async function submitIdea(data) {
     page: data.page ? String(data.page).trim() : null,
     submitted_by: data.submitted_by ? Number(data.submitted_by) : null,
     status: 'new',
+    images,
     created_at: now,
     updated_at: now,
   });
@@ -994,6 +1008,7 @@ async function getIdeas(viewerId) {
     return {
       id: i._id, type: i.type, title: i.title, body: i.body,
       page: i.page || null,
+      images: i.images || [],
       status: i.status, created_at: i.created_at, updated_at: i.updated_at,
       submitted_by_name:     i.submitted_by && teamMap[i.submitted_by] ? teamMap[i.submitted_by].name : null,
       submitted_by_initials: i.submitted_by && teamMap[i.submitted_by] ? teamMap[i.submitted_by].initials : null,
