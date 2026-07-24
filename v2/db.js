@@ -14,6 +14,15 @@ const events = require('./events');
 const BID_ACTIVE_STAGES = ['opportunity', 'active_bid', 'submitted'];
 const CO_ACTIVE_STAGES  = ['active_co', 'submitted_co'];
 
+// Vendor directory categories (2026-07) — fixed list so the Vendors page can
+// offer a consistent filter dropdown; `brands` (on Contact) stays free-text
+// since manufacturer lines vary too much to enumerate.
+const VENDOR_CATEGORIES = [
+  'Low Voltage', 'Excavation', 'Fire Alarm', 'Gear Reps', 'Gear Vendors', 'VFDs',
+  'Generators/ATS', 'Heat Trace', 'Lighting Reps', 'Lighting Vendors', 'Commodities',
+  'Nurse Call', 'Rigging', 'Crane Rentals', 'Utility', 'Vaults',
+];
+
 async function nextId(name) {
   const { Counter } = getModels();
   const doc = await Counter.findByIdAndUpdate(name, { $inc: { seq: 1 } }, { new: true, upsert: true });
@@ -503,6 +512,7 @@ async function getMeta() {
     companies: companies.map(c => ({ id: c._id, name: c.name })),
     team: team.map(t => ({ id: t._id, name: t.name, initials: t.initials, role: t.role })),
     holidays: getHolidayNamesAround(new Date().getUTCFullYear()),
+    vendorCategories: VENDOR_CATEGORIES,
   };
 }
 
@@ -730,7 +740,7 @@ async function resolveCompanyIds(company_ids, new_companies) {
 // Contact.company_id is a real FK (no free-text company, unlike v1). Soft
 // delete via `active` — the field v2's schema already has for exactly this.
 function fmtContactBrief(c) {
-  return { id: c._id, first_name: c.first_name, last_name: c.last_name, full_name: [c.first_name, c.last_name].filter(Boolean).join(' ') || '(no name)', phone: c.phone, email: c.email, title: c.title };
+  return { id: c._id, first_name: c.first_name, last_name: c.last_name, full_name: [c.first_name, c.last_name].filter(Boolean).join(' ') || '(no name)', phone: c.phone, email: c.email, title: c.title, vendor_categories: c.vendor_categories || [], brands: c.brands || [] };
 }
 async function fmtContact(c, companyById) {
   return { ...fmtContactBrief(c), company_id: c.company_id, company: companyById[c.company_id] || null, notes: c.notes, active: !!c.active };
@@ -765,6 +775,7 @@ async function createContact(data) {
     first_name: data.first_name || null, last_name: data.last_name || null,
     phone: data.phone || null, email: data.email ? String(data.email).toLowerCase().trim() : null,
     title: data.title || null, notes: data.notes || null, active: 1,
+    vendor_categories: data.vendor_categories || [], brands: data.brands || [],
   });
   return getContactDetail(id);
 }
@@ -777,11 +788,33 @@ async function updateContact(id, data) {
   if ('email' in data) upd.email = data.email ? String(data.email).toLowerCase().trim() : null;
   if ('title' in data) upd.title = data.title || null;
   if ('notes' in data) upd.notes = data.notes || null;
+  if ('vendor_categories' in data) upd.vendor_categories = data.vendor_categories || [];
+  if ('brands' in data) upd.brands = data.brands || [];
   if (data.company_id) upd.company_id = Number(data.company_id);
   else if (data.new_company) upd.company_id = await resolveCompanyByName(data.new_company);
   const r = await M.Contact.updateOne({ _id: Number(id) }, { $set: upd });
   if (!r.matchedCount) throw new Error('Contact not found');
   return getContactDetail(id);
+}
+
+// ── Vendor directory — Contacts tagged with vendor_categories/brands ───────
+// Lives on Contact (see models.js note) rather than a separate collection so
+// it shares companies, merge tooling, and the edit form with regular contacts.
+async function getVendors({ category, brand, search } = {}) {
+  const M = getModels();
+  const [contacts, companies] = await Promise.all([
+    M.Contact.find({ active: 1, vendor_categories: { $exists: true, $ne: [] } }).lean(),
+    M.Company.find().lean(),
+  ]);
+  const companyById = {}; companies.forEach(c => companyById[c._id] = { id: c._id, name: c.name });
+  let out = await Promise.all(contacts.map(c => fmtContact(c, companyById)));
+  if (category) out = out.filter(c => c.vendor_categories.includes(category));
+  if (brand) { const needle = brand.toLowerCase(); out = out.filter(c => c.brands.some(b => b.toLowerCase().includes(needle))); }
+  if (search) {
+    const needle = search.toLowerCase();
+    out = out.filter(c => [c.full_name, c.email, c.phone, c.company?.name, ...c.brands].some(f => f && String(f).toLowerCase().includes(needle)));
+  }
+  return out.sort((a, b) => (a.company?.name || '').localeCompare(b.company?.name || '') || a.full_name.localeCompare(b.full_name));
 }
 async function deleteContact(id) {
   const M = getModels();
@@ -2549,4 +2582,5 @@ module.exports = {
   updateBidDueDate, updateCoDueDate,
   logActivity, getActivityLog, undoActivity, bidLabel, coLabel, loadBid, loadCO, loadSubmission,
   mergeContacts, deleteCompany, deleteChangeOrder,
+  getVendors, VENDOR_CATEGORIES,
 };

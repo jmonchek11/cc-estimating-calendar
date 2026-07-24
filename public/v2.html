@@ -189,6 +189,7 @@
       <a class="nav-item" data-page="projects" href="#projects" onclick="navigate('projects');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg></span> Projects</a>
       <div class="nav-section-label">PEOPLE</div>
       <a class="nav-item" data-page="contacts" href="#contacts" onclick="navigate('contacts');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span> Contacts</a>
+      <a class="nav-item" data-page="vendors" href="#vendors" onclick="navigate('vendors');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg></span> Vendors</a>
       <div class="nav-section-label">DATA</div>
       <a class="nav-item" data-page="health" href="#health" onclick="navigate('health');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></span> Data Health</a>
       <a class="nav-item" data-page="history" href="#history" id="nav-history" style="display:none" onclick="navigate('history');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 16 14"/></svg></span> History</a>
@@ -334,6 +335,7 @@ function navigate(page) {
   if (page === 'submitted-cos') { VIEW = { name: 'colist', arg: 'submitted_co' }; return renderCoList('submitted_co'); }
   if (page === 'search') { VIEW = { name: 'search' }; return renderSearchResults(); }
   if (page === 'contacts') { VIEW = { name: 'contacts' }; return renderContacts(); }
+  if (page === 'vendors') { VIEW = { name: 'vendors' }; return renderVendors(); }
   if (page === 'digest') { VIEW = { name: 'digest' }; return renderDigest(); }
   if (page === 'calendar') { VIEW = { name: 'calendar' }; return renderCalendar(); }
   if (page === 'settings') { VIEW = { name: 'settings' }; return renderSettings(); }
@@ -344,6 +346,7 @@ async function rerenderView() {
   switch (VIEW.name) {
     case 'search':    return renderSearchResults();
     case 'contacts':  return renderContacts();
+    case 'vendors':   return renderVendors();
     case 'digest':    return renderDigest();
     case 'calendar':  return renderCalendar();
     case 'settings':  return renderSettings();
@@ -1922,8 +1925,13 @@ function showForm(title, fields, onSubmit, submitLabel = 'Save', submitClass = '
         </select></div>`;
     }
     if (f.type === 'multicheck') {
+      const selected = new Set((f.value || []).map(String));
       return `<div class="v2-field"><label>${f.label}${req}</label>
-        ${f.options.map(o => `<label class="v2-check"><input type="checkbox" data-multi="${f.id}" value="${o.value}"> ${esc(o.label)}</label>`).join('')}</div>`;
+        ${f.options.map(o => `<label class="v2-check"><input type="checkbox" data-multi="${f.id}" value="${o.value}" ${selected.has(String(o.value)) ? 'checked' : ''}> ${esc(o.label)}</label>`).join('')}</div>`;
+    }
+    if (f.type === 'tags') {
+      return `<div class="v2-field"><label>${f.label}${req}</label>
+        <input id="vf-${f.id}" type="text" value="${esc((f.value || []).join(', '))}" placeholder="${esc(f.placeholder || 'Comma-separated…')}"></div>`;
     }
     if (f.type === 'company' || f.type === 'project') {
       return `<div class="v2-field"><label>${f.label}${req}</label>
@@ -1972,7 +1980,10 @@ function showForm(title, fields, onSubmit, submitLabel = 'Save', submitClass = '
     let missing = [];
     for (const f of fields) {
       if (f.type === 'multicheck') {
-        data[f.id] = [...ov.querySelectorAll(`input[data-multi="${f.id}"]:checked`)].map(c => Number(c.value));
+        data[f.id] = [...ov.querySelectorAll(`input[data-multi="${f.id}"]:checked`)].map(c => f.stringValues ? c.value : Number(c.value));
+        if (f.required && !data[f.id].length) missing.push(f.label);
+      } else if (f.type === 'tags') {
+        data[f.id] = (document.getElementById('vf-' + f.id)?.value || '').split(',').map(s => s.trim()).filter(Boolean);
         if (f.required && !data[f.id].length) missing.push(f.label);
       } else if (f.type === 'company' || f.type === 'project') {
         const sel = COMBO_STATE[f.id] || [];
@@ -3048,6 +3059,80 @@ async function deleteEmptyProject(id) {
 // company links and stats here are exact instead of string-matched.
 // ═══════════════════════════════════════════════════════════════════════════
 let CONTACTS_STATE = { rows: [], q: '', companyId: '', noCompany: false, sortKey: 'full_name', sortDir: 1 };
+let VENDORS_STATE = { rows: [], q: '', category: '' };
+
+// ── Vendor directory — Contacts tagged with vendor_categories/brands. Same
+// underlying list as Contacts, filtered down and re-shown with category and
+// brand front-and-center (e.g. "who can I call for Silent Knight?"). ───────
+async function renderVendors() {
+  setActiveNav('vendors');
+  const main = document.getElementById('main');
+  main.innerHTML = '<div style="padding:30px;color:var(--text-muted)">Loading…</div>';
+  try { await ensureMeta(); VENDORS_STATE.rows = await api('GET', '/api/v2/vendors'); }
+  catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
+
+  main.innerHTML = `
+    <div class="page-header">
+      <div><div class="page-title">🔧 Vendors</div><div class="page-subtitle" id="vd-count">${VENDORS_STATE.rows.length} vendor contacts</div></div>
+      <div style="display:flex;gap:8px">
+        <button class="v2-btn green" onclick="actNewContact()">+ New Vendor Contact</button>
+      </div>
+    </div>
+    <div class="card" style="padding:0">
+      <div class="v2-filterbar">
+        <input type="text" id="vd-q" placeholder="Search name, company, email, or brand (e.g. Silent Knight)…" value="${esc(VENDORS_STATE.q)}" oninput="onVendorsFilterChange()">
+        <select id="vd-category" onchange="onVendorsFilterChange()">
+          <option value="">All categories</option>
+          ${(META.vendorCategories || []).map(v => `<option value="${esc(v)}" ${v === VENDORS_STATE.category ? 'selected' : ''}>${esc(v)}</option>`).join('')}
+        </select>
+        <span class="clear-link" onclick="clearVendorsFilters()">Clear</span>
+      </div>
+      <div id="vd-body"></div>
+    </div>`;
+  renderVendorsBody();
+}
+function onVendorsFilterChange() {
+  VENDORS_STATE.q = document.getElementById('vd-q')?.value || '';
+  VENDORS_STATE.category = document.getElementById('vd-category')?.value || '';
+  renderVendorsBody();
+}
+function clearVendorsFilters() {
+  VENDORS_STATE.q = ''; VENDORS_STATE.category = '';
+  renderVendors();
+}
+function renderVendorsBody() {
+  const { rows, q, category } = VENDORS_STATE;
+  let out = rows;
+  if (category) out = out.filter(c => c.vendor_categories.includes(category));
+  if (q.trim()) {
+    const n = q.trim().toLowerCase();
+    out = out.filter(c => [c.full_name, c.email, c.phone, c.company?.name, ...c.brands].some(f => f && String(f).toLowerCase().includes(n)));
+  }
+  document.getElementById('vd-count').textContent = `${out.length} of ${rows.length} vendor contacts`;
+
+  const tagPill = (t, bg, fg) => `<span class="badge" style="background:${bg};color:${fg};font-size:10px;margin:1px">${esc(t)}</span>`;
+
+  document.getElementById('vd-body').innerHTML = out.length ? `
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="border-bottom:1px solid var(--border)">
+        <th style="text-align:left;padding:8px 16px;color:var(--text-muted);font-weight:600;font-size:11px">Company</th>
+        <th style="text-align:left;padding:8px 16px;color:var(--text-muted);font-weight:600;font-size:11px">Name</th>
+        <th style="text-align:left;padding:8px 16px;color:var(--text-muted);font-weight:600;font-size:11px">Categories</th>
+        <th style="text-align:left;padding:8px 16px;color:var(--text-muted);font-weight:600;font-size:11px">Brands</th>
+        <th style="text-align:left;padding:8px 16px;color:var(--text-muted);font-weight:600;font-size:11px">Phone</th>
+        <th style="text-align:left;padding:8px 16px;color:var(--text-muted);font-weight:600;font-size:11px">Email</th>
+      </tr></thead>
+      <tbody>${out.map(c => `
+        <tr style="border-bottom:1px solid #f1f5f9">
+          <td style="padding:8px 16px">${c.company ? `<a href="#" onclick="event.preventDefault();openCompanyProfile(${c.company.id})" style="color:#2563eb;text-decoration:none;font-weight:600">${esc(c.company.name)}</a>` : '<span style="color:var(--text-muted)">—</span>'}</td>
+          <td style="padding:8px 16px"><a href="#" onclick="event.preventDefault();openContactProfile(${c.id})" style="color:inherit;text-decoration:none">${esc(c.full_name)}</a>${c.title ? `<div style="font-size:11px;color:var(--text-muted)">${esc(c.title)}</div>` : ''}</td>
+          <td style="padding:8px 16px">${c.vendor_categories.map(v => tagPill(v, '#e0e7ff', '#3730a3')).join(' ')}</td>
+          <td style="padding:8px 16px">${c.brands.length ? c.brands.map(b => tagPill(b, '#dcfce7', '#166534')).join(' ') : '<span style="color:var(--text-muted)">—</span>'}</td>
+          <td style="padding:8px 16px">${c.phone ? esc(c.phone) : '<span style="color:var(--text-muted)">—</span>'}</td>
+          <td style="padding:8px 16px">${c.email ? `<a href="mailto:${esc(c.email)}" style="color:#2563eb">${esc(c.email)}</a>` : '<span style="color:var(--text-muted)">—</span>'}</td>
+        </tr>`).join('')}</tbody>
+    </table>` : '<div style="padding:24px;text-align:center;color:var(--text-muted)">No vendor contacts match — tag a contact with a Vendor Category from its edit form to have it show up here.</div>';
+}
 function sortContacts(key) {
   if (CONTACTS_STATE.sortKey === key) CONTACTS_STATE.sortDir *= -1;
   else { CONTACTS_STATE.sortKey = key; CONTACTS_STATE.sortDir = 1; }
@@ -3155,6 +3240,8 @@ function actNewContact(prefillCompanyId) {
     { id: 'phone', label: 'Phone', type: 'text' },
     { id: 'email', label: 'Email', type: 'text' },
     { id: 'title', label: 'Position', type: 'text', placeholder: 'e.g. Project Manager, Purchasing…' },
+    { id: 'vendor_categories', label: 'Vendor Categories (if this person reps equipment/services)', type: 'multicheck', stringValues: true, options: (META.vendorCategories || []).map(v => ({ value: v, label: v })) },
+    { id: 'brands', label: 'Brands Repped', type: 'tags', placeholder: 'e.g. Silent Knight, Notifier, Fire-Lite' },
     { id: 'notes', label: 'Notes', type: 'textarea' },
   ], async data => {
     const c = await api('POST', '/api/v2/contacts', data);
@@ -3174,6 +3261,8 @@ function actEditContact(id) {
     { id: 'phone', label: 'Phone', type: 'text', value: c.phone },
     { id: 'email', label: 'Email', type: 'text', value: c.email },
     { id: 'title', label: 'Position', type: 'text', value: c.title, placeholder: 'e.g. Project Manager, Purchasing…' },
+    { id: 'vendor_categories', label: 'Vendor Categories (if this person reps equipment/services)', type: 'multicheck', stringValues: true, value: c.vendor_categories, options: (META.vendorCategories || []).map(v => ({ value: v, label: v })) },
+    { id: 'brands', label: 'Brands Repped', type: 'tags', value: c.brands, placeholder: 'e.g. Silent Knight, Notifier, Fire-Lite' },
     { id: 'notes', label: 'Notes', type: 'textarea', value: c.notes },
   ], async data => {
     await api('PATCH', `/api/v2/contacts/${c.id}`, data);
@@ -3234,7 +3323,9 @@ async function openContactProfile(id) {
       ${c.title ? `💼 ${esc(c.title)}<br>` : ''}
       ${c.phone ? `📞 ${esc(c.phone)}<br>` : ''}
       ${c.email ? `✉️ ${esc(c.email)}<br>` : ''}
-      ${c.notes ? `📝 ${esc(c.notes)}` : ''}
+      ${c.notes ? `📝 ${esc(c.notes)}<br>` : ''}
+      ${c.vendor_categories?.length ? `🔧 ${c.vendor_categories.map(esc).join(', ')}<br>` : ''}
+      ${c.brands?.length ? `🏷️ ${c.brands.map(esc).join(', ')}` : ''}
     </div>
     ${bidStatsHtml(hist.stats)}
     <div style="font-weight:700;font-size:13px;margin:12px 0 4px">Bid History</div>

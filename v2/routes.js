@@ -317,6 +317,8 @@ router.post('/api/v2/contacts',          t(req => v2db.createContact(req.body)))
 router.patch('/api/v2/contacts/:id',     t(req => v2db.updateContact(req.params.id, req.body)));
 router.delete('/api/v2/contacts/:id',    t(req => v2db.deleteContact(req.params.id)));
 
+router.get('/api/v2/vendors', async (req, res) => { try { res.json(await v2db.getVendors(req.query)); } catch (e) { res.status(500).json({ error: e.message }); } });
+
 router.get('/api/v2/companies/:id/bids', async (req, res) => { try { res.json(await v2db.getCompanyBids(req.params.id)); } catch (e) { res.status(500).json({ error: e.message }); } });
 router.post('/api/v2/companies',         t(req => v2db.createCompanyV2(req.body)));
 

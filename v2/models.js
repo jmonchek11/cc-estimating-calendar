@@ -212,6 +212,14 @@ const ContactSchema = new mongoose.Schema({
   email:      { type: String, default: null },
   title:      { type: String, default: null },   // e.g. "Project Manager", "Purchasing" — which part of the project they're connected to
   notes:      { type: String, default: null },
+  // Vendor directory (2026-07) — a contact can ALSO be a vendor rep, e.g. a
+  // Graybar contact reps Gear for one project and Lighting for another.
+  // Lives on the contact (not the company) because reps at the same company
+  // often cover different categories. `brands` is free-text tags (mainly
+  // used for Fire Alarm, e.g. "Silent Knight, Notifier") — not an enum,
+  // since manufacturer lines vary too much to whitelist.
+  vendor_categories: { type: [String], default: [] },
+  brands:            { type: [String], default: [] },
   active:     { type: Number, default: 1 },
   created_at: { type: String, default: ts },
   updated_at: { type: String, default: ts },
