@@ -2138,15 +2138,27 @@ async function getReports({ from, to, granularity, personId } = {}) {
   const sumAmt = (arr) => arr.reduce((s, x) => s + (x.estimate_amount || 0), 0);
 
   // ── Summary cards ──────────────────────────────────────────────────────
+  // Everything below is a FUNNEL anchored on date_submitted: "submitted"
+  // is the cohort of bids submitted in this range, and awarded/notAwarded/
+  // pending are how THOSE SAME bids turned out — regardless of how long it
+  // took to decide. This guarantees awarded + notAwarded + pending ==
+  // submitted, so the numbers always reconcile (a bid submitted in January
+  // and awarded in July shows up as "awarded" in January's cohort, not as
+  // an unexplained award with no matching submission in July's).
   const opportunitiesIn = eligibleBids.filter(b => b.stage === 'opportunity' && inRange((b.created_at || '').slice(0, 10)));
   const activeBidsIn    = eligibleBids.filter(b => b.stage === 'active_bid' && inRange((b.created_at || '').slice(0, 10)));
   const submittedIn     = eligibleBids.filter(b => inRange(b.date_submitted));
-  const awardedIn       = eligibleBids.filter(b => b.stage === 'awarded' && inRange(b.award_date));
-  const notAwardedIn    = eligibleBids.filter(b => b.stage === 'not_awarded' && inRange(b.date_not_awarded));
+  const awardedIn       = submittedIn.filter(b => b.stage === 'awarded');
+  const notAwardedIn    = submittedIn.filter(b => b.stage === 'not_awarded');
+  const pendingIn       = submittedIn.filter(b => b.stage === 'submitted');
+  // A submitted bid can later be closed out (e.g. the project got cancelled
+  // after submission) without ever being formally awarded/not-awarded —
+  // its own bucket so the funnel still reconciles exactly to `submitted`.
+  const closedIn        = submittedIn.filter(b => b.stage === 'closed');
   const decided = awardedIn.length + notAwardedIn.length;
 
-  const approvedCosIn  = eligibleCos.filter(c => c.stage === 'approved' && inRange(c.approval_date));
   const submittedCosIn = eligibleCos.filter(c => inRange(c.date_submitted));
+  const approvedCosIn  = submittedCosIn.filter(c => c.stage === 'approved');
 
   const summary = {
     opportunities: { count: opportunitiesIn.length, value: sumAmt(opportunitiesIn) },
@@ -2154,33 +2166,41 @@ async function getReports({ from, to, granularity, personId } = {}) {
     submitted:     { count: submittedIn.length, value: sumAmt(submittedIn) },
     awarded:       { count: awardedIn.length, value: sumAmt(awardedIn) },
     notAwarded:    { count: notAwardedIn.length, value: sumAmt(notAwardedIn) },
+    pending:       { count: pendingIn.length, value: sumAmt(pendingIn) },
+    closed:        { count: closedIn.length, value: sumAmt(closedIn) },
     winRate:       decided ? Math.round((awardedIn.length / decided) * 1000) / 10 : null,
-    approvedCOs:   { count: approvedCosIn.length, value: sumAmt(approvedCosIn) },
     submittedCOs:  { count: submittedCosIn.length, value: sumAmt(submittedCosIn) },
+    approvedCOs:   { count: approvedCosIn.length, value: sumAmt(approvedCosIn) },
   };
 
-  // ── Time series — submitted / awarded / not-awarded $, bucketed ─────────
+  // ── Time series — bucketed by date_submitted (one timeline), split by
+  // how each submitted bid ultimately turned out. ────────────────────────
   const buckets = {};
-  const touch = (dateStr, field, amt) => {
-    const key = bucketKeyFor(dateStr, gran);
+  const touch = (b, field) => {
+    const key = bucketKeyFor(b.date_submitted, gran);
     if (!key) return;
-    if (!buckets[key]) buckets[key] = { key, label: bucketLabel(key, gran), submittedCount: 0, submittedValue: 0, awardedCount: 0, awardedValue: 0, notAwardedCount: 0, notAwardedValue: 0 };
-    buckets[key][field + 'Count']++;
-    buckets[key][field + 'Value'] += (amt || 0);
+    if (!buckets[key]) buckets[key] = { key, label: bucketLabel(key, gran), submittedCount: 0, submittedValue: 0, awardedCount: 0, awardedValue: 0, notAwardedCount: 0, notAwardedValue: 0, pendingCount: 0, pendingValue: 0, closedCount: 0, closedValue: 0 };
+    const bucket = buckets[key];
+    bucket.submittedCount++; bucket.submittedValue += (b.estimate_amount || 0);
+    bucket[field + 'Count']++; bucket[field + 'Value'] += (b.estimate_amount || 0);
   };
-  submittedIn.forEach(b => touch(b.date_submitted, 'submitted', b.estimate_amount));
-  awardedIn.forEach(b => touch(b.award_date, 'awarded', b.estimate_amount));
-  notAwardedIn.forEach(b => touch(b.date_not_awarded, 'notAwarded', b.estimate_amount));
+  submittedIn.forEach(b => touch(b, b.stage === 'awarded' ? 'awarded' : b.stage === 'not_awarded' ? 'notAwarded' : b.stage === 'closed' ? 'closed' : 'pending'));
   const timeSeries = Object.values(buckets).sort((a, b) => a.key.localeCompare(b.key));
 
-  // ── By customer — submitted (BidCustomer join, multi-customer aware) and
-  // awarded (single winner via awarded_company_id) attributed separately.
+  // ── By customer — via BidCustomer join (multi-customer aware); awarded/
+  // not-awarded/closed/pending are all subsets of the SAME submitted cohort
+  // per customer, so Submitted $ always equals their sum.
   const custStats = {};
-  const ensureCust = (id) => custStats[id] || (custStats[id] = { companyId: id, name: coName[id] || '—', submittedCount: 0, submittedValue: 0, awardedCount: 0, awardedValue: 0, notAwardedCount: 0 });
+  const ensureCust = (id) => custStats[id] || (custStats[id] = { companyId: id, name: coName[id] || '—', submittedCount: 0, submittedValue: 0, awardedCount: 0, awardedValue: 0, notAwardedCount: 0, pendingCount: 0, closedCount: 0 });
   const bcByBid = {}; bidCustomers.forEach(bc => (bcByBid[bc.bid_id] = bcByBid[bc.bid_id] || []).push(bc.company_id));
-  submittedIn.forEach(b => (bcByBid[b._id] || []).forEach(cid => { const s = ensureCust(cid); s.submittedCount++; s.submittedValue += (b.estimate_amount || 0); }));
-  awardedIn.forEach(b => { if (b.awarded_company_id) { const s = ensureCust(b.awarded_company_id); s.awardedCount++; s.awardedValue += (b.estimate_amount || 0); } });
-  notAwardedIn.forEach(b => (bcByBid[b._id] || []).forEach(cid => ensureCust(cid).notAwardedCount++));
+  submittedIn.forEach(b => (bcByBid[b._id] || []).forEach(cid => {
+    const s = ensureCust(cid);
+    s.submittedCount++; s.submittedValue += (b.estimate_amount || 0);
+    if (b.stage === 'awarded') { s.awardedCount++; s.awardedValue += (b.estimate_amount || 0); }
+    else if (b.stage === 'not_awarded') s.notAwardedCount++;
+    else if (b.stage === 'closed') s.closedCount++;
+    else s.pendingCount++;
+  }));
   const byCustomer = Object.values(custStats)
     .map(s => ({ ...s, winRate: (s.awardedCount + s.notAwardedCount) ? Math.round((s.awardedCount / (s.awardedCount + s.notAwardedCount)) * 1000) / 10 : null }))
     .sort((a, b) => b.awardedValue - a.awardedValue || b.submittedValue - a.submittedValue);
