@@ -25,8 +25,9 @@ async function requireAdmin(req, res, next) {
 
 // Same generic editor as requireAdmin gates, but a bid/CO's own assigned
 // estimator or salesperson (bid) / estimator (CO) can also edit it, even
-// without admin rights — everything else routed through this editor
-// (project/company/job/bid_submission, or a bid/CO they AREN'T assigned to)
+// without admin rights — same courtesy extends to a bid_submission via its
+// parent bid's assignment. Everything else routed through this editor
+// (project/company/job, or a bid/CO/submission they AREN'T assigned to)
 // still requires real admin. Scoped to just the :entity/:id PATCH route,
 // not the merge/delete/other admin-only actions.
 async function requireAdminOrAssigned(req, res, next) {
@@ -40,6 +41,10 @@ async function requireAdminOrAssigned(req, res, next) {
     } else if (actor && entity === 'change_order') {
       const co = await v2db.loadCO(id).catch(() => null);
       if (co && co.estimator_id === actor.id) return next();
+    } else if (actor && entity === 'bid_submission') {
+      const sub = await v2db.loadSubmission(id).catch(() => null);
+      const bid = sub ? await v2db.loadBid(sub.bid_id).catch(() => null) : null;
+      if (bid && (bid.estimator_id === actor.id || bid.salesperson_id === actor.id)) return next();
     }
     return res.status(403).json({ error: 'Admin only' });
   } catch (e) { res.status(500).json({ error: e.message }); }

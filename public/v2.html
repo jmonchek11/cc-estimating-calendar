@@ -159,7 +159,7 @@
   <div id="app">
     <nav id="sidebar">
       <div class="sidebar-header">
-        <div class="logo"><img src="logo.png" alt="Liberty Integrated Solutions" style="width:100%;max-width:213px;object-fit:contain;padding:4px 0" /></div>
+        <a href="#dashboard" onclick="navigate('dashboard');return false" class="logo" style="display:block;cursor:pointer"><img src="logo.png" alt="Liberty Integrated Solutions" style="width:100%;max-width:213px;object-fit:contain;padding:4px 0" /></a>
       </div>
       <div class="app-switcher" id="app-switcher"></div>
       <div class="sidebar-search-wrap">
@@ -1482,7 +1482,7 @@ function bidNode(b) {
           ${b.drawing_stage ? `<span class="badge" style="background:#ede9fe;color:#5b21b6">${esc(b.drawing_stage)}</span>` : ''}
           ${b.estimate_amount ? `<span class="amount">${fmt$(b.estimate_amount)}</span>` : ''}
           ${(b.submissions || []).filter(s => s.is_current).length > 1 ? `<span class="badge" style="background:#dbeafe;color:#1e40af">${b.submissions.filter(s => s.is_current).length} customers</span>` : ''}
-          ${b.due_date ? `<span style="margin-left:auto;font-weight:700;font-size:12px;color:${b.due_date < today ? '#dc2626' : 'var(--text-muted)'}">Due ${fmtD(b.due_date)}</span>` : ''}
+          ${b.due_date ? `<span style="margin-left:auto;font-weight:700;font-size:12px;color:${['opportunity','active_bid'].includes(b.stage) && b.due_date < today ? '#dc2626' : 'var(--text-muted)'}">Due ${fmtD(b.due_date)}</span>` : ''}
         </div>
         <div style="font-size:12px;color:var(--text-muted);margin-top:4px;line-height:1.6">
           ${!b.customers.length ? '<span style="color:#dc2626">no customer</span><br>' : ''}
@@ -1679,7 +1679,7 @@ function coNode(co) {
           ${stageBadge(co.stage)}
           ${co.superseded ? '<span class="badge" style="background:#e2e8f0;color:#64748b">REVISED</span>' : ''}
           ${co.estimate_amount ? `<span class="amount">${fmt$(co.estimate_amount)}</span>` : ''}
-          ${co.due_date ? `<span style="margin-left:auto;font-weight:700;font-size:12px;color:${co.due_date < today ? '#dc2626' : 'var(--text-muted)'}">Due ${fmtD(co.due_date)}</span>` : ''}
+          ${co.due_date ? `<span style="margin-left:auto;font-weight:700;font-size:12px;color:${co.stage === 'active_co' && co.due_date < today ? '#dc2626' : 'var(--text-muted)'}">Due ${fmtD(co.due_date)}</span>` : ''}
         </div>
         <div style="font-size:12px;color:var(--text-muted);margin-top:2px">
           ${co.estimator ? `Est: ${ini(co.estimator)}` : ''}
@@ -1761,7 +1761,7 @@ function submissionRow(s, bid) {
       ${live && s.next_followup_date ? ` · F/U: <span class="${overdue ? 'overdue-txt' : ''}">${fmtD(s.next_followup_date)}${overdue ? ' — OVERDUE' : ''}</span>` : ''}
       ${s.notes ? ` · ${esc(s.notes)}` : ''}
       ${s.not_awarded_notes ? ` · <span style="color:#991b1b">${esc(s.not_awarded_notes)}</span>` : ''}
-      ${CURRENT_USER?.is_admin ? `<a href="#" onclick="event.preventDefault();actEditSubmission(${s.id})" style="font-size:11px;margin-left:4px">✏️</a>` : ''}
+      ${(CURRENT_USER?.is_admin || CURRENT_USER?.id === bid?.estimator?.id || CURRENT_USER?.id === bid?.salesperson?.id) ? `<a href="#" onclick="event.preventDefault();actEditSubmission(${s.id})" style="font-size:11px;margin-left:4px">✏️</a>` : ''}
     </div>
     ${(s.followups || []).length ? `<div style="margin-left:12px;margin-top:2px">${s.followups.map(fuRow).join('')}</div>` : ''}
     ${actions}
