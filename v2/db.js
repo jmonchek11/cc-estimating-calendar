@@ -2102,14 +2102,14 @@ async function getReports({ from, to, granularity, personId } = {}) {
   const pid = personId ? Number(personId) : null;
   const inRange = (d) => !!d && (!from || d >= from) && (!to || d <= to);
 
-  const [bids, cos, jobs, projects, companies, members, bidCustomers] = await Promise.all([
+  const [bids, cos, jobs, projects, companies, members, currentSubs] = await Promise.all([
     M.Bid.find({ superseded: { $ne: 1 } }).lean(),
     M.ChangeOrder.find({ superseded: { $ne: 1 } }).lean(),
     M.Job.find().lean(),
     M.Project.find().lean(),
     M.Company.find().lean(),
     M.TeamMember.find().lean(),
-    M.BidCustomer.find().lean(),
+    M.BidSubmission.find({ is_current: 1 }).lean(),
   ]);
 
   const pName = {}; projects.forEach(p => pName[p._id] = p.name);
@@ -2187,25 +2187,28 @@ async function getReports({ from, to, granularity, personId } = {}) {
   submittedIn.forEach(b => touch(b, b.stage === 'awarded' ? 'awarded' : b.stage === 'not_awarded' ? 'notAwarded' : b.stage === 'closed' ? 'closed' : 'pending'));
   const timeSeries = Object.values(buckets).sort((a, b) => a.key.localeCompare(b.key));
 
-  // ── By customer — via BidCustomer join (multi-customer aware). A bid
-  // submitted to several companies has only ONE actual winner
-  // (awarded_company_id) — the other linked companies on that same
-  // awarded bid lost it to a competitor, so they're counted Not Awarded,
-  // not Awarded, even though the bid's own stage is 'awarded'. Without
-  // this, every company CC'd on a multi-customer bid would wrongly show
-  // as having won it.
+  // ── By customer — per-submission ground truth (BidSubmission), not the
+  // bid's own overall stage. A multi-customer bid has ONE row per company
+  // it was sent to, each with its OWN outcome — the "winner" is awarded,
+  // but siblings are typically left 'pending' (per DATA_MODEL_SPEC: "the
+  // first awarded submission wins the bid; siblings are LEFT pending,
+  // resolved individually"), not automatically not_awarded, and a
+  // customer can be marked not_awarded independently even while the bid
+  // overall is still 'submitted' (not every customer has answered yet).
+  // Bid.stage === 'closed' overrides every submission on it to Closed,
+  // since closeBid() never touches BidSubmission — the whole opportunity
+  // was called off regardless of what any individual submission still says.
+  // Dollar figures use the submission's own amount, not the bid's
+  // denormalized headline (which only reflects the current/winning one).
   const custStats = {};
   const ensureCust = (id) => custStats[id] || (custStats[id] = { companyId: id, name: coName[id] || '—', submittedCount: 0, submittedValue: 0, awardedCount: 0, awardedValue: 0, notAwardedCount: 0, pendingCount: 0, closedCount: 0 });
-  const bcByBid = {}; bidCustomers.forEach(bc => (bcByBid[bc.bid_id] = bcByBid[bc.bid_id] || []).push(bc.company_id));
-  submittedIn.forEach(b => (bcByBid[b._id] || []).forEach(cid => {
-    const s = ensureCust(cid);
-    s.submittedCount++; s.submittedValue += (b.estimate_amount || 0);
-    if (b.stage === 'awarded') {
-      if (cid === b.awarded_company_id) { s.awardedCount++; s.awardedValue += (b.estimate_amount || 0); }
-      else s.notAwardedCount++;
-    }
-    else if (b.stage === 'not_awarded') s.notAwardedCount++;
-    else if (b.stage === 'closed') s.closedCount++;
+  const subsByBid = {}; currentSubs.forEach(s => (subsByBid[s.bid_id] = subsByBid[s.bid_id] || []).push(s));
+  submittedIn.forEach(b => (subsByBid[b._id] || []).forEach(sub => {
+    const s = ensureCust(sub.company_id);
+    s.submittedCount++; s.submittedValue += (sub.amount || 0);
+    if (b.stage === 'closed') s.closedCount++;
+    else if (sub.outcome === 'awarded') { s.awardedCount++; s.awardedValue += (sub.amount || 0); }
+    else if (sub.outcome === 'not_awarded') s.notAwardedCount++;
     else s.pendingCount++;
   }));
   const byCustomer = Object.values(custStats)
