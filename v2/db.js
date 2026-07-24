@@ -2187,16 +2187,23 @@ async function getReports({ from, to, granularity, personId } = {}) {
   submittedIn.forEach(b => touch(b, b.stage === 'awarded' ? 'awarded' : b.stage === 'not_awarded' ? 'notAwarded' : b.stage === 'closed' ? 'closed' : 'pending'));
   const timeSeries = Object.values(buckets).sort((a, b) => a.key.localeCompare(b.key));
 
-  // ── By customer — via BidCustomer join (multi-customer aware); awarded/
-  // not-awarded/closed/pending are all subsets of the SAME submitted cohort
-  // per customer, so Submitted $ always equals their sum.
+  // ── By customer — via BidCustomer join (multi-customer aware). A bid
+  // submitted to several companies has only ONE actual winner
+  // (awarded_company_id) — the other linked companies on that same
+  // awarded bid lost it to a competitor, so they're counted Not Awarded,
+  // not Awarded, even though the bid's own stage is 'awarded'. Without
+  // this, every company CC'd on a multi-customer bid would wrongly show
+  // as having won it.
   const custStats = {};
   const ensureCust = (id) => custStats[id] || (custStats[id] = { companyId: id, name: coName[id] || '—', submittedCount: 0, submittedValue: 0, awardedCount: 0, awardedValue: 0, notAwardedCount: 0, pendingCount: 0, closedCount: 0 });
   const bcByBid = {}; bidCustomers.forEach(bc => (bcByBid[bc.bid_id] = bcByBid[bc.bid_id] || []).push(bc.company_id));
   submittedIn.forEach(b => (bcByBid[b._id] || []).forEach(cid => {
     const s = ensureCust(cid);
     s.submittedCount++; s.submittedValue += (b.estimate_amount || 0);
-    if (b.stage === 'awarded') { s.awardedCount++; s.awardedValue += (b.estimate_amount || 0); }
+    if (b.stage === 'awarded') {
+      if (cid === b.awarded_company_id) { s.awardedCount++; s.awardedValue += (b.estimate_amount || 0); }
+      else s.notAwardedCount++;
+    }
     else if (b.stage === 'not_awarded') s.notAwardedCount++;
     else if (b.stage === 'closed') s.closedCount++;
     else s.pendingCount++;
