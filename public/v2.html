@@ -1275,7 +1275,6 @@ function showAwardedByMonth() {
   const months = d.awardedYTD.byMonth || [];
   const ov = document.createElement('div');
   ov.className = 'v2-overlay'; ov.id = 'v2-form-overlay';
-  ov.onclick = e => { if (e.target === ov) ov.remove(); };
   ov.innerHTML = `
     <div class="v2-modal" style="max-width:560px;max-height:85vh;overflow-y:auto">
       <div class="v2-modal-hd">✅ Awarded — by month${d.mineOnly ? ' (My View)' : ''}<button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">✕</button></div>
@@ -1362,7 +1361,7 @@ async function renderFlyout(fresh) {
   let panel = document.getElementById('fly-panel');
   if (!overlay) {
     overlay = document.createElement('div'); overlay.id = 'fly-overlay'; overlay.className = 'fly-overlay';
-    overlay.onclick = closeFlyout; document.body.appendChild(overlay);
+    document.body.appendChild(overlay);
     panel = document.createElement('div'); panel.id = 'fly-panel'; panel.className = 'fly-panel'; document.body.appendChild(panel);
     requestAnimationFrame(() => { overlay.classList.add('open'); panel.classList.add('open'); });
   }
@@ -1866,7 +1865,6 @@ function showForm(title, fields, onSubmit, submitLabel = 'Save', submitClass = '
   document.getElementById('v2-form-overlay')?.remove();
   const ov = document.createElement('div');
   ov.className = 'v2-overlay'; ov.id = 'v2-form-overlay';
-  ov.onclick = e => { if (e.target === ov) ov.remove(); };
 
   const fieldHtml = fields.map(f => {
     const req = f.required ? ' <span class="req">*</span>' : '';
@@ -2111,7 +2109,6 @@ function actStartBid(bidId) {
   document.getElementById('v2-form-overlay')?.remove();
   const ov = document.createElement('div');
   ov.className = 'v2-overlay'; ov.id = 'v2-form-overlay';
-  ov.onclick = e => { if (e.target === ov) ov.remove(); };
   ov.innerHTML = `
     <div class="v2-modal" style="max-width:380px">
       <div class="v2-modal-hd">→ Start Bid<button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">✕</button></div>
@@ -2561,7 +2558,6 @@ async function actNewChangeOrder() {
   document.getElementById('v2-form-overlay')?.remove();
   const ov = document.createElement('div');
   ov.className = 'v2-overlay'; ov.id = 'v2-form-overlay';
-  ov.onclick = e => { if (e.target === ov) ov.remove(); };
   ov.innerHTML = `
     <div class="v2-modal" style="max-width:460px">
       <div class="v2-modal-hd">+ New Change Order<button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">✕</button></div>
@@ -3172,7 +3168,6 @@ function openProfileModal(title, bodyHtml) {
   closeProfileModal(); closeFlyout();
   const ov = document.createElement('div');
   ov.className = 'v2-overlay'; ov.id = 'v2-profile-overlay';
-  ov.onclick = e => { if (e.target === ov) closeProfileModal(); };
   ov.innerHTML = `<div class="v2-modal" style="max-width:520px">
     <div class="v2-modal-hd">${title}<button class="v2-btn outline" onclick="closeProfileModal()">✕</button></div>
     <div class="v2-modal-bd">${bodyHtml}</div>
@@ -3244,7 +3239,6 @@ async function actLinkContact(bidCustomerId, companyId) {
   document.getElementById('v2-form-overlay')?.remove();
   const ov = document.createElement('div');
   ov.className = 'v2-overlay'; ov.id = 'v2-form-overlay';
-  ov.onclick = e => { if (e.target === ov) ov.remove(); };
   ov.innerHTML = `
     <div class="v2-modal" style="max-width:400px">
       <div class="v2-modal-hd">Link a Contact<button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">✕</button></div>
@@ -3320,7 +3314,6 @@ function actImportJIS(targetBidId) {
   document.getElementById('v2-form-overlay')?.remove();
   const ov = document.createElement('div');
   ov.className = 'v2-overlay'; ov.id = 'v2-form-overlay';
-  ov.onclick = e => { if (e.target === ov) ov.remove(); };
   ov.innerHTML = `
     <div class="v2-modal" style="max-width:420px">
       <div class="v2-modal-hd">📄 ${targetBidId ? 'Start Bid from JIS' : 'Import Bid from JIS'}<button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">✕</button></div>
@@ -3359,7 +3352,6 @@ function renderJISReview(p, targetBidId) {
   document.getElementById('v2-form-overlay')?.remove();
   const ov = document.createElement('div');
   ov.className = 'v2-overlay'; ov.id = 'v2-form-overlay';
-  ov.onclick = e => { if (e.target === ov) ov.remove(); };
 
   // Three modes: starting an existing opportunity from a JIS (targetBidId
   // set from the "Start Bid" choice menu's "Import from a JIS file" option),
@@ -3582,7 +3574,6 @@ async function openOnlinePanel() {
   document.getElementById('v2-form-overlay')?.remove();
   const ov = document.createElement('div');
   ov.className = 'v2-overlay'; ov.id = 'v2-form-overlay';
-  ov.onclick = e => { if (e.target === ov) ov.remove(); };
   ov.innerHTML = `
     <div class="v2-modal" style="max-width:340px">
       <div class="v2-modal-hd">🟢 Who's Online<button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">✕</button></div>
@@ -3666,7 +3657,6 @@ async function openIdeasModal() {
   document.getElementById('v2-form-overlay')?.remove();
   const ov = document.createElement('div');
   ov.className = 'v2-overlay'; ov.id = 'v2-form-overlay';
-  ov.onclick = e => { if (e.target === ov) ov.remove(); };
   const currentPage = (location.hash || '#dashboard').replace('#', '').split('/')[0];
   ov.innerHTML = `
     <div class="v2-modal" style="max-width:520px;max-height:85vh;overflow-y:auto">
