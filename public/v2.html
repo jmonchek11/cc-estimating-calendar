@@ -3085,7 +3085,7 @@ async function renderVendors() {
     <div class="card" style="padding:0">
       <div class="v2-filterbar">
         <input type="text" id="vd-q" placeholder="Search name, company, email, or brand (e.g. Silent Knight)…" value="${esc(VENDORS_STATE.q)}" oninput="onVendorsFilterChange()">
-        <select id="vd-category" onchange="onVendorsFilterChange()">
+        <select id="vd-category" onchange="onVendorsCategoryChange()">
           <option value="">All categories</option>
           ${(META.vendorCategories || []).map(v => `<option value="${esc(v)}" ${v === VENDORS_STATE.category ? 'selected' : ''}>${esc(v)}</option>`).join('')}
         </select>
@@ -3100,6 +3100,14 @@ function onVendorsFilterChange() {
   VENDORS_STATE.q = document.getElementById('vd-q')?.value || '';
   VENDORS_STATE.category = document.getElementById('vd-category')?.value || '';
   renderVendorsBody();
+}
+// Switching categories almost certainly means "I'm done with that vendor
+// type" — carrying a stale selection across to a new category (e.g. Fire
+// Alarm vendors still checked while looking at Lighting) silently inflates
+// the RFQ recipient count with vendors no longer visible on screen.
+function onVendorsCategoryChange() {
+  VENDORS_STATE.selected = new Set();
+  onVendorsFilterChange();
 }
 function clearVendorsFilters() {
   VENDORS_STATE.q = ''; VENDORS_STATE.category = ''; VENDORS_STATE.selected = new Set();
@@ -3173,8 +3181,11 @@ function rfqDefaultSubject(bid) {
 }
 function rfqDefaultBody(bid) {
   const project = bid ? bid.project : '[PROJECT]';
-  const due = bid && bid.due_date ? fmtD(bid.due_date) : '[DUE DATE]';
-  return `Good afternoon,\n\nCould you provide pricing for the attached plans/specs for ${project}? I would need a quote back by ${due}.\n\nLet me know if there are any questions.\n\nThanks!\n${CURRENT_USER?.name || ''}`;
+  // Vendor-facing due date is 1 working day before OUR due date (see
+  // getSearchResults' vendor_due_date) — time to actually work their quotes
+  // into the bid, not the same day we have to submit.
+  const due = bid && bid.vendor_due_date ? fmtD(bid.vendor_due_date) : '[DUE DATE]';
+  return `Good afternoon,\n\nCould you provide pricing for the attached plans/specs for ${project}? Plans & specs: [ADD LINK OR ATTACH FILES]\n\nI would need a quote back by ${due}.\n\nLet me know if there are any questions.\n\nThanks!\n${CURRENT_USER?.name || ''}`;
 }
 function openRfqModal() {
   const vendors = VENDORS_STATE.rows.filter(c => VENDORS_STATE.selected.has(c.id) && c.email);

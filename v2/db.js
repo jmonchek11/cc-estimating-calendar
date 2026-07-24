@@ -1858,6 +1858,10 @@ async function getSearchResults(q) {
       estimator: tm[b.estimator_id] || null, salesperson: tm[b.salesperson_id] || null,
       customers: [...new Set((custByBid[b._id] || []).filter(Boolean))],
       estimate_amount: b.estimate_amount, due_date: b.due_date, next_followup_date: b.next_followup_date,
+      // Vendor-facing due date for RFQs — 1 working day before OUR due date
+      // (skipping weekends/holidays same as follow-up scheduling) so there's
+      // time to actually work vendor quotes into the bid before it's due.
+      vendor_due_date: b.due_date ? addWorkingDays(b.due_date, -1) : null,
     }));
 
   const matchedCos = cos
