@@ -3700,6 +3700,14 @@ async function openIdeasModal() {
   try { IDEAS_CACHE = await api('GET', '/api/ideas'); } catch { IDEAS_CACHE = []; }
   const firstTerminalIdx = IDEAS_CACHE.findIndex(i => i.is_terminal);
 
+  // Voting, toggling comments, posting one, and changing status all call
+  // this to refresh the list — but it rebuilds the whole modal from
+  // scratch, and a brand-new DOM node's scroll position always starts at
+  // 0. Capture/restore it so clicking something halfway down the list
+  // doesn't snap you back to the top.
+  const prevModal = document.querySelector('#v2-form-overlay .v2-modal');
+  const prevScroll = prevModal ? prevModal.scrollTop : 0;
+
   document.getElementById('v2-form-overlay')?.remove();
   const ov = document.createElement('div');
   ov.className = 'v2-overlay'; ov.id = 'v2-form-overlay';
@@ -3731,6 +3739,8 @@ async function openIdeasModal() {
       </div>
     </div>`;
   document.body.appendChild(ov);
+  const newModal = ov.querySelector('.v2-modal');
+  if (newModal) newModal.scrollTop = prevScroll;
 }
 async function submitIdea() {
   const title = document.getElementById('idea-title')?.value.trim();
