@@ -3340,13 +3340,15 @@ function renderReportsBody(data) {
       ${card('Win Rate', summary.winRate == null ? '—' : summary.winRate + '%')}
       ${card('Approved COs', summary.approvedCOs.count, fmt$(summary.approvedCOs.value))}
     </div>
+    <div style="font-size:11px;color:var(--text-muted);margin:-10px 0 16px 2px">Each figure above counts by its own date — "Submitted" is bids submitted in this range, "Awarded" is bids awarded in this range, even if that bid was originally submitted long before. A bid can appear in one without the other.</div>
     <div class="card" style="padding:16px;margin-bottom:16px">
       <div style="font-weight:700;font-size:13px;margin-bottom:10px">Bid Volume Over Time</div>
       ${timeSeries.length ? `<div style="overflow-x:auto"><div style="min-width:${Math.max(600, timeSeries.length * 70)}px;height:280px"><canvas id="rp-chart-timeseries"></canvas></div></div>`
         : '<div style="color:var(--text-muted);font-size:13px;padding:20px 0;text-align:center">No submitted/awarded activity in this range.</div>'}
     </div>
     <div class="card" style="padding:16px;margin-bottom:16px">
-      <div style="font-weight:700;font-size:13px;margin-bottom:10px">By Customer</div>
+      <div style="font-weight:700;font-size:13px;margin-bottom:4px">By Customer</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">"Submitted" and "Awarded" are independent windows (each dated by when that event happened) — a bid submitted months ago can still show up as newly Awarded here without matching Submitted $ in the same range.</div>
       ${byCustomer.length ? `<div style="height:${Math.max(180, Math.min(byCustomer.length, 10) * 34)}px;margin-bottom:16px"><canvas id="rp-chart-customer"></canvas></div>` : ''}
       <div style="overflow-x:auto">${byCustomerTableHtml(byCustomer)}</div>
     </div>
