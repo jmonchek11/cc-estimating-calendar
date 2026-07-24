@@ -187,6 +187,8 @@
       <a class="nav-item" data-page="submitted-cos" href="#submitted-cos" onclick="navigate('submitted-cos');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="21" y1="3" x2="10" y2="14"/><polygon points="21 3 14 21 10 14 3 10 21 3"/></svg></span> Submitted Change Orders</a>
       <div class="nav-section-label">PROJECTS</div>
       <a class="nav-item" data-page="projects" href="#projects" onclick="navigate('projects');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg></span> Projects</a>
+      <div class="nav-section-label">REPORTS</div>
+      <a class="nav-item" data-page="reports" href="#reports" onclick="navigate('reports');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></span> Reports</a>
       <div class="nav-section-label">PEOPLE</div>
       <a class="nav-item" data-page="contacts" href="#contacts" onclick="navigate('contacts');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span> Contacts</a>
       <a class="nav-item" data-page="vendors" href="#vendors" onclick="navigate('vendors');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg></span> Vendors</a>
@@ -204,6 +206,7 @@
     <main id="main"><div style="padding:30px;color:var(--text-muted)">Loading…</div></main>
   </div>
 
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script>
 const fmt$ = n => n == null ? '' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
 const fmtD = d => { if (!d) return ''; const [y,m,dd] = d.split('-'); return `${Number(m)}/${Number(dd)}/${String(y).slice(2)}`; };
@@ -336,6 +339,7 @@ function navigate(page) {
   if (page === 'search') { VIEW = { name: 'search' }; return renderSearchResults(); }
   if (page === 'contacts') { VIEW = { name: 'contacts' }; return renderContacts(); }
   if (page === 'vendors') { VIEW = { name: 'vendors' }; return renderVendors(); }
+  if (page === 'reports') { VIEW = { name: 'reports' }; return renderReports(); }
   if (page === 'digest') { VIEW = { name: 'digest' }; return renderDigest(); }
   if (page === 'calendar') { VIEW = { name: 'calendar' }; return renderCalendar(); }
   if (page === 'settings') { VIEW = { name: 'settings' }; return renderSettings(); }
@@ -347,6 +351,7 @@ async function rerenderView() {
     case 'search':    return renderSearchResults();
     case 'contacts':  return renderContacts();
     case 'vendors':   return renderVendors();
+    case 'reports':   return renderReports();
     case 'digest':    return renderDigest();
     case 'calendar':  return renderCalendar();
     case 'settings':  return renderSettings();
@@ -3213,6 +3218,217 @@ function renderContactsBody() {
           <td style="padding:8px 16px">${c.email ? `<a href="mailto:${esc(c.email)}" style="color:#2563eb">${esc(c.email)}</a>` : '<span style="color:var(--text-muted)">—</span>'}</td>
         </tr>`).join('')}</tbody>
     </table>` : '<div style="padding:24px;text-align:center;color:var(--text-muted)">No matches</div>';
+}
+
+// ── Reports — trends over opportunities/bids/COs/jobs + per-job lessons
+// learned (CO growth vs original award). Every rollup is computed server-side
+// in getReports() (v2/db.js); this page is just filters + Chart.js. ────────
+let REPORTS_STATE = { preset: 'ytd', from: null, to: null, granularity: 'month', personId: '' };
+let REPORTS_CHARTS = {};
+
+function reportsRangeForPreset(preset) {
+  const now = new Date(today + 'T00:00:00Z');
+  const y = now.getUTCFullYear();
+  const iso = (dt) => dt.toISOString().split('T')[0];
+  const pad = (n) => String(n).padStart(2, '0');
+  if (preset === 'week') {
+    const day = (now.getUTCDay() + 6) % 7;
+    const monday = new Date(now); monday.setUTCDate(now.getUTCDate() - day);
+    return { from: iso(monday), to: today };
+  }
+  if (preset === 'month') return { from: `${y}-${pad(now.getUTCMonth() + 1)}-01`, to: today };
+  if (preset === 'quarter') { const startMonth = Math.floor(now.getUTCMonth() / 3) * 3 + 1; return { from: `${y}-${pad(startMonth)}-01`, to: today }; }
+  if (preset === 'year') return { from: `${y}-01-01`, to: `${y}-12-31` };
+  if (preset === 'ytd') return { from: `${y}-01-01`, to: today };
+  if (preset === 'all') return { from: null, to: null };
+  return { from: REPORTS_STATE.from, to: REPORTS_STATE.to }; // custom
+}
+
+async function renderReports() {
+  setActiveNav('reports');
+  const main = document.getElementById('main');
+  main.innerHTML = '<div style="padding:30px;color:var(--text-muted)">Loading…</div>';
+  try { await ensureMeta(); } catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
+
+  main.innerHTML = `
+    <div class="page-header">
+      <div><div class="page-title">📊 Reports</div><div class="page-subtitle">Trends across opportunities, bids, and jobs — and lessons learned from past ones</div></div>
+    </div>
+    <div class="card" style="padding:12px 16px;margin-bottom:16px">
+      <div class="v2-filterbar" style="flex-wrap:wrap">
+        <select id="rp-preset" onchange="onReportsPresetChange()">
+          <option value="week" ${REPORTS_STATE.preset === 'week' ? 'selected' : ''}>This Week</option>
+          <option value="month" ${REPORTS_STATE.preset === 'month' ? 'selected' : ''}>This Month</option>
+          <option value="quarter" ${REPORTS_STATE.preset === 'quarter' ? 'selected' : ''}>This Quarter</option>
+          <option value="year" ${REPORTS_STATE.preset === 'year' ? 'selected' : ''}>This Year</option>
+          <option value="ytd" ${REPORTS_STATE.preset === 'ytd' ? 'selected' : ''}>Year to Date</option>
+          <option value="all" ${REPORTS_STATE.preset === 'all' ? 'selected' : ''}>All Time</option>
+          <option value="custom" ${REPORTS_STATE.preset === 'custom' ? 'selected' : ''}>Custom Range…</option>
+        </select>
+        ${REPORTS_STATE.preset === 'custom' ? `
+          <input type="date" id="rp-from" value="${REPORTS_STATE.from || ''}" onchange="onReportsCustomDateChange()">
+          <span style="color:var(--text-muted);font-size:12px;align-self:center">to</span>
+          <input type="date" id="rp-to" value="${REPORTS_STATE.to || ''}" onchange="onReportsCustomDateChange()">
+        ` : ''}
+        <select id="rp-granularity" onchange="onReportsFilterChange()">
+          <option value="week" ${REPORTS_STATE.granularity === 'week' ? 'selected' : ''}>Chart by Week</option>
+          <option value="month" ${REPORTS_STATE.granularity === 'month' ? 'selected' : ''}>Chart by Month</option>
+          <option value="year" ${REPORTS_STATE.granularity === 'year' ? 'selected' : ''}>Chart by Year</option>
+        </select>
+        <select id="rp-person" onchange="onReportsFilterChange()">
+          <option value="">Everyone</option>
+          ${META.team.map(t => `<option value="${t.id}" ${String(t.id) === REPORTS_STATE.personId ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}
+        </select>
+        <span class="clear-link" onclick="clearReportsFilters()">Clear</span>
+      </div>
+    </div>
+    <div id="rp-body"><div style="padding:30px;color:var(--text-muted)">Loading data…</div></div>`;
+  await loadReportsData();
+}
+function onReportsPresetChange() {
+  REPORTS_STATE.preset = document.getElementById('rp-preset').value;
+  const suggested = { week: 'week', month: 'week', quarter: 'week', year: 'month', ytd: 'month', all: 'year', custom: REPORTS_STATE.granularity }[REPORTS_STATE.preset];
+  REPORTS_STATE.granularity = suggested;
+  if (REPORTS_STATE.preset === 'custom' && !REPORTS_STATE.from) {
+    const r = reportsRangeForPreset('ytd'); REPORTS_STATE.from = r.from; REPORTS_STATE.to = r.to;
+  }
+  renderReports();
+}
+function onReportsCustomDateChange() {
+  REPORTS_STATE.from = document.getElementById('rp-from')?.value || null;
+  REPORTS_STATE.to = document.getElementById('rp-to')?.value || null;
+  loadReportsData();
+}
+function onReportsFilterChange() {
+  REPORTS_STATE.granularity = document.getElementById('rp-granularity')?.value || 'month';
+  REPORTS_STATE.personId = document.getElementById('rp-person')?.value || '';
+  loadReportsData();
+}
+function clearReportsFilters() {
+  REPORTS_STATE = { preset: 'ytd', from: null, to: null, granularity: 'month', personId: '' };
+  renderReports();
+}
+async function loadReportsData() {
+  const range = REPORTS_STATE.preset === 'custom' ? { from: REPORTS_STATE.from, to: REPORTS_STATE.to } : reportsRangeForPreset(REPORTS_STATE.preset);
+  const params = new URLSearchParams();
+  if (range.from) params.set('from', range.from);
+  if (range.to) params.set('to', range.to);
+  params.set('granularity', REPORTS_STATE.granularity);
+  if (REPORTS_STATE.personId) params.set('personId', REPORTS_STATE.personId);
+  let data;
+  try { data = await api('GET', `/api/v2/reports?${params.toString()}`); }
+  catch (e) { document.getElementById('rp-body').innerHTML = `<div class="err-card">${esc(e.message)}</div>`; return; }
+  renderReportsBody(data);
+}
+function renderReportsBody(data) {
+  const { summary, timeSeries, byCustomer, byJob } = data;
+  const card = (label, value, sub, color) => `
+    <div class="stat-card" style="flex:1;min-width:118px">
+      <div style="font-size:20px;font-weight:800${color ? `;color:${color}` : ''}">${value}</div>
+      <div style="font-size:11px;color:var(--text-muted)">${label}</div>
+      ${sub != null ? `<div style="font-size:12px;font-weight:600;margin-top:2px">${sub}</div>` : ''}
+    </div>`;
+
+  const body = document.getElementById('rp-body');
+  body.innerHTML = `
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
+      ${card('Opportunities', summary.opportunities.count)}
+      ${card('Active Bids', summary.activeBids.count)}
+      ${card('Submitted', summary.submitted.count, fmt$(summary.submitted.value))}
+      ${card('Awarded', summary.awarded.count, fmt$(summary.awarded.value), '#16a34a')}
+      ${card('Not Awarded', summary.notAwarded.count, null, '#dc2626')}
+      ${card('Win Rate', summary.winRate == null ? '—' : summary.winRate + '%')}
+      ${card('Approved COs', summary.approvedCOs.count, fmt$(summary.approvedCOs.value))}
+    </div>
+    <div class="card" style="padding:16px;margin-bottom:16px">
+      <div style="font-weight:700;font-size:13px;margin-bottom:10px">Bid Volume Over Time</div>
+      ${timeSeries.length ? `<div style="overflow-x:auto"><div style="min-width:${Math.max(600, timeSeries.length * 70)}px;height:280px"><canvas id="rp-chart-timeseries"></canvas></div></div>`
+        : '<div style="color:var(--text-muted);font-size:13px;padding:20px 0;text-align:center">No submitted/awarded activity in this range.</div>'}
+    </div>
+    <div class="card" style="padding:16px;margin-bottom:16px">
+      <div style="font-weight:700;font-size:13px;margin-bottom:10px">By Customer</div>
+      ${byCustomer.length ? `<div style="height:${Math.max(180, Math.min(byCustomer.length, 10) * 34)}px;margin-bottom:16px"><canvas id="rp-chart-customer"></canvas></div>` : ''}
+      <div style="overflow-x:auto">${byCustomerTableHtml(byCustomer)}</div>
+    </div>
+    <div class="card" style="padding:16px">
+      <div style="font-weight:700;font-size:13px;margin-bottom:4px">By Job — Lessons Learned</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Approved change-order dollars as a share of the original awarded bid — which jobs grew in scope after award.</div>
+      <div style="overflow-x:auto">${byJobTableHtml(byJob)}</div>
+    </div>`;
+
+  Object.values(REPORTS_CHARTS).forEach(c => c.destroy());
+  REPORTS_CHARTS = {};
+
+  if (timeSeries.length) {
+    REPORTS_CHARTS.timeseries = new Chart(document.getElementById('rp-chart-timeseries'), {
+      type: 'bar',
+      data: {
+        labels: timeSeries.map(t => t.label),
+        datasets: [
+          { label: 'Submitted', data: timeSeries.map(t => t.submittedValue), backgroundColor: '#93c5fd' },
+          { label: 'Awarded', data: timeSeries.map(t => t.awardedValue), backgroundColor: '#16a34a' },
+          { label: 'Not Awarded', data: timeSeries.map(t => t.notAwardedValue), backgroundColor: '#dc2626' },
+        ],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } } },
+        scales: { y: { ticks: { callback: v => fmt$(v) } } },
+      },
+    });
+  }
+  if (byCustomer.length) {
+    const top = byCustomer.slice(0, 10);
+    REPORTS_CHARTS.customer = new Chart(document.getElementById('rp-chart-customer'), {
+      type: 'bar',
+      data: { labels: top.map(c => c.name), datasets: [{ label: 'Awarded $', data: top.map(c => c.awardedValue), backgroundColor: '#16a34a' }] },
+      options: {
+        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: { x: { ticks: { callback: v => fmt$(v) } } },
+      },
+    });
+  }
+}
+function byCustomerTableHtml(rows) {
+  if (!rows.length) return '<div style="color:var(--text-muted);font-size:13px;padding:12px 0;text-align:center">No customer activity in this range.</div>';
+  return `<table style="width:100%;border-collapse:collapse;font-size:13px">
+    <thead><tr style="border-bottom:1px solid var(--border)">
+      <th style="text-align:left;padding:6px 10px;color:var(--text-muted);font-size:11px">Customer</th>
+      <th style="text-align:right;padding:6px 10px;color:var(--text-muted);font-size:11px">Submitted</th>
+      <th style="text-align:right;padding:6px 10px;color:var(--text-muted);font-size:11px">Awarded</th>
+      <th style="text-align:right;padding:6px 10px;color:var(--text-muted);font-size:11px">Win Rate</th>
+    </tr></thead>
+    <tbody>${rows.map(c => `
+      <tr style="border-bottom:1px solid #f1f5f9">
+        <td style="padding:6px 10px">${esc(c.name)}</td>
+        <td style="padding:6px 10px;text-align:right">${c.submittedCount} · ${fmt$(c.submittedValue)}</td>
+        <td style="padding:6px 10px;text-align:right;font-weight:600;color:#16a34a">${c.awardedCount} · ${fmt$(c.awardedValue)}</td>
+        <td style="padding:6px 10px;text-align:right">${c.winRate == null ? '—' : c.winRate + '%'}</td>
+      </tr>`).join('')}</tbody>
+  </table>`;
+}
+function byJobTableHtml(rows) {
+  if (!rows.length) return '<div style="color:var(--text-muted);font-size:13px;padding:12px 0;text-align:center">No awarded jobs in this range.</div>';
+  return `<table style="width:100%;border-collapse:collapse;font-size:13px">
+    <thead><tr style="border-bottom:1px solid var(--border)">
+      <th style="text-align:left;padding:6px 10px;color:var(--text-muted);font-size:11px">Job #</th>
+      <th style="text-align:left;padding:6px 10px;color:var(--text-muted);font-size:11px">Project</th>
+      <th style="text-align:left;padding:6px 10px;color:var(--text-muted);font-size:11px">Customer</th>
+      <th style="text-align:right;padding:6px 10px;color:var(--text-muted);font-size:11px">Original Bid</th>
+      <th style="text-align:right;padding:6px 10px;color:var(--text-muted);font-size:11px">Approved COs</th>
+      <th style="text-align:right;padding:6px 10px;color:var(--text-muted);font-size:11px">Growth</th>
+    </tr></thead>
+    <tbody>${rows.map(j => `
+      <tr style="border-bottom:1px solid #f1f5f9;cursor:pointer" onclick="renderProjectPage(${j.projectId})">
+        <td style="padding:6px 10px">${esc(j.jobNumber)}</td>
+        <td style="padding:6px 10px">${esc(j.projectName)}</td>
+        <td style="padding:6px 10px">${esc(j.company)}</td>
+        <td style="padding:6px 10px;text-align:right">${fmt$(j.originalAmount)}</td>
+        <td style="padding:6px 10px;text-align:right">${j.approvedCoCount} · ${fmt$(j.approvedCoTotal)}</td>
+        <td style="padding:6px 10px;text-align:right;font-weight:700;color:${j.growthPct > 15 ? '#dc2626' : j.growthPct > 0 ? '#d97706' : 'var(--text-muted)'}">${j.growthPct == null ? '—' : j.growthPct + '%'}</td>
+      </tr>`).join('')}</tbody>
+  </table>`;
 }
 
 function actNewCompany() {
