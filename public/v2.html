@@ -483,6 +483,40 @@ async function renderSearchResults() {
 // to bids immediately — same roster either way.
 // ═══════════════════════════════════════════════════════════════════════════
 let TEAM_CACHE = [];
+
+// Keep this list in sync with mailer.js's NOTIFICATION_CATEGORIES — that's
+// the server-side source of truth for which category name gates which
+// email; this is just the client-side copy of the same labels. Idea/issue
+// *submission* (to the admin inbox) is deliberately not here, same reason
+// as server-side: it's not sent to a roster of people who'd need a toggle.
+const NOTIFICATION_CATEGORIES = {
+  assigned: 'Bid/CO assignment',
+  followup: 'Follow-up logged',
+  awarded: 'Bid awarded (team-wide)',
+  reminder: 'Reminders due',
+  walkthrough: 'Jobsite walk-throughs',
+  digest: 'Weekly digest',
+  ideas: 'Idea/issue status updates',
+};
+function notificationPrefRows() {
+  const prefs = CURRENT_USER?.notification_prefs || {};
+  return Object.entries(NOTIFICATION_CATEGORIES).map(([key, label]) => `
+    <label class="v2-check" style="display:flex;align-items:center;gap:8px;padding:4px 0">
+      <input type="checkbox" id="notif-pref-${key}" ${prefs[key] === false ? '' : 'checked'}> ${esc(label)}
+    </label>`).join('');
+}
+async function actSaveNotificationPrefs() {
+  const prefs = {};
+  for (const key of Object.keys(NOTIFICATION_CATEGORIES)) {
+    prefs[key] = document.getElementById(`notif-pref-${key}`)?.checked ?? true;
+  }
+  try {
+    await api('PATCH', '/api/v2/me/notification-prefs', prefs);
+    if (CURRENT_USER) CURRENT_USER.notification_prefs = prefs;
+    alert('Saved.');
+  } catch (e) { alert('Failed: ' + e.message); }
+}
+
 async function renderSettings() {
   setActiveNav('settings');
   const main = document.getElementById('main');
@@ -517,6 +551,18 @@ async function renderSettings() {
       <div><div class="page-title">⚙️ Settings</div><div class="page-subtitle">${team.length} team members</div></div>
       ${isAdmin ? `<button class="v2-btn green" onclick="actNewTeamMember()">+ Add Team Member</button>` : ''}
     </div>
+
+    ${CURRENT_USER ? `
+    <div class="card" style="margin-bottom:14px">
+      <div style="padding:12px 16px;border-bottom:1px solid var(--border)">
+        <div style="font-weight:700;font-size:14px">🔔 My Notification Preferences</div>
+        <div style="font-size:11.5px;color:var(--text-muted);margin-top:3px">Turn off whatever you don't want emailed about — this only affects your own inbox.</div>
+      </div>
+      <div style="padding:14px 16px">
+        ${notificationPrefRows()}
+        <button class="v2-btn blue" onclick="actSaveNotificationPrefs()" style="margin-top:10px">Save</button>
+      </div>
+    </div>` : ''}
 
     <div class="card" style="margin-bottom:14px">
       <div style="padding:12px 16px;border-bottom:1px solid var(--border)">

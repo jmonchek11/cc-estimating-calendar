@@ -541,6 +541,21 @@ async function updateTeamMemberV2(id, data) {
   if (!r.matchedCount) throw new Error('Team member not found');
   return { ok: true };
 }
+// Self-service only — no admin gate, since the whole point is each person
+// controls their own inbox. req.session.userId is passed straight through
+// as the id, never taken from the request body, so there's no way to edit
+// someone else's prefs through this endpoint.
+const NOTIFICATION_PREF_KEYS = ['assigned', 'followup', 'awarded', 'reminder', 'walkthrough', 'digest', 'ideas'];
+async function updateMyNotificationPrefs(userId, prefs) {
+  const M = getModels();
+  const upd = {};
+  for (const k of NOTIFICATION_PREF_KEYS) {
+    if (k in prefs) upd[`notification_prefs.${k}`] = !!prefs[k];
+  }
+  if (Object.keys(upd).length) await M.TeamMember.updateOne({ _id: Number(userId) }, { $set: upd });
+  return { ok: true };
+}
+
 async function updateSettingsV2(data) {
   const M = getModels();
   const upd = {};
@@ -2529,7 +2544,7 @@ module.exports = {
   setWalkthrough, getBidsNeedingWalkthroughReminder, markWalkthroughReminderSent,
   addNote, deleteNote, getNotesFor,
   getDigest,
-  getTeamV2, createTeamMemberV2, updateTeamMemberV2, updateSettingsV2, getSettings,
+  getTeamV2, createTeamMemberV2, updateTeamMemberV2, updateMyNotificationPrefs, updateSettingsV2, getSettings,
   removeBidCustomer, createCompanyV2, deleteBid, addSubEstimator, removeSubEstimator,
   updateBidDueDate, updateCoDueDate,
   logActivity, getActivityLog, undoActivity, bidLabel, coLabel, loadBid, loadCO,

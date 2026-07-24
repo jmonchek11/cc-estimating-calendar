@@ -21,7 +21,7 @@ const { getModels } = require('./models');
 async function emailForV2Member(memberId) {
   const M = getModels();
   const m = await M.TeamMember.findById(Number(memberId)).lean();
-  return m?.email ? { email: m.email, name: m.name } : null;
+  return m?.email ? { email: m.email, name: m.name, notification_prefs: m.notification_prefs } : null;
 }
 
 async function bidEmailShape(bidId) {
@@ -59,7 +59,7 @@ async function notifyAssigned(bidId, recipientId, actorId, role, scope) {
   try {
     if (!recipientId) return;
     const recipient = await emailForV2Member(recipientId);
-    if (!recipient?.email) return;
+    if (!recipient?.email || !mailer.wantsNotification(recipient, 'assigned')) return;
     const shape = await bidEmailShape(bidId);
     if (!shape) return;
     const actor = actorId ? await maindb.getMember(actorId) : null;
@@ -69,12 +69,16 @@ async function notifyAssigned(bidId, recipientId, actorId, role, scope) {
 }
 
 // Everyone assigned to a bid — estimator, salesperson, and any sub-estimators
-// — as {email, name} pairs. Shared by the walk-through "set" notification
-// below and the 24h-before cron reminder in server.js, so both reach the
-// same people the same way.
+// — as {email, name} pairs, already filtered to people who haven't opted out
+// of the 'walkthrough' category. Shared by the walk-through "set"
+// notification below and the 24h-before cron reminder in server.js, so both
+// reach the same people the same way. (Only used for walk-throughs today —
+// if this is ever reused for something else, the category filter baked in
+// here needs to move to the caller instead.)
 async function bidRecipients(bid) {
   const ids = [...new Set([bid.estimator_id, bid.salesperson_id, ...(bid.sub_estimators || []).map(s => s.estimator_id)].filter(Boolean))];
-  return (await Promise.all(ids.map(emailForV2Member))).filter(Boolean);
+  const members = (await Promise.all(ids.map(emailForV2Member))).filter(Boolean);
+  return members.filter(m => mailer.wantsNotification(m, 'walkthrough'));
 }
 
 // Site contact is a real Company + Contact now (see setWalkthrough in
@@ -115,7 +119,7 @@ async function notifyAwarded(bidId, actorName) {
   try {
     const shape = await bidEmailShape(bidId);
     if (!shape) return;
-    const users = await maindb.getActiveUserEmails();
+    const users = (await maindb.getActiveUserEmails()).filter(u => mailer.wantsNotification(u, 'awarded'));
     const { subject, html } = mailer.emailAwarded(shape, actorName || 'Someone');
     await mailer.sendMail({ to: users.map(u => u.email), subject, html });
   } catch (e) { console.error('[v2 notify] awarded email failed:', e.message); }

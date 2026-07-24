@@ -15,7 +15,20 @@ const teamMemberSchema = new mongoose.Schema({
   must_change_password: { type: Boolean, default: true },
   is_admin: { type: Boolean, default: false },
   last_seen: { type: Date, default: null },
-  created_at: { type: String, default: () => new Date().toISOString() }
+  created_at: { type: String, default: () => new Date().toISOString() },
+  // Per-person opt-OUT of notification categories — missing key or `true`
+  // both mean "send it" (see wantsNotification in mailer.js), so accounts
+  // that predate this feature keep getting everything until they visit
+  // Settings and turn something off themselves.
+  notification_prefs: {
+    assigned: { type: Boolean, default: true },
+    followup: { type: Boolean, default: true },
+    awarded: { type: Boolean, default: true },
+    reminder: { type: Boolean, default: true },
+    walkthrough: { type: Boolean, default: true },
+    digest: { type: Boolean, default: true },
+    ideas: { type: Boolean, default: true },
+  },
 }, { _id: false, versionKey: false });
 
 module.exports = mongoose.model('TeamMember', teamMemberSchema, 'teammembers');

@@ -38,7 +38,8 @@ function formatMember(m) {
     ms_oid: o.ms_oid || null,
     is_admin: o.is_admin || false,
     must_change_password: o.must_change_password !== false,
-    created_at: o.created_at
+    created_at: o.created_at,
+    notification_prefs: o.notification_prefs || null,
   };
 }
 
@@ -1876,8 +1877,8 @@ async function getActiveUserEmails() {
   const members = await TeamMember.find({
     active: 1,
     email: { $exists: true, $nin: [null, ''] },
-  }).select('_id name initials email').lean();
-  return members.map(m => ({ id: m._id, name: m.name, initials: m.initials, email: m.email }));
+  }).select('_id name initials email notification_prefs').lean();
+  return members.map(m => ({ id: m._id, name: m.name, initials: m.initials, email: m.email, notification_prefs: m.notification_prefs }));
 }
 
 async function getDueReminders() {

@@ -97,7 +97,8 @@ router.get('/api/v2/settings',        async (req, res) => { try { res.json(await
 router.post('/api/v2/admin/send-digest', requireAdmin, async (req, res) => {
   try {
     const mailer = require('../mailer');
-    const [digest, users] = await Promise.all([v2db.getDigest(), maindb.getActiveUserEmails()]);
+    const [digest, allUsers] = await Promise.all([v2db.getDigest(), maindb.getActiveUserEmails()]);
+    const users = allUsers.filter(u => mailer.wantsNotification(u, 'digest'));
     const { subject, html } = mailer.emailDigest(digest);
     await mailer.sendMail({ to: users.map(u => u.email), subject, html });
     res.json({ ok: true, sent_to: users.length });
@@ -120,7 +121,7 @@ router.get('/api/v2/meta', async (req, res) => {
       const m = await maindb.getMember(req.session.userId);
       if (m) {
         const liberty_apps = await directory.getMyApps({ ms_oid: m.ms_oid, email: m.email });
-        current_user = { id: m.id, name: m.name, is_admin: !!m.is_admin, role: m.role, liberty_apps };
+        current_user = { id: m.id, name: m.name, is_admin: !!m.is_admin, role: m.role, liberty_apps, notification_prefs: m.notification_prefs };
       }
     } catch { /* ignore — current_user stays null */ }
     res.json({ ...meta, current_user });
@@ -180,6 +181,8 @@ router.post('/api/v2/team',           requireAdmin, t(req => v2db.createTeamMemb
   (req, r) => ({ action: 'team.create', summary: `Added team member "${req.body.name}"`, entity_type: 'team_member', entity_id: r.id })));
 router.patch('/api/v2/team/:id',      requireAdmin, t(req => v2db.updateTeamMemberV2(req.params.id, req.body),
   (req) => ({ action: 'team.update', summary: `Edited team member #${req.params.id} (${Object.keys(req.body).join(', ')})`, entity_type: 'team_member', entity_id: Number(req.params.id) })));
+// Self-service — no admin gate, always operates on the logged-in user's own id.
+router.patch('/api/v2/me/notification-prefs', t(req => v2db.updateMyNotificationPrefs(req.session.userId, req.body)));
 
 // ── Settings (v2's own follow-up timer config) ────────────────────────────────
 router.put('/api/v2/settings',        requireAdmin, t(req => v2db.updateSettingsV2(req.body)));

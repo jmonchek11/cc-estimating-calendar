@@ -247,7 +247,8 @@ app.post('/api/admin/send-digest', async (req, res) => {
   try {
     const actor = await db.getMember(req.session.userId);
     if (!actor?.is_admin) return res.status(403).json({ error: 'Admin only' });
-    const [digest, users] = await Promise.all([db.getDigest(), db.getActiveUserEmails()]);
+    const [digest, allUsers] = await Promise.all([db.getDigest(), db.getActiveUserEmails()]);
+    const users = allUsers.filter(u => mailer.wantsNotification(u, 'digest'));
     const { subject, html } = mailer.emailDigest(digest);
     await mailer.sendMail({ to: users.map(u => u.email), subject, html });
     res.json({ ok: true, sent_to: users.length });
@@ -354,7 +355,7 @@ app.put('/api/bids/:id', async (req, res) => {
         const newEstId = req.body.estimator_id != null ? Number(req.body.estimator_id) : undefined;
         if (newEstId && newEstId !== oldBid?.estimator_id) {
           const recipient = await db.getMember(newEstId);
-          if (recipient?.email) {
+          if (recipient?.email && mailer.wantsNotification(recipient, 'assigned')) {
             const { subject, html } = mailer.emailAssigned(updated, recipient.name, actorName, 'estimator');
             await mailer.sendMail({ to: recipient.email, subject, html });
           }
@@ -364,7 +365,7 @@ app.put('/api/bids/:id', async (req, res) => {
         const newSpId = req.body.salesperson_id != null ? Number(req.body.salesperson_id) : undefined;
         if (newSpId && newSpId !== oldBid?.salesperson_id) {
           const recipient = await db.getMember(newSpId);
-          if (recipient?.email) {
+          if (recipient?.email && mailer.wantsNotification(recipient, 'assigned')) {
             const { subject, html } = mailer.emailAssigned(updated, recipient.name, actorName, 'salesperson');
             await mailer.sendMail({ to: recipient.email, subject, html });
           }
@@ -502,7 +503,7 @@ app.post('/api/bids/:id/followups', async (req, res) => {
         const emails = [];
         for (const id of [...new Set(recipientIds)]) {
           const m = await db.getMember(id);
-          if (m?.email) emails.push(m.email);
+          if (m?.email && mailer.wantsNotification(m, 'followup')) emails.push(m.email);
         }
         if (!emails.length) return;
 
@@ -625,7 +626,7 @@ app.put('/api/ideas/:id', async (req, res) => {
     // changed and someone's actually attached to notify.
     if (result.from !== result.to && result.submitted_by && result.submitted_by !== req.session.userId) {
       db.getMember(result.submitted_by).then(recipient => {
-        if (!recipient?.email) return;
+        if (!recipient?.email || !mailer.wantsNotification(recipient, 'ideas')) return;
         const { subject, html } = mailer.emailIdeaStatusChanged(result, result.to);
         return mailer.sendMail({ to: recipient.email, subject, html });
       }).catch(() => {});
@@ -818,7 +819,7 @@ cron.schedule('0 7 * * *', async () => {
       const recipientIds = [bid.estimator_id, bid.salesperson_id].filter(Boolean);
       const emails = [...new Set(recipientIds)]
         .map(id => memberMap[id])
-        .filter(m => m?.email)
+        .filter(m => m?.email && mailer.wantsNotification(m, 'reminder'))
         .map(m => ({ email: m.email, name: m.name }));
 
       for (const r of emails) {
@@ -843,7 +844,8 @@ cron.schedule('5 7 * * *', async () => {
     for (const { reminder, recipientIds } of due) {
       const shape = await v2notify.emailShapeForReminder(reminder);
       if (!shape) { await v2db.markReminderEmailed(reminder._id); continue; }
-      const emails = (await Promise.all(recipientIds.map(id => v2notify.emailForV2Member(id)))).filter(Boolean);
+      const emails = (await Promise.all(recipientIds.map(id => v2notify.emailForV2Member(id))))
+        .filter(m => m && mailer.wantsNotification(m, 'reminder'));
       for (const r of emails) {
         const { subject, html } = mailer.emailReminder(shape, reminder, r.name);
         await mailer.sendMail({ to: r.email, subject, html });
@@ -887,7 +889,8 @@ cron.schedule('0 * * * *', async () => {
 cron.schedule('0 6 * * 1', async () => {
   console.log('[cron] running weekly digest');
   try {
-    const [digest, users] = await Promise.all([v2db.getDigest(), db.getActiveUserEmails()]);
+    const [digest, allUsers] = await Promise.all([v2db.getDigest(), db.getActiveUserEmails()]);
+    const users = allUsers.filter(u => mailer.wantsNotification(u, 'digest'));
     if (!users.length) return console.log('[cron] no users with email — skipping digest');
     const { subject, html } = mailer.emailDigest(digest);
     await mailer.sendMail({ to: users.map(u => u.email), subject, html });

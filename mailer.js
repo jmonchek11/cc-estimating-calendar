@@ -39,6 +39,29 @@ function htmlToPlainText(html) {
     .trim();
 }
 
+// Every category a person can individually opt out of, and the label shown
+// for it in Settings — the one place this list needs to stay in sync with
+// the toggles rendered there (public/v2.html renderSettings). Idea/issue
+// submission-to-admin is deliberately NOT here: it always goes to one fixed
+// admin inbox, not a roster of people who might want to turn it off.
+const NOTIFICATION_CATEGORIES = {
+  assigned: 'Bid/CO assignment',
+  followup: 'Follow-up logged',
+  awarded: 'Bid awarded (team-wide)',
+  reminder: 'Reminders due',
+  walkthrough: 'Jobsite walk-throughs',
+  digest: 'Weekly digest',
+  ideas: 'Idea/issue status updates',
+};
+
+// Missing member, missing prefs object, or missing key all mean "send it" —
+// opt-OUT, not opt-in, so accounts that predate this feature (or a lookup
+// that failed) keep getting what they already got rather than silently
+// going dark. Only an explicit `false` suppresses a category.
+function wantsNotification(member, category) {
+  return member?.notification_prefs?.[category] !== false;
+}
+
 async function sendMail({ to, subject, html }) {
   if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
     console.log('[email] skipped — no credentials configured');
@@ -471,4 +494,4 @@ function emailIdeaStatusChanged(idea, newStatus) {
   };
 }
 
-module.exports = { sendMail, emailAssigned, emailFollowup, emailAwarded, emailReminder, emailWalkthroughSet, emailWalkthroughReminder, emailDigest, emailIdeaSubmitted, emailIdeaStatusChanged };
+module.exports = { sendMail, emailAssigned, emailFollowup, emailAwarded, emailReminder, emailWalkthroughSet, emailWalkthroughReminder, emailDigest, emailIdeaSubmitted, emailIdeaStatusChanged, wantsNotification, NOTIFICATION_CATEGORIES };
