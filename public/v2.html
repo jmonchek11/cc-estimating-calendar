@@ -1447,7 +1447,6 @@ function renderHierarchy(d) {
   let html = `<div class="v2-actions" style="margin:0 0 4px">
     <button class="v2-btn green" onclick="actAddBidToProject(${d.id})">+ Add Bid to this Project</button>
     ${CURRENT_USER?.is_admin ? `<button class="v2-btn outline" onclick="actEditProject(${d.id})">✏️ Edit Project</button>` : ''}
-    <span style="font-size:11px;color:var(--text-muted);align-self:center">new B26-#### for another drawing stage / re-bid</span>
   </div>`;
 
   // Duplicate-jobs warning: same job # on more than one job here (legacy + bid-backed
