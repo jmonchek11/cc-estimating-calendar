@@ -287,7 +287,7 @@ const CounterSchema = new mongoose.Schema({
 // Data Health should never re-cluster as a near-duplicate.
 const IgnoredPairSchema = new mongoose.Schema({
   _id:  Number,
-  kind: { type: String, enum: ['project', 'company'], required: true },
+  kind: { type: String, enum: ['project', 'company', 'contact'], required: true },
   a:    { type: Number, required: true },
   b:    { type: Number, required: true },
 }, opts);
