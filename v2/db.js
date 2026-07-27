@@ -1886,23 +1886,34 @@ async function getBidList(stage) {
   const M = getModels();
   const bids = await M.Bid.find({ stage, superseded: { $ne: 1 } }).sort({ due_date: 1, _id: 1 }).lean();
   const ids = bids.map(b => b._id);
-  const [projects, companies, members, bidCustomers] = await Promise.all([
+  // Awarded bids also want their Job's number/PM surfaced — that's exactly
+  // the data-cleanup gap (missing job # / PM assignment) an "all awarded
+  // bids" view exists to catch, so join it only for that stage rather than
+  // adding the cost to every other list.
+  const [projects, companies, members, bidCustomers, jobs] = await Promise.all([
     M.Project.find().lean(), M.Company.find().lean(), M.TeamMember.find().lean(), M.BidCustomer.find({ bid_id: { $in: ids } }).lean(),
+    stage === 'awarded' ? M.Job.find({ winning_bid_id: { $in: ids } }).lean() : Promise.resolve([]),
   ]);
   const pName = {}; projects.forEach(p => pName[p._id] = p.name);
   const coName = {}; companies.forEach(c => coName[c._id] = c.name);
   const tm = teamMap(members);
   const custByBid = {}; bidCustomers.forEach(bc => (custByBid[bc.bid_id] = custByBid[bc.bid_id] || []).push(coName[bc.company_id]));
-  return bids.map(b => ({
-    id: b._id, project_id: b.project_id, project: pName[b.project_id] || '—',
-    bid_number: b.bid_number, stage: b.stage, drawing_stage: b.drawing_stage,
-    estimator: tm[b.estimator_id] || null, salesperson: tm[b.salesperson_id] || null,
-    sub_estimators: (b.sub_estimators || []).map(s => ({ ...(tm[s.estimator_id] || {}), scope: s.scope })),
-    customers: [...new Set((custByBid[b._id] || []).filter(Boolean))],
-    date_received: b.date_received, due_date: b.due_date,
-    walkthrough_date: b.walkthrough_date, walkthrough_time: b.walkthrough_time,
-    estimate_amount: b.estimate_amount, date_submitted: b.date_submitted, next_followup_date: b.next_followup_date,
-  }));
+  const jobByBid = {}; jobs.forEach(j => { if (j.winning_bid_id) jobByBid[j.winning_bid_id] = j; });
+  return bids.map(b => {
+    const job = jobByBid[b._id];
+    return {
+      id: b._id, project_id: b.project_id, project: pName[b.project_id] || '—',
+      bid_number: b.bid_number, stage: b.stage, drawing_stage: b.drawing_stage,
+      estimator: tm[b.estimator_id] || null, salesperson: tm[b.salesperson_id] || null,
+      sub_estimators: (b.sub_estimators || []).map(s => ({ ...(tm[s.estimator_id] || {}), scope: s.scope })),
+      customers: [...new Set((custByBid[b._id] || []).filter(Boolean))],
+      date_received: b.date_received, due_date: b.due_date,
+      walkthrough_date: b.walkthrough_date, walkthrough_time: b.walkthrough_time,
+      estimate_amount: b.estimate_amount, date_submitted: b.date_submitted, next_followup_date: b.next_followup_date,
+      award_date: b.award_date, awarded_company: b.awarded_company_id ? coName[b.awarded_company_id] : null,
+      job_number: job ? job.job_number : null, pm: job?.pm_id ? tm[job.pm_id] : null,
+    };
+  });
 }
 
 // ── Change order list for a stage ─────────────────────────────────────────────
