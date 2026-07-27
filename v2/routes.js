@@ -245,7 +245,7 @@ router.post('/api/v2/bids/:id/submissions',   t(req => v2db.addSubmission(req.pa
   async (req) => ({ action: 'bid.add_submission', summary: `Added a submission to bid ${await v2db.bidLabel(req.params.id)}`, entity_type: 'bid', entity_id: Number(req.params.id) })));
 router.post('/api/v2/bids/:id/reactivate',    t(req => v2db.reactivateBid(req.params.id, req.body, req.session.userId),
   async (req) => ({ action: 'bid.reactivate', summary: `Reactivated bid ${await v2db.bidLabel(req.params.id)} for a new round`, entity_type: 'bid', entity_id: Number(req.params.id) })));
-router.post('/api/v2/bids/:id/customers',     t(req => v2db.addBidCustomers(req.params.id, req.body),
+router.post('/api/v2/bids/:id/customers',     t(req => v2db.addBidCustomers(req.params.id, req.body, req.session.userId),
   async (req) => ({ action: 'bid.add_customers', summary: `Added customer(s) to bid ${await v2db.bidLabel(req.params.id)}`, entity_type: 'bid', entity_id: Number(req.params.id) })));
 // Its own dedicated action, not the generic admin PATCH — setWalkthrough
 // needs find-or-create logic for the site company/contact that the generic

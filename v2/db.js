@@ -875,17 +875,33 @@ async function removeBidCustomerContact(bidCustomerId, contactId) {
 
 // Add one or more customers to a bid's roster — independent of any submission.
 // Accepts existing company_ids and/or new_companies (names to find-or-create).
-async function addBidCustomers(id, data) {
+async function addBidCustomers(id, data, actorId) {
+  const M = getModels();
   const bid = await loadBid(id);
   const ids = await resolveCompanyIds(data.company_ids, data.new_companies);
   if (!ids.length) throw new Error('Pick or name at least one customer');
   let added = 0;
   for (const companyId of ids) {
-    const M = getModels();
     const exists = await M.BidCustomer.findOne({ bid_id: bid._id, company_id: companyId }).lean();
     if (exists) continue;
     await ensureBidCustomer(bid._id, companyId);
     added++;
+  }
+  // A bid only reaches 'submitted' once every one of its customers has a
+  // current submission (see submitBid) — adding a brand-new customer after
+  // that point makes that no longer true, but nothing else moves the bid
+  // back to 'active_bid'. Without this, submitBid() rejects the new
+  // customer outright ("Cannot submit from stage 'submitted'") since it
+  // only ever accepts active_bid, leaving the new customer stuck with no
+  // way to actually get submitted to.
+  if (added && bid.stage === 'submitted') {
+    await M.Bid.updateOne({ _id: bid._id }, { $set: { stage: 'active_bid', updated_at: ts() } });
+    await recomputeBidFollowup(bid._id);
+    const proj = await M.Project.findById(bid.project_id).lean();
+    await events.safeEmit('bid.stage_changed', {
+      project_id: bid.project_id, bid_id: bid._id, actor_id: actorId || null,
+      payload: { from: 'submitted', to: 'active_bid', project_name: proj?.name || null, reason: 'new customer added after full submission' },
+    });
   }
   return { bid_id: bid._id, added };
 }
