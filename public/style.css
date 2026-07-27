@@ -8,8 +8,15 @@
   --sidebar-hover-bg: #1e293b;
   --primary: #2563eb;
   --primary-dark: #1d4ed8;
-  --success: #16a34a;
-  --warning: #d97706;
+  /* success/warning/text-light darkened from their original shades — the
+     originals read at 3.1-3.3:1 contrast on white (fails WCAG AA's 4.5:1
+     for normal text) and 2.56:1 for text-light; these pass at 5-7:1 while
+     staying the same hue. Backgrounds/buttons using these vars (e.g.
+     .btn-success, .dot-yellow) are unaffected in any way that hurts
+     legibility — a slightly darker fill behind white button text only
+     helps that contrast, never hurts it. */
+  --success: #166534;
+  --warning: #92400e;
   --danger: #dc2626;
   --info: #0891b2;
   --bg: #f1f5f9;
@@ -17,7 +24,7 @@
   --border: #e2e8f0;
   --text: #1e293b;
   --text-muted: #64748b;
-  --text-light: #94a3b8;
+  --text-light: #6b7280;
   --radius: 8px;
   --shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
   --shadow-md: 0 4px 6px rgba(0,0,0,0.07), 0 2px 4px rgba(0,0,0,0.06);
@@ -381,7 +388,7 @@ tbody td {
 .badge-budget { background: #f3e8ff; color: #6b21a8; }
 .badge-stage { background: #e2e8f0; color: #475569; font-size: 11px; }
 .badge-bid   { background: rgba(59,130,246,.15); color: #3b82f6; border: 1px solid rgba(59,130,246,.3); font-size: 11px; font-weight: 700; }
-.badge-co    { background: rgba(251,191,36,.15);  color: #d97706; border: 1px solid rgba(251,191,36,.3); font-size: 11px; font-weight: 700; }
+.badge-co    { background: rgba(251,191,36,.15);  color: #92400e; border: 1px solid rgba(251,191,36,.3); font-size: 11px; font-weight: 700; }
 
 /* ── Award celebration ── */
 @keyframes bell-ring {
@@ -432,7 +439,7 @@ tbody td {
 .cp-row .cp-select { flex: 1; }
 .cp-clear { flex-shrink: 0; }
 .cp-selected {
-  margin-top: 4px; font-size: 12px; color: #16a34a; font-weight: 600;
+  margin-top: 4px; font-size: 12px; color: #166534; font-weight: 600;
   padding: 3px 8px; background: #dcfce7; border-radius: 4px; display: inline-block;
 }
 
@@ -490,8 +497,8 @@ tbody td {
   display: inline-block; border-radius: 10px;
   padding: 2px 8px; font-size: 11px; font-weight: 600;
 }
-.audit-badge-ok   { background: #dcfce7; color: #16a34a; }
-.audit-badge-warn { background: #fffbeb; color: #d97706; }
+.audit-badge-ok   { background: #dcfce7; color: #166534; }
+.audit-badge-warn { background: #fffbeb; color: #92400e; }
 .audit-badge-err  { background: #fef2f2; color: #dc2626; }
 
 /* Sort select */
@@ -502,7 +509,7 @@ tbody td {
 }
 .proj-sort-select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37,99,235,.1); }
 .proj-active-badge {
-  display: inline-block; background: #dcfce7; color: #16a34a;
+  display: inline-block; background: #dcfce7; color: #166534;
   border-radius: 10px; padding: 1px 8px; font-size: 11px; font-weight: 600;
 }
 .proj-right {
@@ -646,7 +653,7 @@ tbody td {
   background: none; color: var(--text-muted); cursor: pointer;
   font-family: inherit; line-height: 1.4;
 }
-.cl-na-btn:hover { background: #fef3c7; color: #d97706; border-color: #d97706; }
+.cl-na-btn:hover { background: #fef3c7; color: #92400e; border-color: #d97706; }
 .cl-item:hover .cl-na-btn { display: inline-flex; align-items: center; }
 
 /* N/A tag shown when marked */
@@ -654,7 +661,7 @@ tbody td {
   flex-shrink: 0; margin-left: auto;
   font-size: 10px; font-weight: 700; padding: 1px 6px;
   border: 1px solid #d97706; border-radius: 3px;
-  background: #fef3c7; color: #d97706;
+  background: #fef3c7; color: #92400e;
   cursor: pointer;
 }
 .cl-na-tag:hover { background: #fde68a; }

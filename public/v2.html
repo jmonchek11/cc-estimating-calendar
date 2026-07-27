@@ -84,7 +84,7 @@
   .bc-divider { height: 1px; background: var(--border); margin: 0 16px; }
   .bc-section { padding: 14px 16px; }
   .bc-sec-hd { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-  .bc-sec-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: #94a3b8; }
+  .bc-sec-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: #6b7280; }
   .bc-quiet-link { font-size: 12px; color: #2563eb; font-weight: 600; cursor: pointer; background: none; border: none; padding: 2px 0; font-family: inherit; }
   .bc-quiet-link:hover { text-decoration: underline; }
   .bc-grouped { background: #f8fafc; border-radius: 8px; overflow: hidden; }
@@ -95,7 +95,7 @@
   .bc-co-name:hover { color: #2563eb; }
   .bc-co-sub { font-size: 11.5px; color: var(--text-muted); margin-top: 2px; }
   .bc-co-amt { font-size: 13px; font-weight: 700; text-align: right; }
-  .bc-co-fu { font-size: 11px; color: #94a3b8; margin-top: 2px; text-align: right; }
+  .bc-co-fu { font-size: 11px; color: #6b7280; margin-top: 2px; text-align: right; }
   .bc-row-actions { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
   .bc-btn-quiet { font-size: 11px; font-weight: 600; padding: 4px 9px; border-radius: 6px; border: 1px solid var(--border); background: #fff; color: #475569; cursor: pointer; font-family: inherit; }
   .bc-btn-quiet:hover { background: #f1f5f9; }
@@ -160,7 +160,7 @@
   .v2-chip { display: inline-flex; align-items: center; gap: 5px; background: #eff6ff; color: #1e40af;
     border: 1px solid #bfdbfe; border-radius: 5px; padding: 2px 6px; font-size: 12px; font-weight: 600; }
   .v2-chip button { border: none; background: none; color: #1e40af; cursor: pointer; font-size: 12px; line-height: 1; padding: 0; }
-  .v2-chip em { color: #16a34a; font-style: normal; font-weight: 700; }
+  .v2-chip em { color: #166534; font-style: normal; font-weight: 700; }
   /* position:fixed (not absolute) + JS-computed coordinates (see comboRenderMenu) —
      an absolutely-positioned dropdown gets clipped by any scrollable ancestor
      (e.g. .v2-modal's overflow-y:auto), which squeezed every dropdown in a
@@ -171,7 +171,7 @@
     max-height: 230px; overflow-y: auto; }
   .v2-combo-opt { padding: 7px 10px; font-size: 13px; cursor: pointer; }
   .v2-combo-opt:hover { background: #f1f5f9; }
-  .v2-combo-new { color: #16a34a; font-weight: 600; border-top: 1px solid var(--border); }
+  .v2-combo-new { color: #166534; font-weight: 600; border-top: 1px solid var(--border); }
   .v2-combo-empty { padding: 7px 10px; font-size: 12px; color: var(--text-muted); }
   .v2-combo-warn { padding: 6px 10px; font-size: 11px; font-weight: 600; color: #92400e; background: #fffbeb; border-bottom: 1px solid #fcd34d; }
   /* list filter/sort toolbar */
@@ -276,9 +276,9 @@ const STAGE = {
   active_co:'Active CO', submitted_co:'Submitted CO', approved:'Approved', not_approved:'Not Approved', voided:'Voided',
 };
 const STAGE_COLOR = {
-  opportunity:'#64748b', active_bid:'#d97706', submitted:'#2563eb', awarded:'#16a34a',
+  opportunity:'#64748b', active_bid:'#92400e', submitted:'#2563eb', awarded:'#166534',
   not_awarded:'#dc2626', closed:'#64748b',
-  active_co:'#d97706', submitted_co:'#2563eb', approved:'#16a34a', not_approved:'#dc2626', voided:'#64748b',
+  active_co:'#92400e', submitted_co:'#2563eb', approved:'#166534', not_approved:'#dc2626', voided:'#64748b',
 };
 const METHOD = { phone:'📞 phone', email:'✉️ email', in_person:'🤝 in person', other:'other' };
 
@@ -507,7 +507,7 @@ async function renderSearchResults() {
       <div class="card" style="padding:0">${items.map(c => `
         <div class="proj-row" onclick="openCoFlyout(${c.project_id},${c.id})">
           <div style="flex:1;min-width:0">
-            <div class="proj-name"><span style="color:#d97706">${esc(c.co_number)}</span> ${esc(c.name)}</div>
+            <div class="proj-name"><span style="color:#92400e">${esc(c.co_number)}</span> ${esc(c.name)}</div>
             <div class="proj-meta">
               ${esc(c.project)}${c.job_number ? ` <span class="proj-meta-sep">·</span> Job ${esc(c.job_number)}` : ''}
               ${c.salesperson ? `<span class="proj-meta-sep">·</span> PM ${ini(c.salesperson)}` : ''}
@@ -947,8 +947,8 @@ async function renderDigest() {
       ${pStat('Active Change Orders', ps.activeCos, '', '#f97316', "renderCoList('active_co')")}
       ${pStat('Submitted Bids — 30d', ps.submittedBids.last30.count, fmt$(ps.submittedBids.last30.value), '#2563eb', "renderBidList('submitted')")}
       ${pStat('Submitted Bids — YTD', ps.submittedBids.ytd.count, fmt$(ps.submittedBids.ytd.value), '#2563eb', "renderBidList('submitted')")}
-      ${pStat('Submitted COs — 30d', ps.submittedCos.last30.count, fmt$(ps.submittedCos.last30.value), '#d97706', "renderCoList('submitted_co')")}
-      ${pStat('Submitted COs — YTD', ps.submittedCos.ytd.count, fmt$(ps.submittedCos.ytd.value), '#d97706', "renderCoList('submitted_co')")}
+      ${pStat('Submitted COs — 30d', ps.submittedCos.last30.count, fmt$(ps.submittedCos.last30.value), '#92400e', "renderCoList('submitted_co')")}
+      ${pStat('Submitted COs — YTD', ps.submittedCos.ytd.count, fmt$(ps.submittedCos.ytd.value), '#92400e', "renderCoList('submitted_co')")}
     </div>`;
 
   const submittedGroupsHtml = d.submittedByEstimator.map(g => `
@@ -978,7 +978,7 @@ async function renderDigest() {
 
     ${section('📤', 'Submitted (last 2 weeks) — by Estimator', submittedCount, submittedCount ? submittedGroupsHtml : null, '#2563eb')}
 
-    ${d.awardedThisWeek.length ? section('🎉', 'Awarded This Week', d.awardedThisWeek.length, rows(d.awardedThisWeek, false), '#16a34a') : ''}
+    ${d.awardedThisWeek.length ? section('🎉', 'Awarded This Week', d.awardedThisWeek.length, rows(d.awardedThisWeek, false), '#166534') : ''}
     ${d.notAwardedThisWeek.length ? section('✗', 'Not Awarded This Week', d.notAwardedThisWeek.length, rows(d.notAwardedThisWeek, false), '#dc2626') : ''}
 
     ${section('👥', 'By Salesperson', null, peopleTable(d.bySalesperson, [
@@ -1210,7 +1210,7 @@ function renderCoListBody(stage) {
   document.getElementById('cl-body-' + stage).innerHTML = rows.length ? rows.map(c => {
       return `<div class="proj-row" onclick="openCoFlyout(${c.project_id},${c.id})">
         <div style="flex:1;min-width:0">
-          <div class="proj-name"><span style="color:#d97706">${esc(c.co_number)}</span> ${esc(c.name)} ${stageBadge(c.stage)}</div>
+          <div class="proj-name"><span style="color:#92400e">${esc(c.co_number)}</span> ${esc(c.name)} ${stageBadge(c.stage)}</div>
           <div class="proj-meta">
             ${esc(c.project)}${c.job_number ? ` <span class="proj-meta-sep">·</span> Job ${esc(c.job_number)}` : ''}
             ${c.salesperson ? `<span class="proj-meta-sep">·</span> PM ${ini(c.salesperson)}` : '<span class="proj-meta-sep">·</span> <span style="color:#dc2626">no PM assigned</span>'}
@@ -1352,15 +1352,15 @@ async function renderDashboard() {
       ${stat('Active Bids', d.pipeline.active_bid, '', '#f59e0b', "renderBidList('active_bid')")}
       ${stat('Submitted (YTD)', d.submittedYTD.count, '', '#2563eb', "renderBidList('submitted')")}
       ${stat('Active Change Orders', d.activeCoCount, '', '#f97316', "renderCoList('active_co')")}
-      ${stat('Awarded (YTD)', d.awardedYTD.count, fmt$(d.awardedYTD.value) + (d.awardedYTD.missingAwardDate ? ` · ${d.awardedYTD.missingAwardDate} missing award date` : ''), '#16a34a', 'showAwardedByMonth()')}
-      ${stat('Overdue Follow-ups', d.overdueBidCount + d.overdueCoCount, `${d.overdueBidCount} bid · ${d.overdueCoCount} CO`, (d.overdueBidCount+d.overdueCoCount) ? '#dc2626' : '#16a34a')}
+      ${stat('Awarded (YTD)', d.awardedYTD.count, fmt$(d.awardedYTD.value) + (d.awardedYTD.missingAwardDate ? ` · ${d.awardedYTD.missingAwardDate} missing award date` : ''), '#166534', 'showAwardedByMonth()')}
+      ${stat('Overdue Follow-ups', d.overdueBidCount + d.overdueCoCount, `${d.overdueBidCount} bid · ${d.overdueCoCount} CO`, (d.overdueBidCount+d.overdueCoCount) ? '#dc2626' : '#166534')}
       ${stat('Jobs awaiting Job #', d.jobsPending, DASH_MINE ? 'assigned to you' : 'from accounting', '#0891b2')}
     </div>
     <div class="dashboard-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
       <div class="card">
         <div class="section-title">📅 Upcoming Due Dates — next 14 days</div>
         ${d.dueSoon.length ? d.dueSoon.map(b => {
-          const dot = b.due_date <= today ? '#dc2626' : '#16a34a';
+          const dot = b.due_date <= today ? '#dc2626' : '#166534';
           return `<div class="proj-row" onclick="openBidFlyout(${b.project_id},${b.id})">
             <div style="flex:1"><strong style="font-size:13px">${esc(b.project || '—')}</strong>
               <span style="color:var(--text-muted);font-size:12px">${b.bid_number ? '#'+esc(b.bid_number) : ''} · ${STAGE[b.stage]}</span></div>
@@ -1412,7 +1412,7 @@ function awardedByMonthHtml(months) {
         <div style="font-size:13.5px;font-weight:700">${m.label}</div>
         <div style="display:flex;align-items:center;gap:10px">
           <span style="font-size:12px;color:var(--text-muted)">${m.count} awarded</span>
-          <span style="font-size:13px;font-weight:700;color:#16a34a">${fmt$(m.value)}</span>
+          <span style="font-size:13px;font-weight:700;color:#166534">${fmt$(m.value)}</span>
           <span style="font-size:11px;color:var(--text-muted)">${open ? '▲' : '▼'}</span>
         </div>
       </div>
@@ -1580,11 +1580,11 @@ function customerRowHtml(b, cust) {
     if (current.notes) subMetaExtra += ` · ${esc(current.notes)}`;
     if (current.not_awarded_notes) subMetaExtra += ` · <span style="color:#991b1b">${esc(current.not_awarded_notes)}</span>`;
   } else if (b.stage === 'active_bid') {
-    right = `<div class="bc-co-fu" style="color:#d97706;font-weight:700">awaiting submission</div>`;
+    right = `<div class="bc-co-fu" style="color:#92400e;font-weight:700">awaiting submission</div>`;
   }
 
   const historicalHtml = historical.length ? `<div style="margin-top:4px">${historical.map(s => `
-    <div style="font-size:11px;color:#94a3b8">Previously ${fmt$(s.amount)} · ${SUB_TYPE[s.submission_type] || esc(s.submission_type)} · ${fmtD(s.date_submitted)} (superseded)</div>`).join('')}</div>` : '';
+    <div style="font-size:11px;color:#6b7280">Previously ${fmt$(s.amount)} · ${SUB_TYPE[s.submission_type] || esc(s.submission_type)} · ${fmtD(s.date_submitted)} (superseded)</div>`).join('')}</div>` : '';
 
   const subLine = current ? `${SUB_TYPE[current.submission_type] || esc(current.submission_type)} · ${fmtD(current.date_submitted)}${current.approved_by ? ` · approved by ${esc(current.approved_by)}` : ''}${subMetaExtra}` : '';
 
@@ -1632,7 +1632,7 @@ function bidNode(b) {
   const dueOverdue = ['opportunity', 'active_bid'].includes(b.stage) && b.due_date && b.due_date < today;
   const metaBits = [];
   if (!b.customers.length) metaBits.push('<span style="color:#dc2626">no customer</span>');
-  if (b.awarded_company) metaBits.push(`Won by <strong style="color:#16a34a">${esc(b.awarded_company.name)}</strong> ${fmtD(b.award_date)}`);
+  if (b.awarded_company) metaBits.push(`Won by <strong style="color:#166534">${esc(b.awarded_company.name)}</strong> ${fmtD(b.award_date)}`);
   if (b.estimator) metaBits.push(`Est. ${ini(b.estimator)}`);
   b.sub_estimators.forEach(s => metaBits.push(`${ini(s)}<span style="font-size:10px">${esc(s.scope)}<a href="#" onclick="event.preventDefault();actRemoveSubEstimator(${b.id},${s.id},'${escJs(s.scope)}')" style="color:#dc2626;margin-left:2px">✕</a></span>`));
   if (b.salesperson) metaBits.push(`Sales ${ini(b.salesperson)}`);
@@ -1840,7 +1840,7 @@ function coNode(co) {
       <span class="badge badge-co" style="flex-shrink:0">CO</span>
       <div style="flex:1;min-width:0">
         <div style="font-weight:600;font-size:13px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-          <span style="color:#d97706">${esc(co.co_number)}</span> ${esc(co.name)}
+          <span style="color:#92400e">${esc(co.co_number)}</span> ${esc(co.name)}
           ${stageBadge(co.stage)}
           ${co.superseded ? '<span class="badge" style="background:#e2e8f0;color:#64748b">REVISED</span>' : ''}
           ${co.estimate_amount ? `<span class="amount">${fmt$(co.estimate_amount)}</span>` : ''}
@@ -1849,7 +1849,7 @@ function coNode(co) {
         <div style="font-size:12px;color:var(--text-muted);margin-top:2px">
           ${co.estimator ? `Est: ${ini(co.estimator)}` : ''}
           ${co.date_submitted ? ` · Submitted ${fmtD(co.date_submitted)} (${esc(co.approved_by)})` : ''}
-          ${co.approval_date ? ` · <span style="color:#16a34a;font-weight:700">Approved ${fmtD(co.approval_date)}</span>` : ''}
+          ${co.approval_date ? ` · <span style="color:#166534;font-weight:700">Approved ${fmtD(co.approval_date)}</span>` : ''}
           ${co.next_followup_date ? ` · Next F/U: <span class="${fuOverdue ? 'overdue-txt' : ''}">${fmtD(co.next_followup_date)}${fuOverdue ? ' — OVERDUE' : ''}</span>` : ''}
           ${co.void_reason ? ` · Voided: ${esc(co.void_reason)}` : ''}
           ${co.not_approved_notes ? ` · ${esc(co.not_approved_notes)}` : ''}
@@ -1904,8 +1904,8 @@ function fuRow(f) {
     ${METHOD[f.contact_method] || ''} w/ <strong>${esc(f.customer_contact || '?')}</strong>:
     ${esc(f.notes || '')}
     ${f.outcome === 'no_decision' && f.next_followup_date ? `→ next ${fmtD(f.next_followup_date)}` : ''}
-    ${f.outcome === 'awarded' ? '<span style="color:#16a34a;font-weight:700">→ AWARDED</span>' : ''}
-    ${f.outcome === 'approved' ? '<span style="color:#16a34a;font-weight:700">→ APPROVED</span>' : ''}
+    ${f.outcome === 'awarded' ? '<span style="color:#166534;font-weight:700">→ AWARDED</span>' : ''}
+    ${f.outcome === 'approved' ? '<span style="color:#166534;font-weight:700">→ APPROVED</span>' : ''}
     ${f.outcome === 'not_awarded' ? '<span class="overdue-txt">→ NOT AWARDED</span>' : ''}
     ${canEdit ? `<a href="#" onclick="event.preventDefault();actEditFollowup(${f.id})" style="font-size:11px;margin-left:4px">✏️</a>` : ''}
   </div>`;
@@ -2765,7 +2765,7 @@ async function actNewChangeOrder() {
       return scores.length ? { j, score: Math.min(...scores) } : null;
     }).filter(Boolean).sort((a, b) => a.score - b.score).slice(0, 8);
     menu.innerHTML = scored.length
-      ? scored.map(({ j }) => `<div class="v2-combo-opt" onmousedown="event.preventDefault();ncoPickJob(${j.id})">${esc(j.project_name)} ${j.job_number ? `<span style="color:var(--text-muted)">— Job ${esc(j.job_number)}</span>` : `<span style="color:#d97706">— Job # pending</span>`}</div>`).join('')
+      ? scored.map(({ j }) => `<div class="v2-combo-opt" onmousedown="event.preventDefault();ncoPickJob(${j.id})">${esc(j.project_name)} ${j.job_number ? `<span style="color:var(--text-muted)">— Job ${esc(j.job_number)}</span>` : `<span style="color:#92400e">— Job # pending</span>`}</div>`).join('')
       : `<div class="v2-combo-empty">No matching project or job # — a change order needs an existing job (created at bid award, or via "+ Legacy Job")</div>`;
     const box = input.closest('.v2-combo-box');
     const rect = box.getBoundingClientRect();
@@ -2940,13 +2940,13 @@ async function showHealth() {
         <div style="font-size:13px;padding:3px 0;display:flex;align-items:center;gap:8px">
           <span style="flex:1">• ${esc(o.desc)}</span>
           ${admin ? `<a href="#" onclick="event.preventDefault();undoOverride(${o.id})" style="font-size:11px;color:#dc2626">↩ undo</a>` : ''}
-        </div>`).join(''), '#16a34a') : ''}
+        </div>`).join(''), '#166534') : ''}
 
     ${card('Likely duplicate projects', dupProjIssues, 'groups that look like the same project — pick the keeper and merge (rewrites bid/job links)',
-      dupProjIssues ? clusterList(h.dupProjects, 'project') : '<div style="color:#16a34a;font-size:13px">None 🎉</div>', '#dc2626')}
+      dupProjIssues ? clusterList(h.dupProjects, 'project') : '<div style="color:#166534;font-size:13px">None 🎉</div>', '#dc2626')}
 
     ${card('Likely duplicate companies', dupCoIssues, 'name variants of one company — pick the keeper and merge (repoints all customer/contact links)',
-      dupCoIssues ? clusterList(h.dupCompanies, 'company') : '<div style="color:#16a34a;font-size:13px">None 🎉</div>', '#d97706')}
+      dupCoIssues ? clusterList(h.dupCompanies, 'company') : '<div style="color:#166534;font-size:13px">None 🎉</div>', '#92400e')}
 
     ${card('Duplicate bids', h.dupBids.length, 'same bid # created twice under one project (e.g. a double-click) — pick which to keep, the rest are deleted',
       h.dupBids.length ? h.dupBids.map((g, gi) => `
@@ -2960,7 +2960,7 @@ async function showHealth() {
             </select>
             <button class="v2-btn red" onclick="doDeleteDupBids(${gi})">Delete the rest</button>
           </div>` : ''}
-        </div>`).join('') : '<div style="color:#16a34a;font-size:13px">None 🎉</div>', '#dc2626')}
+        </div>`).join('') : '<div style="color:#166534;font-size:13px">None 🎉</div>', '#dc2626')}
 
     ${card('Duplicate change orders', h.dupCOs.length, 'same RFC/CO # under one job — often genuinely different COs that collided on a label, not accidents. Rename the collision away, or delete one only if it truly is a double-submit (active COs only)',
       h.dupCOs.length ? h.dupCOs.map((g, gi) => `
@@ -2972,7 +2972,7 @@ async function showHealth() {
               ${admin ? `<a href="#" onclick="event.preventDefault();renameCO(${c.id})" style="font-size:11px">✏️ renumber</a>` : ''}
               ${admin && c.stage === 'active_co' ? `<a href="#" onclick="event.preventDefault();doDeleteCO(${c.id})" style="font-size:11px;color:#dc2626">🗑 delete</a>` : ''}
             </div>`).join('')}
-        </div>`).join('') : '<div style="color:#16a34a;font-size:13px">None 🎉</div>', '#ea580c')}
+        </div>`).join('') : '<div style="color:#166534;font-size:13px">None 🎉</div>', '#ea580c')}
 
     ${card('Duplicate contacts', h.dupContacts.length, 'same person entered twice at one company (often from a duplicate-bid accident) — pick which to keep',
       h.dupContacts.length ? h.dupContacts.map((g, gi) => `
@@ -2987,7 +2987,7 @@ async function showHealth() {
             <button class="v2-btn amber" onclick="doMergeDupContacts(${gi})">Merge ${g.contacts.length}→1</button>
             <button class="v2-btn outline" onclick="doDismissContacts(${gi})">Not a dup</button>
           </div>` : ''}
-        </div>`).join('') : '<div style="color:#16a34a;font-size:13px">None 🎉</div>', '#9333ea')}
+        </div>`).join('') : '<div style="color:#166534;font-size:13px">None 🎉</div>', '#9333ea')}
 
     ${card('Duplicate jobs', h.dupJobs.length, 'same job # created twice under one project — merges COs onto the survivor',
       h.dupJobs.length ? h.dupJobs.map((g, gi) => `
@@ -3001,17 +3001,17 @@ async function showHealth() {
             </select>
             <button class="v2-btn blue" onclick="doMergeDupJobs(${gi})">Merge ${g.jobs.length}→1</button>
           </div>` : ''}
-        </div>`).join('') : '<div style="color:#16a34a;font-size:13px">None 🎉</div>', '#2563eb')}
+        </div>`).join('') : '<div style="color:#166534;font-size:13px">None 🎉</div>', '#2563eb')}
 
     ${card('Empty companies', h.emptyCompanies.length, 'never bid to, no contacts, never awarded — safe to delete',
       h.emptyCompanies.length ? h.emptyCompanies.map(c => `
         <div style="font-size:13px;padding:3px 0;display:flex;align-items:center;gap:8px">
           <span style="flex:1">• ${esc(c.name)}</span>
           ${admin ? `<a href="#" onclick="event.preventDefault();doDeleteEmptyCompany(${c.id})" style="font-size:11px;color:#dc2626">🗑 delete</a>` : ''}
-        </div>`).join('') : '<div style="color:#16a34a;font-size:13px">None</div>', '#64748b')}
+        </div>`).join('') : '<div style="color:#166534;font-size:13px">None</div>', '#64748b')}
 
     ${card('Data integrity check', Object.values(h.orphans).reduce((s,n)=>s+n,0), 'references pointing at deleted records — should always be zero; a non-zero count here is a bug to investigate, not something to auto-fix',
-      Object.values(h.orphans).some(n=>n>0) ? Object.entries(h.orphans).filter(([,n])=>n>0).map(([k,n]) => `<div style="font-size:13px;padding:2px 0;color:#dc2626">• ${k}: ${n}</div>`).join('') : '<div style="color:#16a34a;font-size:13px">All clean 🎉</div>', '#0f766e')}
+      Object.values(h.orphans).some(n=>n>0) ? Object.entries(h.orphans).filter(([,n])=>n>0).map(([k,n]) => `<div style="font-size:13px;padding:2px 0;color:#dc2626">• ${k}: ${n}</div>`).join('') : '<div style="color:#166534;font-size:13px">All clean 🎉</div>', '#0f766e')}
 
     ${card('Jobs awaiting a job # from accounting', h.jobsAwaitingNumber.length, 'nothing to fix here directly — this is just visibility so someone can follow up with accounting on the specific ones',
       h.jobsAwaitingNumber.length ? h.jobsAwaitingNumber.map(j => `
@@ -3021,22 +3021,22 @@ async function showHealth() {
             <div class="proj-meta">${j.pm ? `PM ${esc(j.pm)}` : '<span style="color:#dc2626">no PM assigned</span>'}${j.cos ? `<span class="proj-meta-sep">·</span> ${j.cos} CO${j.cos!==1?'s':''}` : ''}</div>
           </div>
           <span style="font-size:11px;color:var(--text-muted);flex-shrink:0">since ${fmtD(j.created_at.slice(0,10))}</span>
-        </div>`).join('') : '<div style="color:#16a34a;font-size:13px">None</div>', '#0891b2')}
+        </div>`).join('') : '<div style="color:#166534;font-size:13px">None</div>', '#0891b2')}
 
     ${card('Projects with no bids', h.noBidProjects.length, 'LEGACY = job + COs, no base bid (expected — just rename) · EMPTY = nothing attached (safe to delete)',
-      h.noBidProjects.length ? noBidList(h.noBidProjects) : '<div style="color:#16a34a;font-size:13px">None</div>', '#0891b2')}
+      h.noBidProjects.length ? noBidList(h.noBidProjects) : '<div style="color:#166534;font-size:13px">None</div>', '#0891b2')}
 
     ${card('Active bids missing a customer', h.missing.no_customer.length, 'submitted/active bids with no linked customer',
-      h.missing.no_customer.length ? flatList(h.missing.no_customer, b => esc(b.label)) : '<div style="color:#16a34a;font-size:13px">None</div>', '#9333ea')}
+      h.missing.no_customer.length ? flatList(h.missing.no_customer, b => esc(b.label)) : '<div style="color:#166534;font-size:13px">None</div>', '#9333ea')}
 
     ${card('Active bids missing an estimator', h.missing.no_estimator.length, 'no estimator assigned',
-      h.missing.no_estimator.length ? flatList(h.missing.no_estimator, b => esc(b.label)) : '<div style="color:#16a34a;font-size:13px">None</div>', '#2563eb')}
+      h.missing.no_estimator.length ? flatList(h.missing.no_estimator, b => esc(b.label)) : '<div style="color:#166534;font-size:13px">None</div>', '#2563eb')}
 
     ${card('Submitted bids missing an amount', h.missing.submitted_no_amount.length, 'submitted but no estimate $ recorded',
-      h.missing.submitted_no_amount.length ? flatList(h.missing.submitted_no_amount, b => esc(b.label)) : '<div style="color:#16a34a;font-size:13px">None</div>', '#ea580c')}
+      h.missing.submitted_no_amount.length ? flatList(h.missing.submitted_no_amount, b => esc(b.label)) : '<div style="color:#166534;font-size:13px">None</div>', '#ea580c')}
 
     ${card('Active bids with no bid #', h.missing.no_bid_number.length, 'hard to identify/dedupe — many are follow-up/opportunity rows',
-      h.missing.no_bid_number.length ? flatList(h.missing.no_bid_number, b => esc(b.label)) : '<div style="color:#16a34a;font-size:13px">None</div>', '#64748b')}
+      h.missing.no_bid_number.length ? flatList(h.missing.no_bid_number, b => esc(b.label)) : '<div style="color:#166534;font-size:13px">None</div>', '#64748b')}
   `;
 }
 
@@ -3321,7 +3321,7 @@ function openRfqModal() {
       <div class="v2-modal-hd">✉️ Generate RFQ Email<button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">✕</button></div>
       <div class="v2-modal-bd">
         <div class="v2-field">
-          <label>Vendors — BCC'd (${vendors.length})${skipped ? ` <span style="font-weight:400;color:#d97706">· ${skipped} skipped, no email on file</span>` : ''}</label>
+          <label>Vendors — BCC'd (${vendors.length})${skipped ? ` <span style="font-weight:400;color:#92400e">· ${skipped} skipped, no email on file</span>` : ''}</label>
           <div style="font-size:12px;color:var(--text-muted);line-height:1.6;max-height:100px;overflow-y:auto">${vendors.map(v => `${esc(v.company?.name || '—')} — ${esc(v.email)}`).join('<br>')}</div>
         </div>
         <div class="v2-field" style="position:relative">
@@ -3587,9 +3587,9 @@ function renderReportsBody(data) {
       ${card('Opportunities', summary.opportunities.count)}
       ${card('Active Bids', summary.activeBids.count)}
       ${card('Submitted', summary.submitted.count, fmt$(summary.submitted.value))}
-      ${card('Awarded', summary.awarded.count, fmt$(summary.awarded.value), '#16a34a')}
+      ${card('Awarded', summary.awarded.count, fmt$(summary.awarded.value), '#166534')}
       ${card('Not Awarded', summary.notAwarded.count, null, '#dc2626')}
-      ${card('Still Pending', summary.pending.count, null, '#d97706')}
+      ${card('Still Pending', summary.pending.count, null, '#92400e')}
       ${card('Closed', summary.closed.count, null, 'var(--text-muted)')}
       ${card('Win Rate', summary.winRate == null ? '—' : summary.winRate + '%')}
       ${card('Approved COs', summary.approvedCOs.count, fmt$(summary.approvedCOs.value))}
@@ -3626,7 +3626,7 @@ function renderReportsBody(data) {
           { label: 'Awarded', data: timeSeries.map(t => t.awardedValue), backgroundColor: '#16a34a', stack: 's' },
           { label: 'Not Awarded', data: timeSeries.map(t => t.notAwardedValue), backgroundColor: '#dc2626', stack: 's' },
           { label: 'Still Pending', data: timeSeries.map(t => t.pendingValue), backgroundColor: '#fbbf24', stack: 's' },
-          { label: 'Closed', data: timeSeries.map(t => t.closedValue), backgroundColor: '#94a3b8', stack: 's' },
+          { label: 'Closed', data: timeSeries.map(t => t.closedValue), backgroundColor: '#6b7280', stack: 's' },
         ],
       },
       options: {
@@ -3665,9 +3665,9 @@ function byCustomerTableHtml(rows) {
       <tr style="border-bottom:1px solid #f1f5f9">
         <td style="padding:6px 10px">${esc(c.name)}</td>
         <td style="padding:6px 10px;text-align:right">${c.submittedCount} · ${fmt$(c.submittedValue)}</td>
-        <td style="padding:6px 10px;text-align:right;font-weight:600;color:#16a34a">${c.awardedCount} · ${fmt$(c.awardedValue)}</td>
+        <td style="padding:6px 10px;text-align:right;font-weight:600;color:#166534">${c.awardedCount} · ${fmt$(c.awardedValue)}</td>
         <td style="padding:6px 10px;text-align:right;color:#dc2626">${c.notAwardedCount}</td>
-        <td style="padding:6px 10px;text-align:right;color:#d97706">${c.pendingCount}</td>
+        <td style="padding:6px 10px;text-align:right;color:#92400e">${c.pendingCount}</td>
         <td style="padding:6px 10px;text-align:right;color:var(--text-muted)">${c.closedCount}</td>
         <td style="padding:6px 10px;text-align:right">${c.winRate == null ? '—' : c.winRate + '%'}</td>
       </tr>`).join('')}</tbody>
@@ -3691,7 +3691,7 @@ function byJobTableHtml(rows) {
         <td style="padding:6px 10px">${esc(j.company)}</td>
         <td style="padding:6px 10px;text-align:right">${fmt$(j.originalAmount)}</td>
         <td style="padding:6px 10px;text-align:right">${j.approvedCoCount} · ${fmt$(j.approvedCoTotal)}</td>
-        <td style="padding:6px 10px;text-align:right;font-weight:700;color:${j.growthPct > 15 ? '#dc2626' : j.growthPct > 0 ? '#d97706' : 'var(--text-muted)'}">${j.growthPct == null ? '—' : j.growthPct + '%'}</td>
+        <td style="padding:6px 10px;text-align:right;font-weight:700;color:${j.growthPct > 15 ? '#dc2626' : j.growthPct > 0 ? '#92400e' : 'var(--text-muted)'}">${j.growthPct == null ? '—' : j.growthPct + '%'}</td>
       </tr>`).join('')}</tbody>
   </table>`;
 }
@@ -3763,10 +3763,10 @@ function closeProfileModal() { document.getElementById('v2-profile-overlay')?.re
 const bidStatsHtml = (stats) => `
   <div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0">
     <div class="stat-card" style="flex:1;min-width:80px"><div style="font-size:20px;font-weight:800">${stats.total}</div><div style="font-size:11px;color:var(--text-muted)">Total Bids</div></div>
-    <div class="stat-card" style="flex:1;min-width:80px"><div style="font-size:20px;font-weight:800;color:#d97706">${stats.active}</div><div style="font-size:11px;color:var(--text-muted)">Active</div></div>
-    <div class="stat-card" style="flex:1;min-width:80px"><div style="font-size:20px;font-weight:800;color:#16a34a">${stats.wins}</div><div style="font-size:11px;color:var(--text-muted)">Wins</div></div>
+    <div class="stat-card" style="flex:1;min-width:80px"><div style="font-size:20px;font-weight:800;color:#92400e">${stats.active}</div><div style="font-size:11px;color:var(--text-muted)">Active</div></div>
+    <div class="stat-card" style="flex:1;min-width:80px"><div style="font-size:20px;font-weight:800;color:#166534">${stats.wins}</div><div style="font-size:11px;color:var(--text-muted)">Wins</div></div>
     <div class="stat-card" style="flex:1;min-width:80px"><div style="font-size:20px;font-weight:800">${stats.winRate == null ? '—' : stats.winRate + '%'}</div><div style="font-size:11px;color:var(--text-muted)">Win Rate</div></div>
-    <div class="stat-card" style="flex:1;min-width:100px"><div style="font-size:16px;font-weight:800;color:#16a34a">${fmt$(stats.wonValue)}</div><div style="font-size:11px;color:var(--text-muted)">Won Value</div></div>
+    <div class="stat-card" style="flex:1;min-width:100px"><div style="font-size:16px;font-weight:800;color:#166534">${fmt$(stats.wonValue)}</div><div style="font-size:11px;color:var(--text-muted)">Won Value</div></div>
   </div>`;
 
 const bidHistoryRowsHtml = (bids) => bids.length ? bids.map(b => `
@@ -4007,14 +4007,14 @@ function renderJISReview(p, targetBidId) {
     <div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-top:8px">
       <div style="font-weight:700;font-size:13px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         🏢 ${esc(gc.jis_name)}
-        ${gc.matched_company ? `<span class="badge" style="background:#dcfce7;color:#16a34a">✓ matches existing</span>` : `<span class="badge" style="background:#fef3c7;color:#b45309">🆕 will create</span>`}
+        ${gc.matched_company ? `<span class="badge" style="background:#dcfce7;color:#166534">✓ matches existing</span>` : `<span class="badge" style="background:#fef3c7;color:#b45309">🆕 will create</span>`}
       </div>
       <div style="font-size:12px;color:var(--text-muted);margin-top:2px">
         ${[gc.street, [gc.city, gc.state, gc.zip].filter(Boolean).join(', ')].filter(Boolean).join(' · ')}
         ${gc.phone ? ` · ${esc(gc.phone)}` : ''}
       </div>
       ${gc.poc ? `<div style="font-size:12px;margin-top:5px;padding-top:5px;border-top:1px solid var(--border)">
-        👤 ${esc(gc.poc.jis_name)} ${gc.poc.matched_contact ? `<span class="badge" style="background:#dcfce7;color:#16a34a;font-size:10px">✓ existing contact</span>` : `<span class="badge" style="background:#fef3c7;color:#b45309;font-size:10px">🆕 new contact</span>`}
+        👤 ${esc(gc.poc.jis_name)} ${gc.poc.matched_contact ? `<span class="badge" style="background:#dcfce7;color:#166534;font-size:10px">✓ existing contact</span>` : `<span class="badge" style="background:#fef3c7;color:#b45309;font-size:10px">🆕 new contact</span>`}
         <div style="color:var(--text-muted)">${gc.poc.phone ? esc(gc.poc.phone) : ''}${gc.poc.phone && gc.poc.email ? ' · ' : ''}${gc.poc.email ? esc(gc.poc.email) : ''}</div>
       </div>` : ''}
     </div>`;
