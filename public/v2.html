@@ -1477,6 +1477,25 @@ function renderHierarchy(d) {
   return html || '<div style="padding:10px;color:var(--text-muted);font-size:13px">Nothing here yet.</div>';
 }
 
+// Customer list + the one action that belongs right next to it ("+ Customer")
+// instead of buried in the generic action bar at the bottom of the card —
+// same grouping idea as Reminders/Notes, which already keep their own
+// "+ Reminder" / "+ Note" trigger attached to their own list.
+function customersSectionHtml(b) {
+  const canAddCustomer = !b.superseded && ['opportunity', 'active_bid', 'submitted'].includes(b.stage);
+  const submittedIds = new Set((b.submissions || []).filter(s => s.is_current).map(s => s.company?.id));
+  const list = b.customers.length ? `<div style="display:flex;flex-direction:column;gap:6px;margin-top:6px">${b.customers.map(cust => `
+    <div style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:#fafbfc">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <span onclick="openCompanyProfile(${cust.id})" style="cursor:pointer;color:#2563eb;font-weight:700;font-size:12.5px">🏢 ${esc(cust.name)}${submittedIds.has(cust.id) ? ' <span style="color:#16a34a;font-weight:700;font-size:11px">✓ submitted</span>' : (b.stage === 'active_bid' ? ' <span style="color:#d97706;font-weight:700;font-size:11px">awaiting submission</span>' : '')}</span>
+        <button type="button" title="Remove customer from this bid" onclick="actRemoveBidCustomer(${cust.bid_customer_id},'${escJs(cust.name)}')" style="border:none;background:none;color:#dc2626;cursor:pointer;font-size:13px;padding:2px 4px;line-height:1">✕</button>
+      </div>
+      ${bidCustomerContactsHtml(cust)}
+    </div>`).join('')}</div>` : '';
+  const addBtn = canAddCustomer ? `<button class="v2-btn outline" style="font-size:11px;padding:3px 8px;margin-top:6px" onclick="actAddCustomers(${b.id})">+ Customer</button>` : '';
+  return list + addBtn;
+}
+
 function bidNode(b) {
   const isAwarded = b.stage === 'awarded';
   return `
@@ -1503,17 +1522,7 @@ function bidNode(b) {
           ${b.not_awarded_notes ? `<br><span style="color:#dc2626">Not awarded ${fmtD(b.date_not_awarded)}:</span> ${esc(b.not_awarded_notes)}` : ''}
           ${b.notes ? `<br>📝 ${esc(b.notes)}` : ''}
         </div>
-        ${b.customers.length ? (() => {
-          const submittedIds = new Set((b.submissions || []).filter(s => s.is_current).map(s => s.company?.id));
-          return `<div style="display:flex;flex-direction:column;gap:6px;margin-top:6px">${b.customers.map(cust => `
-          <div style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:#fafbfc">
-            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-              <span onclick="openCompanyProfile(${cust.id})" style="cursor:pointer;color:#2563eb;font-weight:700;font-size:12.5px">🏢 ${esc(cust.name)}${submittedIds.has(cust.id) ? ' <span style="color:#16a34a;font-weight:700;font-size:11px">✓ submitted</span>' : (b.stage === 'active_bid' ? ' <span style="color:#d97706;font-weight:700;font-size:11px">awaiting submission</span>' : '')}</span>
-              <button type="button" title="Remove customer from this bid" onclick="actRemoveBidCustomer(${cust.bid_customer_id},'${escJs(cust.name)}')" style="border:none;background:none;color:#dc2626;cursor:pointer;font-size:13px;padding:2px 4px;line-height:1">✕</button>
-            </div>
-            ${bidCustomerContactsHtml(cust)}
-          </div>`).join('')}</div>`;
-        })() : ''}
+        ${customersSectionHtml(b)}
         ${(b.submissions || []).length ? `<div class="v2-fu"><div style="font-weight:600;color:var(--text);margin-bottom:3px">Submissions</div>${b.submissions.map(s => submissionRow(s, b)).join('')}</div>` : ''}
         ${(b.followups || []).length ? `<div class="v2-fu"><div style="font-weight:600;color:var(--text);margin-bottom:3px">Follow-ups</div>${b.followups.map(fuRow).join('')}</div>` : ''}
         ${remindersHtml('bid', b.id, b.reminders)}
@@ -1528,11 +1537,21 @@ function bidNode(b) {
 // it — not just a line buried in the description text — so a scheduled
 // walk-through is genuinely hard to miss when scanning a bid card.
 function walkthroughHtml(b) {
-  if (!b.walkthrough_date) return '';
+  // Trigger button lives in the box it controls (like Reminders/Notes' own
+  // "+" button) instead of a generic bottom action bar, so setting or
+  // editing a walk-through happens right where the walk-through info is.
+  const canEditBid = CURRENT_USER?.is_admin || CURRENT_USER?.id === b.estimator?.id || CURRENT_USER?.id === b.salesperson?.id;
+  const canSetWalkthrough = canEditBid && !b.superseded && BID_EDITABLE_STAGES.includes(b.stage);
+  if (!b.walkthrough_date) {
+    return canSetWalkthrough ? `<button class="v2-btn outline" style="font-size:11px;padding:3px 8px;margin-top:6px" onclick="actSetWalkthrough(${b.id})">🚶 + Walk-through</button>` : '';
+  }
   const contact = b.walkthrough_contact;
   const company = b.walkthrough_company;
   return `<div class="v2-fu" style="background:#ecfeff;border:1px solid #a5f3fc;border-radius:6px;padding:8px 10px;margin-top:6px">
-    <div style="font-weight:700;color:#0e7490;font-size:12px">🚶 Walk-through: ${fmtD(b.walkthrough_date)}${b.walkthrough_time ? ' · ' + fmtTimeShort(b.walkthrough_time) : ''}</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+      <div style="font-weight:700;color:#0e7490;font-size:12px">🚶 Walk-through: ${fmtD(b.walkthrough_date)}${b.walkthrough_time ? ' · ' + fmtTimeShort(b.walkthrough_time) : ''}</div>
+      ${canSetWalkthrough ? `<a href="#" onclick="event.preventDefault();actSetWalkthrough(${b.id})" style="font-size:11px;color:#0e7490">edit</a>` : ''}
+    </div>
     ${(contact || company) ? `<div style="font-size:11.5px;color:#155e75;margin-top:2px">Site contact: ${contact ? esc(contact.full_name) : '—'}${company ? ' · ' + esc(company.name) : ''}${contact?.phone ? ' · ' + esc(contact.phone) : ''}</div>` : ''}
   </div>`;
 }
@@ -1619,24 +1638,26 @@ function submitOrAddSubmissionBtn(b) {
     ? `<button class="v2-btn blue" onclick="actSubmitBid(${b.id})">Submit Bid</button>`
     : `<button class="v2-btn outline" onclick="actAddSubmission(${b.id})">+ Add Submission</button>`;
 }
+// Only stage-transition actions live here now — "+ Customer" moved next to
+// the Customers list (customersSectionHtml) and Set/Edit Walk-through moved
+// into its own box (walkthroughHtml), same idea as Reminders/Notes already
+// keeping their "+" button attached to their own list instead of a shared
+// bottom bar.
 function bidActions(b) {
   // Superseded bids are inactive — no workflow buttons, but admins can still edit.
   let workflow = '';
   if (!b.superseded) {
     if (b.stage === 'opportunity') {
       workflow = `<button class="v2-btn blue" onclick="actStartBid(${b.id})">→ Start Bid</button>
-                  <button class="v2-btn outline" onclick="actAddCustomers(${b.id})">+ Customer</button>
                   <button class="v2-btn outline" onclick="actLogFollowup('bid',${b.id})">📝 Log Follow-up</button>
                   <button class="v2-btn outline" onclick="actEditOpportunityDetails(${b.id})">📅 Due Date / Assign</button>
                   <button class="v2-btn outline" onclick="actCloseBid(${b.id})">Close</button>`;
     } else if (b.stage === 'active_bid') {
       workflow = `${submitOrAddSubmissionBtn(b)}
-                  <button class="v2-btn outline" onclick="actAddCustomers(${b.id})">+ Customer</button>
                   <button class="v2-btn outline" onclick="actCloseBid(${b.id})">Close</button>`;
     } else if (b.stage === 'submitted') {
       // Follow-up / award / not-awarded are now per submission (on each submission row).
       workflow = `${submitOrAddSubmissionBtn(b)}
-                  <button class="v2-btn outline" onclick="actAddCustomers(${b.id})">+ Customer</button>
                   <button class="v2-btn outline" onclick="actReactivateBid(${b.id})">↻ Reactivate</button>`;
     } else if (b.stage === 'closed') {
       // The customer came back after all — reopens to wherever it was closed
@@ -1650,9 +1671,7 @@ function bidActions(b) {
   const canEditBid = CURRENT_USER?.is_admin || CURRENT_USER?.id === b.estimator?.id || CURRENT_USER?.id === b.salesperson?.id;
   const adminBtn = (canEditBid && BID_EDITABLE_STAGES.includes(b.stage))
     ? `<button class="v2-btn outline" onclick="actEditBid(${b.id})">✏️ Edit</button>` : '';
-  const walkthroughBtn = (canEditBid && !b.superseded && BID_EDITABLE_STAGES.includes(b.stage))
-    ? `<button class="v2-btn outline" onclick="actSetWalkthrough(${b.id})">🚶 ${b.walkthrough_date ? 'Edit' : 'Set'} Walk-through</button>` : '';
-  const all = [workflow, walkthroughBtn, adminBtn].filter(Boolean).join('');
+  const all = [workflow, adminBtn].filter(Boolean).join('');
   return all ? `<div class="v2-actions">${all}</div>` : '';
 }
 
