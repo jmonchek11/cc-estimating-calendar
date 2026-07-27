@@ -1551,14 +1551,14 @@ function remindersHtml(parentType, parentId, reminders) {
     </div>`;
   }).join('');
   return `<div style="margin-top:4px">${rows}
-    <a href="#" onclick="event.preventDefault();actAddReminder('${parentType}',${parentId})" style="font-size:11px;color:#2563eb">+ Reminder</a>
+    <button class="v2-btn outline" style="font-size:11px;padding:3px 8px" onclick="actAddReminder('${parentType}',${parentId})">+ Reminder</button>
   </div>`;
 }
 function actAddReminder(parentType, parentId) {
   showForm('⏰ Add Reminder', [
     { id: 'remind_on', label: 'Remind me on', type: 'date', required: true, value: today },
     { id: 'note', label: 'Note', type: 'textarea', placeholder: 'What to remember…' },
-  ], data => api('POST', '/api/v2/reminders', { ...data, parent_type: parentType, parent_id: parentId }), 'Add Reminder', 'amber');
+  ], data => api('POST', '/api/v2/reminders', { ...data, parent_type: parentType, parent_id: parentId }), 'Add Reminder', 'blue');
 }
 // Notes — a dateless, freeform log entry (who said what, when), distinct
 // from Reminders (a dated "ping me" tickler) and from the entity's own
@@ -1570,7 +1570,7 @@ function notesHtml(parentType, parentId, notesLog) {
       <a href="#" onclick="event.preventDefault();actDeleteNote('${parentType}',${parentId},${n.id})" style="font-size:11px;color:#dc2626;margin-left:4px">delete</a>
     </div>`).join('');
   return `<div style="margin-top:4px">${rows}
-    <a href="#" onclick="event.preventDefault();actAddNote('${parentType}',${parentId})" style="font-size:11px;color:#2563eb">+ Note</a>
+    <button class="v2-btn outline" style="font-size:11px;padding:3px 8px" onclick="actAddNote('${parentType}',${parentId})">+ Note</button>
   </div>`;
 }
 function actAddNote(parentType, parentId) {
@@ -1608,10 +1608,16 @@ function bidNeedsFirstSubmission(b) {
   const submittedIds = new Set((b.submissions || []).filter(s => s.is_current).map(s => s.company?.id));
   return !b.customers.length || b.customers.some(c => !submittedIds.has(c.id));
 }
+// Color budget for this view: ONE accent (blue) on the single forward-moving
+// action per stage — Start Bid while it's still an opportunity, nothing else
+// competes with it once a submission exists (routine progress from there
+// happens at the submission level — see submissionRow). Everything else
+// (add a customer, log a follow-up, close, walk-through, reactivate, add a
+// revision) is an outline button by default — available, not shouting.
 function submitOrAddSubmissionBtn(b) {
   return bidNeedsFirstSubmission(b)
-    ? `<button class="v2-btn green" onclick="actSubmitBid(${b.id})">Submit Bid</button>`
-    : `<button class="v2-btn amber" onclick="actAddSubmission(${b.id})">+ Add Submission</button>`;
+    ? `<button class="v2-btn blue" onclick="actSubmitBid(${b.id})">Submit Bid</button>`
+    : `<button class="v2-btn outline" onclick="actAddSubmission(${b.id})">+ Add Submission</button>`;
 }
 function bidActions(b) {
   // Superseded bids are inactive — no workflow buttons, but admins can still edit.
@@ -1622,20 +1628,20 @@ function bidActions(b) {
                   <button class="v2-btn outline" onclick="actAddCustomers(${b.id})">+ Customer</button>
                   <button class="v2-btn outline" onclick="actLogFollowup('bid',${b.id})">📝 Log Follow-up</button>
                   <button class="v2-btn outline" onclick="actEditOpportunityDetails(${b.id})">📅 Due Date / Assign</button>
-                  <button class="v2-btn gray" onclick="actCloseBid(${b.id})">Close</button>`;
+                  <button class="v2-btn outline" onclick="actCloseBid(${b.id})">Close</button>`;
     } else if (b.stage === 'active_bid') {
       workflow = `${submitOrAddSubmissionBtn(b)}
                   <button class="v2-btn outline" onclick="actAddCustomers(${b.id})">+ Customer</button>
-                  <button class="v2-btn gray" onclick="actCloseBid(${b.id})">Close</button>`;
+                  <button class="v2-btn outline" onclick="actCloseBid(${b.id})">Close</button>`;
     } else if (b.stage === 'submitted') {
       // Follow-up / award / not-awarded are now per submission (on each submission row).
       workflow = `${submitOrAddSubmissionBtn(b)}
                   <button class="v2-btn outline" onclick="actAddCustomers(${b.id})">+ Customer</button>
-                  <button class="v2-btn blue" onclick="actReactivateBid(${b.id})">↻ Reactivate</button>`;
+                  <button class="v2-btn outline" onclick="actReactivateBid(${b.id})">↻ Reactivate</button>`;
     } else if (b.stage === 'closed') {
       // The customer came back after all — reopens to wherever it was closed
       // from (opportunity if it never got a bid #, active_bid otherwise).
-      workflow = `<button class="v2-btn blue" onclick="actReactivateBid(${b.id})">↻ Reactivate</button>`;
+      workflow = `<button class="v2-btn outline" onclick="actReactivateBid(${b.id})">↻ Reactivate</button>`;
     }
   }
   // Admins can edit any bid; the assigned estimator/salesperson can edit
@@ -1645,7 +1651,7 @@ function bidActions(b) {
   const adminBtn = (canEditBid && BID_EDITABLE_STAGES.includes(b.stage))
     ? `<button class="v2-btn outline" onclick="actEditBid(${b.id})">✏️ Edit</button>` : '';
   const walkthroughBtn = (canEditBid && !b.superseded && BID_EDITABLE_STAGES.includes(b.stage))
-    ? `<button class="v2-btn" style="background:#0891b2;color:#fff" onclick="actSetWalkthrough(${b.id})">🚶 ${b.walkthrough_date ? 'Edit' : 'Set'} Walk-through</button>` : '';
+    ? `<button class="v2-btn outline" onclick="actSetWalkthrough(${b.id})">🚶 ${b.walkthrough_date ? 'Edit' : 'Set'} Walk-through</button>` : '';
   const all = [workflow, walkthroughBtn, adminBtn].filter(Boolean).join('');
   return all ? `<div class="v2-actions">${all}</div>` : '';
 }
@@ -1750,11 +1756,17 @@ function submissionRow(s, bid) {
   const live = s.is_current && s.outcome === 'pending';
   let actions = '';
   if (live && bid && ['submitted', 'awarded'].includes(bid.stage)) {
-    const awardBtn = bid.stage === 'submitted' ? `<button class="v2-btn green" onclick="actAwardSubmission(${s.id})">✓ Awarded</button>` : '';
+    // Awarded/Not Awarded are still-pending DECISIONS, not outcomes yet — kept
+    // neutral (outline) so they don't read as a result that's already
+    // happened. Color shows up once a decision is actually made, on the
+    // outcome badge above (awarded-pill / red "NOT AWARDED" pill), not here.
+    // Log Follow-up stays the one accented action since it's the routine
+    // thing you do while a submission is still pending.
+    const awardBtn = bid.stage === 'submitted' ? `<button class="v2-btn outline" onclick="actAwardSubmission(${s.id})">✓ Awarded</button>` : '';
     actions = `<div class="v2-actions" style="margin-top:4px">
       <button class="v2-btn blue" onclick="actLogFollowup('bid_submission',${s.id})">📝 Log Follow-up</button>
       ${awardBtn}
-      <button class="v2-btn red" onclick="actNotAwardSubmission(${s.id})">✗ Not Awarded</button>
+      <button class="v2-btn outline" onclick="actNotAwardSubmission(${s.id})">✗ Not Awarded</button>
     </div>`;
   }
 
