@@ -1287,10 +1287,25 @@ async function notAwardSubmission(submissionId, data, actorId) {
   }});
   await recomputeBidFollowup(bid._id);
 
-  const all = await M.BidSubmission.find({ bid_id: bid._id }).lean();
-  const anyAwarded = all.some(s => s.outcome === 'awarded');
-  const anyPending = all.some(s => s.outcome === 'pending');
-  if (!anyAwarded && !anyPending && bid.stage === 'submitted') {
+  // "Is everyone decided" must be checked against BidCustomer (every company
+  // actually on this bid), not just "no pending row exists in BidSubmission"
+  // — a customer added to the bid but never submitted to yet has NO
+  // BidSubmission row at all, so it would silently vanish from that check
+  // and get treated as already-decided. Real incident: bid had 3 customers,
+  // only 1 had ever been submitted to; marking that one submission
+  // not_awarded flipped the WHOLE bid to not_awarded even though the other
+  // 2 customers had never been submitted to, let alone decided.
+  const [customers, currentSubs] = await Promise.all([
+    M.BidCustomer.find({ bid_id: bid._id }).lean(),
+    M.BidSubmission.find({ bid_id: bid._id, is_current: 1 }).lean(),
+  ]);
+  const subByCompany = {}; currentSubs.forEach(s => subByCompany[s.company_id] = s);
+  const anyAwarded = currentSubs.some(s => s.outcome === 'awarded');
+  const everyoneDecided = customers.length > 0 && customers.every(c => {
+    const s = subByCompany[c.company_id];
+    return s && s.outcome !== 'pending';
+  });
+  if (!anyAwarded && everyoneDecided && bid.stage === 'submitted') {
     await M.Bid.updateOne({ _id: bid._id }, { $set: {
       stage: 'not_awarded', date_not_awarded: data.date_not_awarded,
       not_awarded_notes: 'All customers declined.', next_followup_date: null, updated_at: ts(),
