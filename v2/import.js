@@ -264,15 +264,19 @@ async function main() {
       else ex.subNoCompany++;
     }
 
-    // Awarded bid → fill in its Job's winner (or create a Job if it has no job # yet)
+    // Awarded bid → fill in its Job's winner (or create a Job if it has no job # yet).
+    // A project's job # may already be claimed by an earlier awarded bid (two
+    // separately-awarded bids sharing one project) — that bid still needs its
+    // own Job, just with no job # yet (accounting assigns one later), rather
+    // than being silently dropped.
     if (stage === 'awarded') {
       const bj = baseJob(r['Job #']);
-      if (bj && jobByNum[bj]) {
-        const jdoc = jobDocs.find(j => j._id === jobByNum[bj]);
-        if (jdoc && !jdoc.winning_bid_id) { jdoc.winning_bid_id = id; jdoc.awarded_company_id = awardedCompanyId; jdoc.award_date = xdate(r['Award Date']); }
+      const jdoc = bj ? jobDocs.find(j => j._id === jobByNum[bj]) : null;
+      if (jdoc && !jdoc.winning_bid_id) {
+        jdoc.winning_bid_id = id; jdoc.awarded_company_id = awardedCompanyId; jdoc.award_date = xdate(r['Award Date']);
       } else {
-        const jid = ++job_id; jobDocs.push({ _id: jid, project_id: projectId, winning_bid_id: id, job_number: bj || null, awarded_company_id: awardedCompanyId, pm_id: null, award_date: xdate(r['Award Date']), created_at: ts(), updated_at: ts() });
-        if (bj) jobByNum[bj] = jid;
+        const jid = ++job_id; jobDocs.push({ _id: jid, project_id: projectId, winning_bid_id: id, job_number: jdoc ? null : (bj || null), awarded_company_id: awardedCompanyId, pm_id: null, award_date: xdate(r['Award Date']), created_at: ts(), updated_at: ts() });
+        if (bj && !jdoc) jobByNum[bj] = jid;
       }
     }
   }

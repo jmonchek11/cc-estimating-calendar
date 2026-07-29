@@ -252,6 +252,7 @@ async function getProjectDetail(projectId) {
     start_date: b.start_date,
     date_received: b.date_received,
     due_date: b.due_date,
+    due_time: b.due_time,
     walkthrough_date: b.walkthrough_date,
     walkthrough_time: b.walkthrough_time,
     walkthrough_company: companyById[b.walkthrough_company_id] || null,
@@ -601,7 +602,7 @@ async function updateSettingsV2(data) {
 
 // ── Opportunity creation ──────────────────────────────────────────────────────
 // Creates a Project (or attaches to an existing one) + an opportunity Bid.
-async function createOpportunity({ project_id, project_name, notes, description, location, due_date, company_ids, new_companies, contact_ids_by_company, created_by }) {
+async function createOpportunity({ project_id, project_name, notes, description, location, due_date, due_time, company_ids, new_companies, contact_ids_by_company, created_by }) {
   const M = getModels();
   let pid = project_id ? Number(project_id) : null;
   let isNewProject = false;
@@ -614,7 +615,7 @@ async function createOpportunity({ project_id, project_name, notes, description,
     isNewProject = true;
   }
   const bidId = await nextId('bids');
-  await M.Bid.create({ _id: bidId, project_id: pid, stage: 'opportunity', notes: notes || null, due_date: due_date || null });
+  await M.Bid.create({ _id: bidId, project_id: pid, stage: 'opportunity', notes: notes || null, due_date: due_date || null, due_time: due_time || null });
 
   const companyIds = await resolveCompanyIds(company_ids, new_companies);
   for (const companyId of companyIds) await ensureBidCustomer(bidId, companyId);
@@ -664,6 +665,7 @@ async function startBid(id, data, actorId) {
     sub_estimators: data.sub_estimators || [],
     date_received: data.date_received,
     due_date: data.due_date,
+    due_time: data.due_time || null,
     start_date: data.start_date || null,
     drawing_stage: data.drawing_stage || null,
     updated_at: ts(),
@@ -943,6 +945,7 @@ async function updateOpportunity(id, data) {
   if (bid.stage !== 'opportunity') throw new Error("This is only for opportunities — once a bid has started, edit it from the bid's own Edit button.");
   const upd = { updated_at: ts() };
   if ('due_date' in data) upd.due_date = data.due_date || null;
+  if ('due_time' in data) upd.due_time = data.due_time || null;
   if ('estimator_id' in data) upd.estimator_id = data.estimator_id ? Number(data.estimator_id) : null;
   if ('salesperson_id' in data) upd.salesperson_id = data.salesperson_id ? Number(data.salesperson_id) : null;
   await M.Bid.updateOne({ _id: bid._id }, { $set: upd });
@@ -1172,8 +1175,10 @@ async function reactivateBid(id, data, actorId) {
   if (target === 'active_bid') {
     require_(data, ['due_date']);
     upd.due_date = data.due_date;
+    upd.due_time = data.due_time || null;
   } else if (data.due_date) {
     upd.due_date = data.due_date;
+    upd.due_time = data.due_time || null;
   }
   await M.Bid.updateOne({ _id: bid._id }, { $set: upd });
   const proj = await M.Project.findById(bid.project_id).lean();
@@ -1197,7 +1202,7 @@ const ADMIN_EDITABLE = {
   // Walk-through fields are NOT here — they go through the dedicated
   // setWalkthrough()/POST .../walkthrough, which needs find-or-create logic
   // for the site company/contact that this generic whitelist path can't do.
-  bid:            ['bid_number', 'estimator_id', 'salesperson_id', 'date_received', 'due_date', 'start_date',
+  bid:            ['bid_number', 'estimator_id', 'salesperson_id', 'date_received', 'due_date', 'due_time', 'start_date',
                    'drawing_stage', 'notes', 'jurisdiction', 'superseded'],
   job:            ['job_number', 'pm_id', 'awarded_company_id', 'award_date'],
   change_order:   ['co_number', 'name', 'due_date', 'start_date', 'estimator_id', 'notes',
@@ -1977,7 +1982,7 @@ async function getBidList(stage) {
       estimator: tm[b.estimator_id] || null, salesperson: tm[b.salesperson_id] || null,
       sub_estimators: (b.sub_estimators || []).map(s => ({ ...(tm[s.estimator_id] || {}), scope: s.scope })),
       customers: [...new Set((custByBid[b._id] || []).filter(Boolean))],
-      date_received: b.date_received, due_date: b.due_date,
+      date_received: b.date_received, due_date: b.due_date, due_time: b.due_time,
       walkthrough_date: b.walkthrough_date, walkthrough_time: b.walkthrough_time,
       estimate_amount: b.estimate_amount, date_submitted: b.date_submitted, next_followup_date: b.next_followup_date,
       award_date: b.award_date, awarded_company: b.awarded_company_id ? coName[b.awarded_company_id] : null,
@@ -2396,7 +2401,7 @@ async function getDashboard(userId, mineOnly) {
       list: awardedYTD.slice(0, 8).sort((a,b)=>(b.award_date||'').localeCompare(a.award_date||'')).map(b => ({ id: b._id, project_id: b.project_id, bid_number: b.bid_number, project: pName[b.project_id], amount: b.estimate_amount, award_date: b.award_date, company: b.awarded_company_id ? coName[b.awarded_company_id] : null })),
       byMonth },
     overdueBidCount: overdueBids.length, overdueCoCount: overdueCos.length,
-    dueSoon: dueSoon.slice(0, 15).map(b => ({ id: b._id, project_id: b.project_id, bid_number: b.bid_number, project: pName[b.project_id], due_date: b.due_date, stage: b.stage })),
+    dueSoon: dueSoon.slice(0, 15).map(b => ({ id: b._id, project_id: b.project_id, bid_number: b.bid_number, project: pName[b.project_id], due_date: b.due_date, due_time: b.due_time, stage: b.stage })),
     jobsPending: myJobsPending.length,
   };
 }

@@ -708,7 +708,7 @@ async function fetchCalendarItems(mineOnly) {
     api('GET', '/api/v2/co-list?stage=active_co'), api('GET', '/api/v2/co-list?stage=submitted_co'),
   ]);
   let items = [
-    ...[...opp, ...active, ...sub].map(b => ({ kind: 'bid', id: b.id, project_id: b.project_id, title: b.project, label: b.bid_number, due_date: b.due_date, next_followup_date: b.next_followup_date, walkthrough_date: b.walkthrough_date, walkthrough_time: b.walkthrough_time, estimator: b.estimator, salesperson: b.salesperson, sub_estimators: b.sub_estimators || [], customer: (b.customers || []).join(', '), stage: b.stage })),
+    ...[...opp, ...active, ...sub].map(b => ({ kind: 'bid', id: b.id, project_id: b.project_id, title: b.project, label: b.bid_number, due_date: b.due_date, due_time: b.due_time, next_followup_date: b.next_followup_date, walkthrough_date: b.walkthrough_date, walkthrough_time: b.walkthrough_time, estimator: b.estimator, salesperson: b.salesperson, sub_estimators: b.sub_estimators || [], customer: (b.customers || []).join(', '), stage: b.stage })),
     ...[...activeCo, ...subCo].map(c => ({ kind: 'co', id: c.id, project_id: c.project_id, title: `${c.co_number} — ${c.name}`, label: c.project, due_date: c.due_date, next_followup_date: c.next_followup_date, estimator: c.estimator, salesperson: c.salesperson, customer: null, stage: c.stage })),
   ];
   if (mineOnly && CURRENT_USER) {
@@ -808,12 +808,16 @@ function buildCalendarGrid(year, month, items, filter) {
     const chips = dayItems.map(({ item, type }) => {
       if (type === 'due') {
         const c = estimatorColor(item.estimator?.id);
+        // A bid/CO that's already past its active stage (submitted or
+        // beyond) has fulfilled its due date's purpose — strike it through
+        // so the calendar reads as "handled" without removing the chip.
+        const isDone = item.stage === 'submitted' || item.stage === 'submitted_co';
         // Only due-date chips are draggable — a due date is what dropping on
         // another day changes; follow-up dates aren't touched by this.
-        return `<div class="cal-chip" draggable="true"
+        return `<div class="cal-chip${isDone ? ' cal-chip-done' : ''}" draggable="true"
             ondragstart="calDragStart(event,'${item.kind}',${item.id},'${escJs(item.title)}')"
             style="background:${c}a6;border-left-color:${c};cursor:grab">
-          <span class="cal-chip-txt">${esc(item.title)}</span>
+          <span class="cal-chip-txt">${esc(item.title)}${item.due_time ? ' · ' + fmtTimeShort(item.due_time) : ''}</span>
           ${item.estimator ? `<span class="cal-chip-ini" style="color:#fff">${esc(item.estimator.initials)}</span>` : ''}
         </div>`;
       }
@@ -868,7 +872,7 @@ function openCalDayModal(dateStr) {
   const label = new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
   const rows = items.map(({ item, type }) => {
     const color = type === 'due' ? estimatorColor(item.estimator?.id) : type === 'walkthrough' ? '#0891b2' : '#64748b';
-    const typeLabel = type === 'due' ? '📐 Due date' : type === 'walkthrough' ? `🚶 Walk-through${item.walkthrough_time ? ' · ' + fmtTimeShort(item.walkthrough_time) : ''}` : '📞 Follow-up';
+    const typeLabel = type === 'due' ? `📐 Due date${item.due_time ? ' · ' + fmtTimeShort(item.due_time) : ''}` : type === 'walkthrough' ? `🚶 Walk-through${item.walkthrough_time ? ' · ' + fmtTimeShort(item.walkthrough_time) : ''}` : '📞 Follow-up';
     return `<div class="proj-row" onclick="closeProfileModal();${item.kind === 'bid' ? `openBidFlyout(${item.project_id},${item.id})` : `openCoFlyout(${item.project_id},${item.id})`}">
       <div style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0;margin-top:5px"></div>
       <div style="flex:1;min-width:0">
@@ -1133,7 +1137,7 @@ function renderBidListBody(stage) {
         ${b.date_submitted ? `<div style="font-size:11px;color:var(--text-muted)">Sent ${fmtD(b.date_submitted)}</div>` : ''}
         ${b.next_followup_date ? `<div style="font-size:11px;${overdue ? 'color:#dc2626;font-weight:700' : 'color:var(--text-muted)'}">F/U ${fmtD(b.next_followup_date)}${overdue ? ' • OVERDUE' : ''}</div>` : ''}`;
     }
-    return b.due_date ? `<span style="font-size:12px;font-weight:700;color:${b.due_date < today ? '#dc2626' : 'var(--text-muted)'}">Due ${fmtD(b.due_date)}</span>` : '';
+    return b.due_date ? `<span style="font-size:12px;font-weight:700;color:${b.due_date < today ? '#dc2626' : 'var(--text-muted)'}">Due ${fmtD(b.due_date)}${b.due_time ? ' · ' + fmtTimeShort(b.due_time) : ''}</span>` : '';
   };
 
   document.getElementById('bl-count-' + stage).textContent = `${rows.length} of ${LIST_STATE[stage].length} ${meta.sub}`;
@@ -1364,7 +1368,7 @@ async function renderDashboard() {
           return `<div class="proj-row" onclick="openBidFlyout(${b.project_id},${b.id})">
             <div style="flex:1"><strong style="font-size:13px">${esc(b.project || '—')}</strong>
               <span style="color:var(--text-muted);font-size:12px">${b.bid_number ? '#'+esc(b.bid_number) : ''} · ${STAGE[b.stage]}</span></div>
-            <span style="font-size:12px;font-weight:700;color:${dot}">Due ${fmtD(b.due_date)}</span>
+            <span style="font-size:12px;font-weight:700;color:${dot}">Due ${fmtD(b.due_date)}${b.due_time ? ' · ' + fmtTimeShort(b.due_time) : ''}</span>
           </div>`; }).join('') : '<div class="text-muted" style="font-size:13px;padding:6px 0">Nothing due in the next 14 days</div>'}
       </div>
       <div class="card">
@@ -1653,7 +1657,7 @@ function bidNode(b) {
         </div>
         ${(b.estimate_amount || b.due_date) ? `<div class="bc-hd-right">
           ${b.estimate_amount ? `<div class="bc-amount">${fmt$(b.estimate_amount)}</div>` : ''}
-          ${b.due_date ? `<div class="bc-due" style="color:${dueOverdue ? '#dc2626' : 'var(--text-muted)'}">Due ${fmtD(b.due_date)}</div>` : ''}
+          ${b.due_date ? `<div class="bc-due" style="color:${dueOverdue ? '#dc2626' : 'var(--text-muted)'}">Due ${fmtD(b.due_date)}${b.due_time ? ' · ' + fmtTimeShort(b.due_time) : ''}</div>` : ''}
         </div>` : ''}
       </div>
       ${metaBits.length ? `<div class="bc-meta">${metaBits.join(' · ')}</div>` : ''}
@@ -2160,6 +2164,7 @@ const startBidFields = () => ([
   { id: 'salesperson_id', label: 'Salesperson', type: 'select', emptyLabel: 'TBD', options: teamOpts(['sales']) },
   { id: 'date_received', label: 'Date Received', type: 'date', required: true, value: today },
   { id: 'due_date', label: 'Due Date', type: 'date', required: true },
+  { id: 'due_time', label: 'Due Time (optional)', type: 'time' },
   { id: 'start_date', label: 'Start Date', type: 'date' },
   { id: 'drawing_stage', label: 'Drawing Stage', type: 'text', placeholder: '50% budget, 70% budget, 100% CD…' },
 ]);
@@ -2257,6 +2262,7 @@ async function actNewOpportunity() {
     { id: 'description', label: 'Project Description', type: 'textarea', placeholder: 'Brief description of the scope of work…' },
     { id: 'location', label: 'Location', type: 'text', placeholder: 'City, State or site address…' },
     { id: 'due_date', label: 'Due Date', type: 'date' },
+    { id: 'due_time', label: 'Due Time (optional)', type: 'time' },
     { id: 'company_ids', label: 'Customer(s)', type: 'company', multi: true, newKey: 'new_companies', options: companyOpts(), placeholder: 'Type customer name…',
       onChange: () => renderOppContactPickers(contactsByCompany) },
     { id: 'opp_contacts_section', type: 'custom' },
@@ -2392,6 +2398,7 @@ function actReactivateBid(bidId) {
   const backToOpportunity = b.stage === 'closed' && !b.bid_number;
   showForm('↻ Reactivate Bid', [
     { id: 'due_date', label: backToOpportunity ? 'Due Date (optional)' : 'New Due Date', type: 'date', required: !backToOpportunity },
+    { id: 'due_time', label: 'Due Time (optional)', type: 'time' },
   ], data => api('POST', `/api/v2/bids/${bidId}/reactivate`, data), 'Reactivate', 'blue');
 }
 
@@ -2428,6 +2435,7 @@ function actEditBid(bidId) {
     fields.push(
       { id: 'date_received', label: 'Date Received', type: 'date', value: b.date_received },
       { id: 'due_date', label: 'Due Date', type: 'date', value: b.due_date },
+      { id: 'due_time', label: 'Due Time (optional)', type: 'time', value: b.due_time },
       { id: 'start_date', label: 'Start Date', type: 'date', value: b.start_date },
       { id: 'drawing_stage', label: 'Drawing Stage', type: 'text', value: b.drawing_stage },
     );
@@ -2724,6 +2732,7 @@ function actEditOpportunityDetails(bidId) {
   const b = DETAIL_CACHE[OPEN_PROJECT]?.bids.find(x => x.id === bidId) || {};
   showForm('📅 Opportunity Details', [
     { id: 'due_date', label: 'Due Date (decision expected)', type: 'date', value: b.due_date },
+    { id: 'due_time', label: 'Due Time (optional)', type: 'time', value: b.due_time },
     { id: 'estimator_id', label: 'Estimator (if known)', type: 'select', emptyLabel: 'TBD', options: teamOpts(['estimator']), value: b.estimator?.id },
     { id: 'salesperson_id', label: 'Salesperson', type: 'select', emptyLabel: 'TBD', options: teamOpts(['sales']), value: b.salesperson?.id },
   ], data => api('PATCH', `/api/v2/bids/${bidId}/opportunity`, data), 'Save');
