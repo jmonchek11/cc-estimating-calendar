@@ -170,7 +170,7 @@ async function getProjectDetail(projectId) {
   const project = await M.Project.findById(pid).lean();
   if (!project) return null;
 
-  const [bids, jobs, members, companies] = await Promise.all([
+  let [bids, jobs, members, companies] = await Promise.all([
     M.Bid.find({ project_id: pid }).lean(),
     M.Job.find({ project_id: pid }).lean(),
     M.TeamMember.find().lean(),
@@ -178,11 +178,35 @@ async function getProjectDetail(projectId) {
   ]);
   const bidIds = bids.map(b => b._id);
   const jobIds = jobs.map(j => j._id);
-  const [cos, bidCustomers, submissions] = await Promise.all([
+  let [cos, bidCustomers, submissions] = await Promise.all([
     M.ChangeOrder.find({ job_id: { $in: jobIds } }).lean(),
     M.BidCustomer.find({ bid_id: { $in: bidIds } }).lean(),
     M.BidSubmission.find({ bid_id: { $in: bidIds } }).sort({ date_submitted: 1, _id: 1 }).lean(),
   ]);
+  // Self-healing: a 'submitted' bid whose every current submission is
+  // already decided (all not_awarded, none pending, none awarded) should
+  // have flipped to 'not_awarded' the moment the last one was decided —
+  // reconcileBidOutcome() normally does that inline, but an unlucky
+  // ordering of near-simultaneous decisions can leave it stuck. Checking
+  // with the data already loaded above is free; only bids that actually
+  // look stuck trigger reconcileBidOutcome()'s real (rare) DB write.
+  const stuckCandidates = bids.filter(b => {
+    if (b.stage !== 'submitted') return false;
+    const bidSubs = submissions.filter(s => s.bid_id === b._id && s.is_current);
+    if (!bidSubs.length || bidSubs.some(s => s.outcome === 'awarded')) return false;
+    const subCompanyIds = new Set(bidSubs.map(s => s.company_id));
+    const decidedCompanyIds = new Set(bidSubs.filter(s => s.outcome !== 'pending').map(s => s.company_id));
+    const custCompanyIds = bidCustomers.filter(bc => bc.bid_id === b._id).map(bc => bc.company_id);
+    return custCompanyIds.length > 0 && custCompanyIds.every(cid => decidedCompanyIds.has(cid)) && subCompanyIds.size === custCompanyIds.length;
+  });
+  if (stuckCandidates.length) {
+    await Promise.all(stuckCandidates.map(b => reconcileBidOutcome(b._id)));
+    [bids, bidCustomers, submissions] = await Promise.all([
+      M.Bid.find({ project_id: pid }).lean(),
+      M.BidCustomer.find({ bid_id: { $in: bidIds } }).lean(),
+      M.BidSubmission.find({ bid_id: { $in: bidIds } }).sort({ date_submitted: 1, _id: 1 }).lean(),
+    ]);
+  }
   // Walk-through site contacts are pulled in here too, even though they're
   // often for a company that isn't one of the bid's actual customers (e.g. a
   // GC's on-site super rather than the GC's office contact).
@@ -1274,6 +1298,50 @@ async function awardSubmission(submissionId, data, actorId) {
 // ── Submission not awarded — this customer went elsewhere ─────────────────────
 // When ALL of a bid's submissions are not_awarded (none awarded), the bid
 // becomes not_awarded. Otherwise it stays submitted (others still pending).
+// Flips a 'submitted' bid to 'not_awarded' once every customer on it has
+// been decided (none pending, none awarded — an award flips the bid
+// immediately on its own, see awardSubmission, so there's nothing to
+// reconcile once one exists). "Everyone decided" is checked against
+// BidCustomer (every company actually on the bid), not just "no pending
+// row exists in BidSubmission" — a customer added to the bid but never
+// submitted to yet has NO BidSubmission row at all, so it would silently
+// vanish from a submissions-only check and get treated as already-decided.
+// The update's own `stage: 'submitted'` filter makes this safe to call
+// redundantly/concurrently — if two calls race, only the one that still
+// finds the bid in 'submitted' actually flips it (modifiedCount:0 for the
+// other), and safe to call defensively wherever a bid is loaded for
+// display so a bid that somehow missed this transition (e.g. an unlucky
+// ordering of near-simultaneous decisions) self-heals the next time
+// anyone views it instead of staying stuck indefinitely.
+async function reconcileBidOutcome(bidId, actorId) {
+  const M = getModels();
+  const [customers, currentSubs] = await Promise.all([
+    M.BidCustomer.find({ bid_id: bidId }).lean(),
+    M.BidSubmission.find({ bid_id: bidId, is_current: 1 }).lean(),
+  ]);
+  if (!customers.length || currentSubs.some(s => s.outcome === 'awarded')) return;
+  const subByCompany = {}; currentSubs.forEach(s => subByCompany[s.company_id] = s);
+  const everyoneDecided = customers.every(c => {
+    const s = subByCompany[c.company_id];
+    return s && s.outcome !== 'pending';
+  });
+  if (!everyoneDecided) return;
+  const latestNotAwarded = currentSubs.filter(s => s.outcome === 'not_awarded')
+    .sort((a, b) => (b.date_not_awarded || '').localeCompare(a.date_not_awarded || ''))[0];
+  const result = await M.Bid.updateOne({ _id: bidId, stage: 'submitted' }, { $set: {
+    stage: 'not_awarded', date_not_awarded: latestNotAwarded?.date_not_awarded || today(),
+    not_awarded_notes: 'All customers declined.', next_followup_date: null, updated_at: ts(),
+  }});
+  if (result.modifiedCount) {
+    const bid = await M.Bid.findById(bidId).lean();
+    const proj = await M.Project.findById(bid.project_id).lean();
+    await events.safeEmit('bid.stage_changed', {
+      project_id: bid.project_id, bid_id: bidId, actor_id: actorId || null,
+      payload: { from: 'submitted', to: 'not_awarded', project_name: proj?.name || null },
+    });
+  }
+}
+
 async function notAwardSubmission(submissionId, data, actorId) {
   const M = getModels();
   const sub = await loadSubmission(submissionId);
@@ -1286,36 +1354,7 @@ async function notAwardSubmission(submissionId, data, actorId) {
     not_awarded_notes: data.not_awarded_notes || null, next_followup_date: null, updated_at: ts(),
   }});
   await recomputeBidFollowup(bid._id);
-
-  // "Is everyone decided" must be checked against BidCustomer (every company
-  // actually on this bid), not just "no pending row exists in BidSubmission"
-  // — a customer added to the bid but never submitted to yet has NO
-  // BidSubmission row at all, so it would silently vanish from that check
-  // and get treated as already-decided. Real incident: bid had 3 customers,
-  // only 1 had ever been submitted to; marking that one submission
-  // not_awarded flipped the WHOLE bid to not_awarded even though the other
-  // 2 customers had never been submitted to, let alone decided.
-  const [customers, currentSubs] = await Promise.all([
-    M.BidCustomer.find({ bid_id: bid._id }).lean(),
-    M.BidSubmission.find({ bid_id: bid._id, is_current: 1 }).lean(),
-  ]);
-  const subByCompany = {}; currentSubs.forEach(s => subByCompany[s.company_id] = s);
-  const anyAwarded = currentSubs.some(s => s.outcome === 'awarded');
-  const everyoneDecided = customers.length > 0 && customers.every(c => {
-    const s = subByCompany[c.company_id];
-    return s && s.outcome !== 'pending';
-  });
-  if (!anyAwarded && everyoneDecided && bid.stage === 'submitted') {
-    await M.Bid.updateOne({ _id: bid._id }, { $set: {
-      stage: 'not_awarded', date_not_awarded: data.date_not_awarded,
-      not_awarded_notes: 'All customers declined.', next_followup_date: null, updated_at: ts(),
-    }});
-    const proj = await M.Project.findById(bid.project_id).lean();
-    await events.safeEmit('bid.stage_changed', {
-      project_id: bid.project_id, bid_id: bid._id, actor_id: actorId || null,
-      payload: { from: 'submitted', to: 'not_awarded', project_name: proj?.name || null },
-    });
-  }
+  await reconcileBidOutcome(bid._id, actorId);
   return { submission_id: sub._id, bid_id: bid._id };
 }
 

@@ -2660,6 +2660,33 @@ function actEditCO(coId) {
   showForm('✏️ Edit Change Order (admin)', fields, data => api('PATCH', `/api/v2/admin/change_order/${coId}`, data), 'Save Changes');
 }
 
+function findBidForSubmission(subId) {
+  const d = DETAIL_CACHE[OPEN_PROJECT];
+  if (!d) return null;
+  return d.bids.find(b => (b.submissions || []).some(x => x.id === subId)) || null;
+}
+
+// After awarding one customer, offer to close out every other still-pending
+// customer on the same bid as Not Awarded in one step, instead of opening
+// the same form once per remaining customer. Plain confirm() + a loop of
+// the existing not-awarded call, rather than nesting another showForm — the
+// backend has no stage guard on notAwardSubmission, so this is safe to run
+// even though the bid itself already flipped to 'awarded' from the award
+// that just happened.
+async function maybeBatchNotAwardSiblings(awardedSubmissionId, winnerName) {
+  const bid = findBidForSubmission(awardedSubmissionId);
+  if (!bid) return;
+  const siblings = (bid.submissions || []).filter(x => x.is_current && x.outcome === 'pending' && x.id !== awardedSubmissionId);
+  if (!siblings.length) return;
+  const names = siblings.map(x => x.company?.name).filter(Boolean).join(', ');
+  if (!confirm(`Mark the other ${siblings.length} still-pending submission${siblings.length === 1 ? '' : 's'} (${names}) as Not Awarded now?`)) return;
+  for (const sib of siblings) {
+    try {
+      await api('POST', `/api/v2/submissions/${sib.id}/not-awarded`, { date_not_awarded: today, not_awarded_notes: winnerName ? `Lost to ${winnerName}` : null });
+    } catch (e) { alert(`Failed to mark ${sib.company?.name || 'a submission'} not awarded: ${e.message}`); }
+  }
+}
+
 // Award / not-award are PER SUBMISSION (the customer that responded). The
 // company is implied by the submission, so no customer picker is needed.
 function actAwardSubmission(submissionId) {
@@ -2667,7 +2694,10 @@ function actAwardSubmission(submissionId) {
   showForm(`🎉 Awarded — ${esc(s?.company?.name || 'customer')}`, [
     { id: 'award_date', label: 'Award Date', type: 'date', required: true, value: today },
     { id: 'pm_id', label: 'Assign PM (can be set later)', type: 'select', emptyLabel: 'TBD', options: teamOpts(['pm', 'sales', 'estimator']) },
-  ], data => api('POST', `/api/v2/submissions/${submissionId}/award`, data), 'Confirm Awarded', 'green');
+  ], async data => {
+    await api('POST', `/api/v2/submissions/${submissionId}/award`, data);
+    await maybeBatchNotAwardSiblings(submissionId, s?.company?.name);
+  }, 'Confirm Awarded', 'green');
 }
 
 function actNotAwardSubmission(submissionId) {
