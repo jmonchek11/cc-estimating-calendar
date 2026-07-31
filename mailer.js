@@ -352,7 +352,7 @@ function emailWalkthroughReminder(bid, walkthroughDate, walkthroughTime, recipie
   };
 }
 
-function emailDigest(digest) {
+function emailDigest(digest, personal, recipientName) {
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 
   // Pipeline snapshot — counts only for opportunities/active bids/active COs
@@ -408,12 +408,41 @@ function emailDigest(digest) {
       </div>`).join('');
   }
 
+  // Personal section — "what's on my plate" — goes first, above the
+  // company-wide numbers, so the reader's own week is the first thing they
+  // see Monday morning. Only rendered when a per-person digest was passed in
+  // (the admin's on-demand "send test digest" can still call this without
+  // one for a quick company-wide preview).
+  const personalSection = personal ? `
+      <div class="section" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:14px 16px;margin-bottom:20px">
+        <div class="section-title" style="margin-top:0">👋 Your Week${recipientName ? `, ${recipientName.split(' ')[0]}` : ''}</div>
+
+        <div style="font-weight:700;font-size:13px;margin:10px 0 2px">Active Bids (${(personal.activeBids || []).length})</div>
+        ${bidListRows(personal.activeBids, true)}
+
+        <div style="font-weight:700;font-size:13px;margin:10px 0 2px">Your Upcoming Due Dates</div>
+        ${dueDateRows(personal.upcomingDueDates)}
+
+        <div style="font-weight:700;font-size:13px;margin:10px 0 2px">Recently Submitted (last 2 weeks)</div>
+        ${bidListRows(personal.recentlySubmitted, true)}
+
+        ${(personal.awardedThisWeek || []).length ? `
+        <div style="font-weight:700;font-size:13px;margin:10px 0 2px">🎉 You Won This Week</div>
+        ${bidListRows(personal.awardedThisWeek, true)}` : ''}
+
+        <div style="font-weight:700;font-size:13px;margin:10px 0 2px">Your Overdue Follow-ups</div>
+        ${overdueRows(personal.overdueFollowups)}
+      </div>` : '';
+
   return {
     subject: `📊 Weekly Estimating Digest — ${today}`,
     html: base(`
       ${iconHeading(`${APP_URL}/icon-digest.png`, 'Weekly Digest')}
       <p style="color:#64748b">${today}</p>
 
+      ${personalSection}
+
+      ${personal ? '<p style="color:#64748b;font-weight:700;font-size:13px;margin:22px 0 4px">Company-Wide</p>' : ''}
       <div class="section">
         <div class="section-title">Pipeline Snapshot</div>
         <table>

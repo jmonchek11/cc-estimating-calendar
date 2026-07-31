@@ -61,6 +61,8 @@ const BidSchema = new mongoose.Schema({
   due_date:       { type: String, default: null },
   due_time:       { type: String, default: null },               // "HH:MM", 24-hour — optional, independent of due_date
   start_date:     { type: String, default: null },
+  owner_id:       { type: Number, default: null },               // FK → TeamMember — who added this opportunity, for tracking/follow-up
+  source:         { type: String, default: null },                // where it came from (iSqFt, BuildingConnected, referral, email invite location, etc.)
   drawing_stage:  { type: String, default: null },               // "50% budget", "80% budget", "100% CD"…
   drawings:       { type: String, default: null },               // drawing SET description, e.g. "Rev 2 dated 5/1/26 prepared by XYZ Architects" — from the JIS title sheet, distinct from drawing_stage
   notes:          { type: String, default: null },

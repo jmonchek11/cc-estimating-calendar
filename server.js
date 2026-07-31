@@ -247,10 +247,15 @@ app.post('/api/admin/send-digest', async (req, res) => {
   try {
     const actor = await db.getMember(req.session.userId);
     if (!actor?.is_admin) return res.status(403).json({ error: 'Admin only' });
-    const [digest, allUsers] = await Promise.all([db.getDigest(), db.getActiveUserEmails()]);
+    const [digest, allUsers] = await Promise.all([v2db.getDigest(), db.getActiveUserEmails()]);
     const users = allUsers.filter(u => mailer.wantsNotification(u, 'digest'));
-    const { subject, html } = mailer.emailDigest(digest);
-    await mailer.sendMail({ to: users.map(u => u.email), subject, html });
+    // Personalized per recipient (their own bids/due dates/follow-ups up top)
+    // — sent individually rather than one mail-merge blast, both to keep
+    // each person's data private and because the content now differs per user.
+    for (const u of users) {
+      const { subject, html } = mailer.emailDigest(digest, digest.byPersonId?.[u.id], u.name);
+      await mailer.sendMail({ to: u.email, subject, html });
+    }
     res.json({ ok: true, sent_to: users.length });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -892,8 +897,12 @@ cron.schedule('0 6 * * 1', async () => {
     const [digest, allUsers] = await Promise.all([v2db.getDigest(), db.getActiveUserEmails()]);
     const users = allUsers.filter(u => mailer.wantsNotification(u, 'digest'));
     if (!users.length) return console.log('[cron] no users with email — skipping digest');
-    const { subject, html } = mailer.emailDigest(digest);
-    await mailer.sendMail({ to: users.map(u => u.email), subject, html });
+    // Personalized per recipient — see /api/admin/send-digest for why this
+    // is now a per-user loop instead of one shared blast.
+    for (const u of users) {
+      const { subject, html } = mailer.emailDigest(digest, digest.byPersonId?.[u.id], u.name);
+      await mailer.sendMail({ to: u.email, subject, html });
+    }
     console.log(`[cron] weekly digest sent to ${users.length} user(s)`);
   } catch (e) {
     console.error('[cron] digest error:', e.message);

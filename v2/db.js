@@ -244,6 +244,8 @@ async function getProjectDetail(projectId) {
     drawing_stage: b.drawing_stage,
     estimator: tm[b.estimator_id] || null,
     salesperson: tm[b.salesperson_id] || null,
+    owner: tm[b.owner_id] || null,
+    source: b.source,
     sub_estimators: (b.sub_estimators || []).map(s => ({ ...(tm[s.estimator_id] || {}), scope: s.scope })),
     customers: bidCustomers.filter(bc => bc.bid_id === b._id).map(bc => {
       const co = companyById[bc.company_id]; if (!co) return null;
@@ -602,7 +604,7 @@ async function updateSettingsV2(data) {
 
 // ── Opportunity creation ──────────────────────────────────────────────────────
 // Creates a Project (or attaches to an existing one) + an opportunity Bid.
-async function createOpportunity({ project_id, project_name, notes, description, location, due_date, due_time, company_ids, new_companies, contact_ids_by_company, created_by }) {
+async function createOpportunity({ project_id, project_name, notes, description, location, due_date, due_time, owner_id, source, company_ids, new_companies, contact_ids_by_company, created_by }) {
   const M = getModels();
   let pid = project_id ? Number(project_id) : null;
   let isNewProject = false;
@@ -615,7 +617,8 @@ async function createOpportunity({ project_id, project_name, notes, description,
     isNewProject = true;
   }
   const bidId = await nextId('bids');
-  await M.Bid.create({ _id: bidId, project_id: pid, stage: 'opportunity', notes: notes || null, due_date: due_date || null, due_time: due_time || null });
+  const ownerId = owner_id ? Number(owner_id) : (created_by ? Number(created_by) : null);
+  await M.Bid.create({ _id: bidId, project_id: pid, stage: 'opportunity', notes: notes || null, due_date: due_date || null, due_time: due_time || null, owner_id: ownerId, source: source || null });
 
   const companyIds = await resolveCompanyIds(company_ids, new_companies);
   for (const companyId of companyIds) await ensureBidCustomer(bidId, companyId);
@@ -946,6 +949,8 @@ async function updateOpportunity(id, data) {
   const upd = { updated_at: ts() };
   if ('due_date' in data) upd.due_date = data.due_date || null;
   if ('due_time' in data) upd.due_time = data.due_time || null;
+  if ('owner_id' in data) upd.owner_id = data.owner_id ? Number(data.owner_id) : null;
+  if ('source' in data) upd.source = data.source || null;
   if ('estimator_id' in data) upd.estimator_id = data.estimator_id ? Number(data.estimator_id) : null;
   if ('salesperson_id' in data) upd.salesperson_id = data.salesperson_id ? Number(data.salesperson_id) : null;
   await M.Bid.updateOne({ _id: bid._id }, { $set: upd });
@@ -1203,13 +1208,13 @@ const ADMIN_EDITABLE = {
   // setWalkthrough()/POST .../walkthrough, which needs find-or-create logic
   // for the site company/contact that this generic whitelist path can't do.
   bid:            ['bid_number', 'estimator_id', 'salesperson_id', 'date_received', 'due_date', 'due_time', 'start_date',
-                   'drawing_stage', 'notes', 'jurisdiction', 'superseded'],
+                   'drawing_stage', 'notes', 'jurisdiction', 'superseded', 'owner_id', 'source'],
   job:            ['job_number', 'pm_id', 'awarded_company_id', 'award_date'],
   change_order:   ['co_number', 'name', 'due_date', 'start_date', 'estimator_id', 'notes',
-                   'estimate_amount', 'date_submitted', 'approved_by'],
+                   'estimate_amount', 'date_submitted', 'approved_by', 'approval_date'],
   bid_submission: ['company_id', 'amount', 'date_submitted', 'approved_by', 'submission_type', 'notes', 'is_current', 'not_awarded_notes'],
 };
-const NUMERIC_FK = new Set(['estimator_id', 'salesperson_id', 'pm_id', 'awarded_company_id', 'company_id']);
+const NUMERIC_FK = new Set(['estimator_id', 'salesperson_id', 'pm_id', 'awarded_company_id', 'company_id', 'owner_id']);
 
 async function adminUpdate(entity, id, data) {
   const M = getModels();
@@ -1980,6 +1985,7 @@ async function getBidList(stage) {
       id: b._id, project_id: b.project_id, project: pName[b.project_id] || '—',
       bid_number: b.bid_number, stage: b.stage, drawing_stage: b.drawing_stage,
       estimator: tm[b.estimator_id] || null, salesperson: tm[b.salesperson_id] || null,
+      owner: tm[b.owner_id] || null, source: b.source,
       sub_estimators: (b.sub_estimators || []).map(s => ({ ...(tm[s.estimator_id] || {}), scope: s.scope })),
       customers: [...new Set((custByBid[b._id] || []).filter(Boolean))],
       date_received: b.date_received, due_date: b.due_date, due_time: b.due_time,
@@ -1987,6 +1993,7 @@ async function getBidList(stage) {
       estimate_amount: b.estimate_amount, date_submitted: b.date_submitted, next_followup_date: b.next_followup_date,
       award_date: b.award_date, awarded_company: b.awarded_company_id ? coName[b.awarded_company_id] : null,
       job_number: job ? job.job_number : null, pm: job?.pm_id ? tm[job.pm_id] : null,
+      closed_date: b.closed_date, closed_approved_by: b.closed_approved_by, close_reason: b.close_reason,
     };
   });
 }
@@ -2144,9 +2151,28 @@ async function getDigest() {
     return { kind: 'co', bid_id: c._id, project_id: jobProj[c.job_id] || null, project_name: `${c.co_number} — ${c.name}`, bid_number: null, rid: r._id, note: r.note, remind_on: r.remind_on };
   }).filter(Boolean);
 
+  // ── Per-person section — "what's on MY plate", so Monday morning opens
+  // with the reader's own world before the company-wide numbers. Same
+  // "mine" rule used everywhere else (estimator, salesperson, or a
+  // sub-estimator on a broken-out system) — built for every active member
+  // here rather than lazily per-request, since the digest is only ever
+  // generated once a week and the marginal cost per person is small.
+  const byPersonId = {};
+  members.forEach(m => {
+    const mine = (b) => b.estimator_id === m._id || b.salesperson_id === m._id || (b.sub_estimators || []).some(s => s.estimator_id === m._id);
+    const myBids = bids.filter(mine);
+    byPersonId[m._id] = {
+      activeBids: myBids.filter(b => b.stage === 'active_bid').sort((a, b) => (a.due_date || '').localeCompare(b.due_date || '')).map(shapeBid),
+      upcomingDueDates: myBids.filter(b => ['opportunity', 'active_bid', 'submitted'].includes(b.stage) && b.due_date >= todayStr && b.due_date <= monthAhead).sort((a, b) => (a.due_date || '').localeCompare(b.due_date || '')).map(shapeBid),
+      recentlySubmitted: myBids.filter(b => b.date_submitted && b.date_submitted >= twoWeeksAgo && b.date_submitted <= todayStr).sort((a, b) => (b.date_submitted || '').localeCompare(a.date_submitted || '')).map(shapeBid),
+      overdueFollowups: myBids.filter(b => b.stage === 'submitted' && b.next_followup_date && b.next_followup_date < todayStr).sort((a, b) => (a.next_followup_date || '').localeCompare(b.next_followup_date || '')).map(shapeBid),
+      awardedThisWeek: myBids.filter(b => b.stage === 'awarded' && b.award_date >= weekAgo && b.award_date <= todayStr).map(shapeBid),
+    };
+  });
+
   return {
     generatedAt: new Date().toISOString(), weekRange: { from: weekAgo, to: todayStr },
-    pipelineSnapshot, byEstimator, bySalesperson,
+    pipelineSnapshot, byEstimator, bySalesperson, byPersonId,
     newOpportunities, newActiveBids, newActiveCos,
     submittedByEstimator, submittedNoEstimator,
     awardedThisWeek, notAwardedThisWeek,
@@ -2322,7 +2348,18 @@ async function getReports({ from, to, granularity, personId } = {}) {
     })
     .sort((a, b) => (b.growthPct ?? -Infinity) - (a.growthPct ?? -Infinity));
 
-  return { summary, timeSeries, byCustomer, byJob, granularity: gran, from: from || null, to: to || null, person: pid ? (tm[pid]?.name || null) : null };
+  // ── Not-awarded detail list — the summary card only has a count/value;
+  // this backs a "why did we lose these" drill-down with the project name
+  // attached so it's actually actionable, not just a number.
+  const notAwardedList = notAwardedIn
+    .map(b => ({
+      bidId: b._id, bidNumber: b.bid_number, projectId: b.project_id, projectName: pName[b.project_id] || '—',
+      amount: b.estimate_amount, dateNotAwarded: b.date_not_awarded, notes: b.not_awarded_notes,
+      estimator: tm[b.estimator_id]?.name || null,
+    }))
+    .sort((a, b) => (b.dateNotAwarded || '').localeCompare(a.dateNotAwarded || ''));
+
+  return { summary, timeSeries, byCustomer, byJob, notAwardedList, granularity: gran, from: from || null, to: to || null, person: pid ? (tm[pid]?.name || null) : null };
 }
 
 // mineOnly/userId: "My View" (default in the UI) filters every bubble/list to

@@ -219,8 +219,10 @@
       <a class="nav-item" data-page="dashboard" href="#dashboard" onclick="navigate('dashboard');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span> Dashboard</a>
       <a class="nav-item" data-page="digest" href="#digest" onclick="navigate('digest');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="14"/><line x1="12" y1="20" x2="12" y2="8"/><line x1="18" y1="20" x2="18" y2="4"/></svg></span> Weekly Digest</a>
       <a class="nav-item" data-page="calendar" href="#calendar" onclick="navigate('calendar');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span> Calendar</a>
+      <div class="nav-section-label">OPPORTUNITIES</div>
+      <a class="nav-item" data-page="opportunities" href="#opportunities" onclick="navigate('opportunities');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="0.8" fill="currentColor" stroke="none"/></svg></span> Active Opportunities</a>
+      <a class="nav-item" data-page="closed-opportunities" href="#closed-opportunities" onclick="navigate('closed-opportunities');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg></span> Closed Opportunities</a>
       <div class="nav-section-label">BIDS</div>
-      <a class="nav-item" data-page="opportunities" href="#opportunities" onclick="navigate('opportunities');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="0.8" fill="currentColor" stroke="none"/></svg></span> Opportunities</a>
       <a class="nav-item" data-page="active-bids" href="#active-bids" onclick="navigate('active-bids');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 11 14 10 22 21 10 13 10 13 2"/></svg></span> Active Bids</a>
       <a class="nav-item" data-page="submitted-bids" href="#submitted-bids" onclick="navigate('submitted-bids');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="21" y1="3" x2="10" y2="14"/><polygon points="21 3 14 21 10 14 3 10 21 3"/></svg></span> Submitted Bids</a>
       <a class="nav-item" data-page="awarded-bids" href="#awarded-bids" onclick="navigate('awarded-bids');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></span> Awarded Bids</a>
@@ -374,6 +376,7 @@ function navigate(page) {
   if (page === 'health') { VIEW = { name: 'health' }; return showHealth(); }
   if (page === 'history') { VIEW = { name: 'history' }; return renderHistory(); }
   if (page === 'opportunities') { VIEW = { name: 'bidlist', arg: 'opportunity' }; return renderBidList('opportunity'); }
+  if (page === 'closed-opportunities') { VIEW = { name: 'bidlist', arg: 'closed' }; return renderBidList('closed'); }
   if (page === 'active-bids') { VIEW = { name: 'bidlist', arg: 'active_bid' }; return renderBidList('active_bid'); }
   if (page === 'submitted-bids') { VIEW = { name: 'bidlist', arg: 'submitted' }; return renderBidList('submitted'); }
   if (page === 'awarded-bids') { VIEW = { name: 'bidlist', arg: 'awarded' }; return renderBidList('awarded'); }
@@ -773,9 +776,7 @@ function navCalendar(dir) {
 }
 
 function buildCalendarGrid(year, month, items, filter) {
-  const firstDay = new Date(year, month, 1);
   const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const startDOW = firstDay.getDay();
   const pad = n => String(n).padStart(2, '0');
 
   CAL_DAY_MAP = {};
@@ -791,11 +792,23 @@ function buildCalendarGrid(year, month, items, filter) {
     if (filter !== 'followups_only') add(it.walkthrough_date, it, 'walkthrough');
   });
 
-  const headers = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => `<div class="cal-hdr-cell">${d}</div>`).join('');
+  // Office runs Monday–Friday only — weekends are skipped entirely rather
+  // than shown empty, so the grid is a true 5-column work week.
+  const headers = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].map(d => `<div class="cal-hdr-cell">${d}</div>`).join('');
   let cells = '';
-  for (let i = 0; i < startDOW; i++) cells += '<div class="cal-day-empty"></div>';
+  let weekdayCount = 0;
+  let started = false;
 
   for (let d = 1; d <= daysInMonth; d++) {
+    const dow = new Date(year, month, d).getDay();
+    if (dow === 0 || dow === 6) continue; // skip Sat/Sun
+    if (!started) {
+      const leadingEmpty = dow - 1; // Mon(1)->0 … Fri(5)->4
+      for (let i = 0; i < leadingEmpty; i++) cells += '<div class="cal-day-empty"></div>';
+      weekdayCount += leadingEmpty;
+      started = true;
+    }
+    weekdayCount++;
     const ds = `${year}-${pad(month + 1)}-${pad(d)}`;
     const isToday = ds === today;
     const dayItems = CAL_DAY_MAP[ds] || [];
@@ -838,8 +851,8 @@ function buildCalendarGrid(year, month, items, filter) {
       <div class="cal-day-chips">${chips}</div>
     </div>`;
   }
-  const rem = (startDOW + daysInMonth) % 7;
-  if (rem) for (let i = rem; i < 7; i++) cells += '<div class="cal-day-empty"></div>';
+  const rem = weekdayCount % 5;
+  if (rem) for (let i = rem; i < 5; i++) cells += '<div class="cal-day-empty"></div>';
   return `<div class="cal-hdr">${headers}</div><div class="cal-grid">${cells}</div>`;
 }
 
@@ -961,12 +974,31 @@ async function renderDigest() {
     + (d.submittedNoEstimator.length ? `<div style="padding:8px 16px;background:#f8fafc;font-weight:700;font-size:12px;color:var(--text-muted);border-top:1px solid var(--border)">No estimator (${d.submittedNoEstimator.length})</div>${d.submittedNoEstimator.map(b => bidRow(b, false)).join('')}` : '');
   const submittedCount = d.submittedByEstimator.reduce((s,g)=>s+g.bids.length,0) + d.submittedNoEstimator.length;
 
+  const mine = CURRENT_USER ? d.byPersonId?.[CURRENT_USER.id] : null;
+  const personalHtml = mine ? `
+    <div class="card" style="margin-bottom:14px;background:#eff6ff;border:1px solid #bfdbfe">
+      <div style="padding:12px 16px;border-bottom:1px solid #bfdbfe;font-weight:700;font-size:14px">👋 Your Week${CURRENT_USER.name ? `, ${esc(CURRENT_USER.name.split(' ')[0])}` : ''}</div>
+      <div style="padding:12px 16px 16px">
+        <div style="font-weight:700;font-size:12px;color:var(--text-muted);margin-bottom:4px">Active Bids (${mine.activeBids.length})</div>
+        ${mine.activeBids.length ? mine.activeBids.map(b => bidRow(b, false)).join('') : '<div style="color:var(--text-muted);font-size:13px;padding:4px 0 10px">None</div>'}
+        <div style="font-weight:700;font-size:12px;color:var(--text-muted);margin:10px 0 4px">Your Upcoming Due Dates</div>
+        ${mine.upcomingDueDates.length ? mine.upcomingDueDates.map(b => bidRow(b, false)).join('') : '<div style="color:var(--text-muted);font-size:13px;padding:4px 0 10px">None upcoming</div>'}
+        <div style="font-weight:700;font-size:12px;color:var(--text-muted);margin:10px 0 4px">Recently Submitted (last 2 weeks)</div>
+        ${mine.recentlySubmitted.length ? mine.recentlySubmitted.map(b => bidRow(b, false)).join('') : '<div style="color:var(--text-muted);font-size:13px;padding:4px 0 10px">None</div>'}
+        ${mine.awardedThisWeek.length ? `<div style="font-weight:700;font-size:12px;color:var(--text-muted);margin:10px 0 4px">🎉 You Won This Week</div>${mine.awardedThisWeek.map(b => bidRow(b, false)).join('')}` : ''}
+        <div style="font-weight:700;font-size:12px;color:var(--text-muted);margin:10px 0 4px">Your Overdue Follow-ups</div>
+        ${mine.overdueFollowups.length ? mine.overdueFollowups.map(b => bidRow(b, true)).join('') : '<div style="color:#166534;font-size:13px;padding:4px 0">✅ None</div>'}
+      </div>
+    </div>` : '';
+
   main.innerHTML = `
     <div class="page-header">
       <div><div class="page-title">📊 Weekly Digest</div><div class="page-subtitle">${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</div></div>
       <button class="v2-btn outline" onclick="window.print()">🖨 Print</button>
     </div>
 
+    ${personalHtml}
+    ${personalHtml ? '<div style="font-weight:700;font-size:13px;color:var(--text-muted);margin:18px 0 8px">Company-Wide</div>' : ''}
     ${section('📋', 'Pipeline Snapshot', null, pipelineBubbles)}
 
     ${d.upcomingReminders.length ? section('⏰', 'Upcoming Reminders', d.upcomingReminders.length, d.upcomingReminders.map(r => `
@@ -996,7 +1028,8 @@ async function renderDigest() {
 }
 
 const BID_LIST_META = {
-  opportunity: { page: 'opportunities',  title: '🔵 Opportunities', sub: 'considering — not yet bidding' },
+  opportunity: { page: 'opportunities',        title: '🔵 Active Opportunities', sub: 'considering — not yet bidding' },
+  closed:      { page: 'closed-opportunities', title: '⚪ Closed Opportunities', sub: 'declined or called off' },
   active_bid:  { page: 'active-bids',    title: '🟡 Active Bids',   sub: 'estimating in progress' },
   submitted:   { page: 'submitted-bids', title: '📤 Submitted Bids', sub: 'awaiting customer decision' },
   awarded:     { page: 'awarded-bids',   title: '✅ Awarded Bids',  sub: 'won — check job # / PM assignment' },
@@ -1086,6 +1119,8 @@ async function renderBidList(stage) {
     ? [['submitted', 'Recently submitted'], ['followup', 'Follow-up date'], ['due', 'Due date'], ['amount', 'Amount'], ['project', 'Project name']]
     : stage === 'awarded'
     ? [['award', 'Recently awarded'], ['amount', 'Amount'], ['project', 'Project name']]
+    : stage === 'closed'
+    ? [['closed', 'Recently closed'], ['amount', 'Amount'], ['project', 'Project name']]
     : [['due', 'Due date'], ['amount', 'Amount'], ['project', 'Project name']];
   // First time landing on a tab (still on the generic 'due' default), jump
   // to the sort that actually matches what the tab is for — most-recently-
@@ -1093,6 +1128,7 @@ async function renderBidList(stage) {
   // making people pick it every time.
   if (stage === 'submitted' && filterState(stage).sort === 'due') filterState(stage).sort = 'submitted';
   if (stage === 'awarded' && filterState(stage).sort === 'due') filterState(stage).sort = 'award';
+  if (stage === 'closed' && filterState(stage).sort === 'due') filterState(stage).sort = 'closed';
 
   const headerActions = stage === 'active_bid' ? `
       <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -1121,6 +1157,7 @@ function renderBidListBody(stage) {
     followup: (a, b) => (a.next_followup_date || '9999').localeCompare(b.next_followup_date || '9999'),
     submitted: (a, b) => (b.date_submitted || '').localeCompare(a.date_submitted || ''),
     award: (a, b) => (b.award_date || '').localeCompare(a.award_date || ''),
+    closed: (a, b) => (b.closed_date || '').localeCompare(a.closed_date || ''),
     amount: (a, b) => (b.estimate_amount || 0) - (a.estimate_amount || 0),
     project: (a, b) => (a.project || '').localeCompare(b.project || ''),
   };
@@ -1136,6 +1173,17 @@ function renderBidListBody(stage) {
       return `${b.estimate_amount ? `<span class="amount" style="font-size:13px">${fmt$(b.estimate_amount)}</span>` : ''}
         ${b.date_submitted ? `<div style="font-size:11px;color:var(--text-muted)">Sent ${fmtD(b.date_submitted)}</div>` : ''}
         ${b.next_followup_date ? `<div style="font-size:11px;${overdue ? 'color:#dc2626;font-weight:700' : 'color:var(--text-muted)'}">F/U ${fmtD(b.next_followup_date)}${overdue ? ' • OVERDUE' : ''}</div>` : ''}`;
+    }
+    if (stage === 'closed') {
+      return `${b.closed_date ? `<div style="font-size:11px;color:var(--text-muted)">Closed ${fmtD(b.closed_date)}</div>` : ''}
+        ${b.close_reason ? `<div style="font-size:11px;color:var(--text-muted);max-width:220px">${esc(b.close_reason)}</div>` : ''}`;
+    }
+    if (stage === 'opportunity') {
+      return `${b.due_date ? `<div style="font-size:12px;font-weight:700;color:${b.due_date < today ? '#dc2626' : 'var(--text-muted)'};margin-bottom:6px">Due ${fmtD(b.due_date)}${b.due_time ? ' · ' + fmtTimeShort(b.due_time) : ''}</div>` : ''}
+        <div style="display:flex;gap:6px;justify-content:flex-end" onclick="event.stopPropagation()">
+          <button class="v2-btn green" style="padding:4px 10px;font-size:11px" onclick="actStartBid(${b.id})">✓ Bid</button>
+          <button class="v2-btn gray" style="padding:4px 10px;font-size:11px" onclick="actCloseBid(${b.id})">✗ No Bid</button>
+        </div>`;
     }
     return b.due_date ? `<span style="font-size:12px;font-weight:700;color:${b.due_date < today ? '#dc2626' : 'var(--text-muted)'}">Due ${fmtD(b.due_date)}${b.due_time ? ' · ' + fmtTimeShort(b.due_time) : ''}</span>` : '';
   };
@@ -1636,6 +1684,8 @@ function bidNode(b) {
   const dueOverdue = ['opportunity', 'active_bid'].includes(b.stage) && b.due_date && b.due_date < today;
   const metaBits = [];
   if (!b.customers.length) metaBits.push('<span style="color:#dc2626">no customer</span>');
+  if (b.owner) metaBits.push(`Added by ${ini(b.owner)}`);
+  if (b.source) metaBits.push(`via ${esc(b.source)}`);
   if (b.awarded_company) metaBits.push(`Won by <strong style="color:#166534">${esc(b.awarded_company.name)}</strong> ${fmtD(b.award_date)}`);
   if (b.estimator) metaBits.push(`Est. ${ini(b.estimator)}`);
   b.sub_estimators.forEach(s => metaBits.push(`${ini(s)}<span style="font-size:10px">${esc(s.scope)}<a href="#" onclick="event.preventDefault();actRemoveSubEstimator(${b.id},${s.id},'${escJs(s.scope)}')" style="color:#dc2626;margin-left:2px">✕</a></span>`));
@@ -1866,7 +1916,9 @@ function coNode(co) {
     </div>`;
 }
 
-const CO_EDITABLE_STAGES = ['active_co', 'submitted_co'];
+// Data-cleanup corrections need to reach approved COs too — pricing/scope
+// entered wrong doesn't stop being wrong just because the CO got approved.
+const CO_EDITABLE_STAGES = ['active_co', 'submitted_co', 'approved'];
 
 function coActions(co) {
   let workflow = '';
@@ -2259,6 +2311,8 @@ async function actNewOpportunity() {
   showForm('💡 New Opportunity', [
     { id: 'project_id', label: 'Project', type: 'project', multi: false, required: true,
       newKey: 'project_name', options: projectOpts(), placeholder: 'Type project name…' },
+    { id: 'owner_id', label: 'Opportunity Owner', type: 'select', required: true, options: teamOpts(), value: CURRENT_USER?.id },
+    { id: 'source', label: 'Source (where did this come from?)', type: 'text', placeholder: 'iSqFt, BuildingConnected, email invite, referral, phone call…' },
     { id: 'description', label: 'Project Description', type: 'textarea', placeholder: 'Brief description of the scope of work…' },
     { id: 'location', label: 'Location', type: 'text', placeholder: 'City, State or site address…' },
     { id: 'due_date', label: 'Due Date', type: 'date' },
@@ -2438,6 +2492,8 @@ function actEditBid(bidId) {
       { id: 'due_time', label: 'Due Time (optional)', type: 'time', value: b.due_time },
       { id: 'start_date', label: 'Start Date', type: 'date', value: b.start_date },
       { id: 'drawing_stage', label: 'Drawing Stage', type: 'text', value: b.drawing_stage },
+      { id: 'owner_id', label: 'Opportunity Owner', type: 'select', emptyLabel: 'TBD', options: teamOpts(), value: b.owner?.id },
+      { id: 'source', label: 'Source (where did this come from?)', type: 'text', value: b.source, placeholder: 'iSqFt, BuildingConnected, email invite, referral, phone call…' },
     );
     // Walk-through has its own dedicated action (🚶 button in the actions row,
     // plus a visible line on the bid card) rather than living buried in here —
@@ -2658,12 +2714,15 @@ function actEditCO(coId) {
     { id: 'estimator_id', label: 'Estimator', type: 'select', emptyLabel: 'TBD', options: teamOpts(['estimator']), value: co.estimator?.id },
     { id: 'notes', label: 'Notes', type: 'textarea', value: co.notes },
   ];
-  if (co.stage === 'submitted_co') {
+  if (co.stage === 'submitted_co' || co.stage === 'approved') {
     fields.push(
       { id: 'estimate_amount', label: 'CO Estimate $', type: 'currency', value: co.estimate_amount },
       { id: 'date_submitted', label: 'Date Submitted', type: 'date', value: co.date_submitted },
       { id: 'approved_by', label: 'Approved By', type: 'select', value: co.approved_by, options: nameOpts(['estimator', 'sales', 'pm']) },
     );
+  }
+  if (co.stage === 'approved') {
+    fields.push({ id: 'approval_date', label: 'Date Approved', type: 'date', value: co.approval_date });
   }
   showForm('✏️ Edit Change Order (admin)', fields, data => api('PATCH', `/api/v2/admin/change_order/${coId}`, data), 'Save Changes');
 }
@@ -2733,6 +2792,8 @@ function actEditOpportunityDetails(bidId) {
   showForm('📅 Opportunity Details', [
     { id: 'due_date', label: 'Due Date (decision expected)', type: 'date', value: b.due_date },
     { id: 'due_time', label: 'Due Time (optional)', type: 'time', value: b.due_time },
+    { id: 'owner_id', label: 'Opportunity Owner', type: 'select', emptyLabel: 'TBD', options: teamOpts(), value: b.owner?.id },
+    { id: 'source', label: 'Source (where did this come from?)', type: 'text', value: b.source, placeholder: 'iSqFt, BuildingConnected, email invite, referral, phone call…' },
     { id: 'estimator_id', label: 'Estimator (if known)', type: 'select', emptyLabel: 'TBD', options: teamOpts(['estimator']), value: b.estimator?.id },
     { id: 'salesperson_id', label: 'Salesperson', type: 'select', emptyLabel: 'TBD', options: teamOpts(['sales']), value: b.salesperson?.id },
   ], data => api('PATCH', `/api/v2/bids/${bidId}/opportunity`, data), 'Save');
@@ -3335,6 +3396,12 @@ function renderVendorsBody() {
 // the user still reviews, attaches plans, and hits send in Outlook.
 let RFQ_STATE = { vendors: [], bid: null };
 let RFQ_BID_RESULTS = [];
+function timeGreeting() {
+  const h = new Date().getHours();
+  if (h < 12) return 'Good morning';
+  if (h < 17) return 'Good afternoon';
+  return 'Good evening';
+}
 function rfqDefaultSubject(bid) {
   return bid ? `RFQ – ${bid.project}${bid.bid_number ? ' – ' + bid.bid_number : ''}` : 'Request for Quote';
 }
@@ -3344,7 +3411,7 @@ function rfqDefaultBody(bid) {
   // getSearchResults' vendor_due_date) — time to actually work their quotes
   // into the bid, not the same day we have to submit.
   const due = bid && bid.vendor_due_date ? fmtD(bid.vendor_due_date) : '[DUE DATE]';
-  return `Good afternoon,\n\nCould you provide pricing for the attached plans/specs for ${project}? Plans & specs: [ADD LINK OR ATTACH FILES]\n\nI would need a quote back by ${due}.\n\nLet me know if there are any questions.\n\nThanks!\n${CURRENT_USER?.name || ''}`;
+  return `${timeGreeting()},\n\nCould you provide pricing for the attached plans/specs for ${project}? Plans & specs: [ADD LINK OR ATTACH FILES]\n\nI would need a quote back by ${due}.\n\nLet me know if there are any questions.\n\nThanks!\n${CURRENT_USER?.name || ''}`;
 }
 function openRfqModal() {
   const vendors = VENDORS_STATE.rows.filter(c => VENDORS_STATE.selected.has(c.id) && c.email);
@@ -3516,6 +3583,13 @@ function renderContactsBody() {
 // in getReports() (v2/db.js); this page is just filters + Chart.js. ────────
 let REPORTS_STATE = { preset: 'ytd', from: null, to: null, granularity: 'month', personId: '' };
 let REPORTS_CHARTS = {};
+let REPORTS_DATA = null;
+let REPORTS_SHOW_NOT_AWARDED = false;
+function toggleReportsNotAwarded() {
+  REPORTS_SHOW_NOT_AWARDED = !REPORTS_SHOW_NOT_AWARDED;
+  if (REPORTS_DATA) renderReportsBody(REPORTS_DATA);
+  if (REPORTS_SHOW_NOT_AWARDED) setTimeout(() => document.getElementById('rp-not-awarded')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+}
 
 function reportsRangeForPreset(preset) {
   const now = new Date(today + 'T00:00:00Z');
@@ -3612,7 +3686,8 @@ async function loadReportsData() {
   renderReportsBody(data);
 }
 function renderReportsBody(data) {
-  const { summary, timeSeries, byCustomer, byJob } = data;
+  REPORTS_DATA = data;
+  const { summary, timeSeries, byCustomer, byJob, notAwardedList } = data;
   const card = (label, value, sub, color) => `
     <div class="stat-card" style="flex:1;min-width:118px">
       <div style="font-size:20px;font-weight:800${color ? `;color:${color}` : ''}">${value}</div>
@@ -3627,7 +3702,7 @@ function renderReportsBody(data) {
       ${card('Active Bids', summary.activeBids.count)}
       ${card('Submitted', summary.submitted.count, fmt$(summary.submitted.value))}
       ${card('Awarded', summary.awarded.count, fmt$(summary.awarded.value), '#166534')}
-      ${card('Not Awarded', summary.notAwarded.count, null, '#dc2626')}
+      <div onclick="toggleReportsNotAwarded()" style="cursor:pointer;flex:1;min-width:118px">${card('Not Awarded', summary.notAwarded.count, null, '#dc2626')}</div>
       ${card('Still Pending', summary.pending.count, null, '#92400e')}
       ${card('Closed', summary.closed.count, null, 'var(--text-muted)')}
       ${card('Win Rate', summary.winRate == null ? '—' : summary.winRate + '%')}
@@ -3645,11 +3720,20 @@ function renderReportsBody(data) {
       ${byCustomer.length ? `<div style="height:${Math.max(180, Math.min(byCustomer.length, 10) * 34)}px;margin-bottom:16px"><canvas id="rp-chart-customer"></canvas></div>` : ''}
       <div style="overflow-x:auto">${byCustomerTableHtml(byCustomer)}</div>
     </div>
-    <div class="card" style="padding:16px">
+    <div class="card" style="padding:16px;margin-bottom:16px">
       <div style="font-weight:700;font-size:13px;margin-bottom:4px">By Job — Lessons Learned</div>
       <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Approved change-order dollars as a share of the original awarded bid — which jobs grew in scope after award.</div>
       <div style="overflow-x:auto">${byJobTableHtml(byJob)}</div>
-    </div>`;
+    </div>
+    ${REPORTS_SHOW_NOT_AWARDED ? `
+    <div class="card" id="rp-not-awarded" style="padding:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+        <div style="font-weight:700;font-size:13px">Not Awarded — Detail</div>
+        <button class="v2-btn outline" style="padding:4px 10px;font-size:11px" onclick="toggleReportsNotAwarded()">Hide</button>
+      </div>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Every bid that lost in this range, with the project it belongs to — click a row to open the project.</div>
+      <div style="overflow-x:auto">${notAwardedTableHtml(notAwardedList)}</div>
+    </div>` : ''}`;
 
   Object.values(REPORTS_CHARTS).forEach(c => c.destroy());
   REPORTS_CHARTS = {};
@@ -3731,6 +3815,29 @@ function byJobTableHtml(rows) {
         <td style="padding:6px 10px;text-align:right">${fmt$(j.originalAmount)}</td>
         <td style="padding:6px 10px;text-align:right">${j.approvedCoCount} · ${fmt$(j.approvedCoTotal)}</td>
         <td style="padding:6px 10px;text-align:right;font-weight:700;color:${j.growthPct > 15 ? '#dc2626' : j.growthPct > 0 ? '#92400e' : 'var(--text-muted)'}">${j.growthPct == null ? '—' : j.growthPct + '%'}</td>
+      </tr>`).join('')}</tbody>
+  </table>`;
+}
+
+function notAwardedTableHtml(rows) {
+  if (!rows.length) return '<div style="color:var(--text-muted);font-size:13px;padding:12px 0;text-align:center">No not-awarded bids in this range.</div>';
+  return `<table style="width:100%;border-collapse:collapse;font-size:13px">
+    <thead><tr style="border-bottom:1px solid var(--border)">
+      <th style="text-align:left;padding:6px 10px;color:var(--text-muted);font-size:11px">Bid #</th>
+      <th style="text-align:left;padding:6px 10px;color:var(--text-muted);font-size:11px">Project</th>
+      <th style="text-align:left;padding:6px 10px;color:var(--text-muted);font-size:11px">Estimator</th>
+      <th style="text-align:right;padding:6px 10px;color:var(--text-muted);font-size:11px">Amount</th>
+      <th style="text-align:right;padding:6px 10px;color:var(--text-muted);font-size:11px">Date</th>
+      <th style="text-align:left;padding:6px 10px;color:var(--text-muted);font-size:11px">Notes</th>
+    </tr></thead>
+    <tbody>${rows.map(r => `
+      <tr style="border-bottom:1px solid #f1f5f9;cursor:pointer" onclick="renderProjectPage(${r.projectId})">
+        <td style="padding:6px 10px">${esc(r.bidNumber || '—')}</td>
+        <td style="padding:6px 10px">${esc(r.projectName)}</td>
+        <td style="padding:6px 10px">${esc(r.estimator || '—')}</td>
+        <td style="padding:6px 10px;text-align:right">${r.amount ? fmt$(r.amount) : '—'}</td>
+        <td style="padding:6px 10px;text-align:right">${r.dateNotAwarded ? fmtD(r.dateNotAwarded) : '—'}</td>
+        <td style="padding:6px 10px;color:var(--text-muted)">${esc(r.notes || '')}</td>
       </tr>`).join('')}</tbody>
   </table>`;
 }
@@ -4250,11 +4357,17 @@ async function openOnlinePanel() {
 }
 
 // ── Ideas / Issues — reuses v1's /api/ideas (global) ─────────────────────
+// Keys must match the nav's data-page/hash values exactly (see the sidebar
+// <a> tags and the navigate() switch) — the "Related to" dropdown defaults
+// to whatever page you're on, but only if it has an entry here. Add a new
+// entry any time a new top-level page/hash is added, or it'll silently fall
+// back to "General / Not page-specific".
 const IDEA_PAGE_NAMES = {
   dashboard: 'Dashboard', digest: 'Weekly Digest', calendar: 'Calendar',
-  opportunities: 'Opportunities', 'active-bids': 'Active Bids', 'submitted-bids': 'Submitted Bids', 'awarded-bids': 'Awarded Bids',
+  opportunities: 'Active Opportunities', 'closed-opportunities': 'Closed Opportunities',
+  'active-bids': 'Active Bids', 'submitted-bids': 'Submitted Bids', 'awarded-bids': 'Awarded Bids',
   'active-cos': 'Active Change Orders', 'submitted-cos': 'Submitted Change Orders',
-  projects: 'Projects', contacts: 'Contacts', health: 'Data Health', history: 'History',
+  projects: 'Projects', contacts: 'Contacts', vendors: 'Vendors', reports: 'Reports', health: 'Data Health', history: 'History',
   settings: 'Settings', ideas: 'Ideas & Issues',
 };
 // Visible to everyone (not just admins) — the whole point of voting is that
