@@ -247,23 +247,41 @@ router.post('/api/v2/bids/:id/reactivate',    t(req => v2db.reactivateBid(req.pa
   async (req) => ({ action: 'bid.reactivate', summary: `Reactivated bid ${await v2db.bidLabel(req.params.id)} for a new round`, entity_type: 'bid', entity_id: Number(req.params.id) })));
 router.post('/api/v2/bids/:id/customers',     t(req => v2db.addBidCustomers(req.params.id, req.body, req.session.userId),
   async (req) => ({ action: 'bid.add_customers', summary: `Added customer(s) to bid ${await v2db.bidLabel(req.params.id)}`, entity_type: 'bid', entity_id: Number(req.params.id) })));
-// Its own dedicated action, not the generic admin PATCH — setWalkthrough
-// needs find-or-create logic for the site company/contact that the generic
+// A bid can have several walk-throughs — its own dedicated add/update/remove
+// actions, not the generic admin PATCH, since scheduling one needs
+// find-or-create logic for the site company/contact that the generic
 // whitelist path can't do. Same permission rule as requireAdminOrAssigned
 // (admin, or the bid's own assigned estimator/salesperson), inlined here
-// since that middleware reads req.params.entity, which this route doesn't have.
-router.post('/api/v2/bids/:id/walkthrough',   t(async req => {
-    const oldBid = await v2db.loadBid(req.params.id).catch(() => null);
-    const actor = await actorOf(req);
-    const allowed = actor?.is_admin || (oldBid && actor && (oldBid.estimator_id === actor.id || oldBid.salesperson_id === actor.id));
-    if (!allowed) throw new Error('Only an admin or this bid\'s assigned estimator/salesperson can set its walk-through');
-    const r = await v2db.setWalkthrough(req.params.id, req.body, req.session.userId);
-    const dateChanged = (req.body.walkthrough_date || null) !== (oldBid?.walkthrough_date || null);
-    const timeChanged = (req.body.walkthrough_time || null) !== (oldBid?.walkthrough_time || null);
-    if ((dateChanged || timeChanged) && req.body.walkthrough_date) notify.notifyWalkthroughSet(Number(req.params.id), req.session.userId);
+// since that middleware reads req.params.entity, which these routes don't have.
+async function requireBidAssignedOrAdmin(req) {
+  const bid = await v2db.loadBid(req.params.id).catch(() => null);
+  const actor = await actorOf(req);
+  const allowed = actor?.is_admin || (bid && actor && (bid.estimator_id === actor.id || bid.salesperson_id === actor.id));
+  if (!allowed) throw new Error('Only an admin or this bid\'s assigned estimator/salesperson can manage its walk-throughs');
+  return bid;
+}
+router.post('/api/v2/bids/:id/walkthroughs',   t(async req => {
+    await requireBidAssignedOrAdmin(req);
+    const r = await v2db.addWalkthrough(req.params.id, req.body, req.session.userId);
+    if (req.body.date) notify.notifyWalkthroughSet(Number(req.params.id), r.walkthrough_id, req.session.userId);
     return r;
   },
-  async (req) => ({ action: 'bid.set_walkthrough', summary: `Set walk-through for bid ${await v2db.bidLabel(req.params.id)}`, entity_type: 'bid', entity_id: Number(req.params.id) })));
+  async (req) => ({ action: 'bid.add_walkthrough', summary: `Added a walk-through for bid ${await v2db.bidLabel(req.params.id)}`, entity_type: 'bid', entity_id: Number(req.params.id) })));
+router.patch('/api/v2/bids/:id/walkthroughs/:wid', t(async req => {
+    const oldBid = await requireBidAssignedOrAdmin(req);
+    const oldW = oldBid?.walkthroughs?.find(w => w._id === Number(req.params.wid));
+    const r = await v2db.updateWalkthrough(req.params.id, req.params.wid, req.body, req.session.userId);
+    const dateChanged = (req.body.date || null) !== (oldW?.date || null);
+    const timeChanged = (req.body.time || null) !== (oldW?.time || null);
+    if ((dateChanged || timeChanged) && req.body.date) notify.notifyWalkthroughSet(Number(req.params.id), Number(req.params.wid), req.session.userId);
+    return r;
+  },
+  async (req) => ({ action: 'bid.update_walkthrough', summary: `Updated a walk-through for bid ${await v2db.bidLabel(req.params.id)}`, entity_type: 'bid', entity_id: Number(req.params.id) })));
+router.delete('/api/v2/bids/:id/walkthroughs/:wid', t(async req => {
+    await requireBidAssignedOrAdmin(req);
+    return v2db.removeWalkthrough(req.params.id, req.params.wid);
+  },
+  async (req) => ({ action: 'bid.remove_walkthrough', summary: `Removed a walk-through from bid ${await v2db.bidLabel(req.params.id)}`, entity_type: 'bid', entity_id: Number(req.params.id) })));
 router.patch('/api/v2/bids/:id/opportunity',  t(async req => {
     const oldBid = await v2db.loadBid(req.params.id).catch(() => null);
     const r = await v2db.updateOpportunity(req.params.id, req.body);
@@ -329,7 +347,16 @@ router.post('/api/v2/bid-customers/:id/contacts',              t(req => v2db.add
 router.delete('/api/v2/bid-customers/:id/contacts/:contactId', t(req => v2db.removeBidCustomerContact(req.params.id, req.params.contactId)));
 
 // ── Follow-ups (bid_submission or change_order parent) ────────────────────────
-router.post('/api/v2/followups',              t(req => v2db.logFollowupV2({ ...req.body, contacted_by: req.body.contacted_by || req.session.userId })));
+router.post('/api/v2/followups', async (req, res) => {
+  try {
+    const contacted_by = req.body.contacted_by || req.session.userId;
+    const result = await v2db.logFollowupV2({ ...req.body, contacted_by });
+    res.json(result);
+    // fire-and-forget — a mail failure must never affect the follow-up itself
+    notify.notifyFollowup(req.body.parent_type, req.body.parent_id,
+      { notes: req.body.notes, next_followup_date: result.next_followup_date }, contacted_by).catch(() => {});
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
 router.patch('/api/v2/followups/:id',          t(req => v2db.updateFollowup(req.params.id, req.body, req.session.userId),
   (req) => ({ action: 'followup.edit', summary: `Corrected a follow-up entry (#${req.params.id})`, entity_type: 'followup', entity_id: Number(req.params.id) })));
 

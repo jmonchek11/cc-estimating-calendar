@@ -210,7 +210,7 @@ async function getProjectDetail(projectId) {
   // Walk-through site contacts are pulled in here too, even though they're
   // often for a company that isn't one of the bid's actual customers (e.g. a
   // GC's on-site super rather than the GC's office contact).
-  const allContactIds = [...new Set([...bidCustomers.flatMap(bc => bc.contact_ids || []), ...bids.map(b => b.walkthrough_contact_id).filter(Boolean)])];
+  const allContactIds = [...new Set([...bidCustomers.flatMap(bc => bc.contact_ids || []), ...bids.flatMap(b => (b.walkthroughs || []).map(w => w.contact_id)).filter(Boolean)])];
   const contacts = allContactIds.length ? await M.Contact.find({ _id: { $in: allContactIds } }).lean() : [];
   const contactById = {}; contacts.forEach(c => { contactById[c._id] = fmtContactBrief(c); });
   const allReminders = await M.Reminder.find({
@@ -255,10 +255,11 @@ async function getProjectDetail(projectId) {
     date_received: b.date_received,
     due_date: b.due_date,
     due_time: b.due_time,
-    walkthrough_date: b.walkthrough_date,
-    walkthrough_time: b.walkthrough_time,
-    walkthrough_company: companyById[b.walkthrough_company_id] || null,
-    walkthrough_contact: contactById[b.walkthrough_contact_id] || null,
+    walkthroughs: (b.walkthroughs || []).map(w => ({
+      id: w._id, date: w.date, time: w.time,
+      company: companyById[w.company_id] || null,
+      contact: contactById[w.contact_id] || null,
+    })).sort((x, y) => (x.date || '9999').localeCompare(y.date || '9999') || (x.time || '99:99').localeCompare(y.time || '99:99')),
     estimate_amount: b.estimate_amount,
     jurisdiction: b.jurisdiction,
     date_submitted: b.date_submitted,
@@ -1204,9 +1205,10 @@ async function reactivateBid(id, data, actorId) {
 const ADMIN_EDITABLE = {
   project:        ['name'],
   company:        ['name', 'city', 'state'],
-  // Walk-through fields are NOT here — they go through the dedicated
-  // setWalkthrough()/POST .../walkthrough, which needs find-or-create logic
-  // for the site company/contact that this generic whitelist path can't do.
+  // Walk-throughs are NOT here — they go through the dedicated add/update/
+  // remove walk-through endpoints, which need find-or-create logic for the
+  // site company/contact (and array-entry targeting) this generic whitelist
+  // path can't do.
   bid:            ['bid_number', 'estimator_id', 'salesperson_id', 'date_received', 'due_date', 'due_time', 'start_date',
                    'drawing_stage', 'notes', 'jurisdiction', 'superseded', 'owner_id', 'source'],
   job:            ['job_number', 'pm_id', 'awarded_company_id', 'award_date'],
@@ -1516,10 +1518,11 @@ async function markReminderEmailed(id) {
 // name+phone becomes a new Contact under that company) — not free text,
 // so it's a real record other features (Contacts list, company profile)
 // can also see, not something only this one bid knows about.
-async function setWalkthrough(id, data, actorId) {
+// A bid can have several walk-throughs (different companies/dates/times) —
+// each is its own array entry with its own id, rather than a single set of
+// fields on the bid, so scheduling one doesn't overwrite another.
+async function resolveWalkthroughCompanyContact(data) {
   const M = getModels();
-  const bid = await loadBid(id);
-
   let companyId = data.company_id ? Number(data.company_id) : null;
   if (!companyId && data.new_company) companyId = await resolveCompanyByName(data.new_company);
 
@@ -1533,44 +1536,83 @@ async function setWalkthrough(id, data, actorId) {
       phone: data.new_contact_phone || null, email: null, active: 1,
     });
   }
+  return { companyId, contactId };
+}
 
-  const upd = {
-    walkthrough_date: data.walkthrough_date || null,
-    walkthrough_time: data.walkthrough_time || null,
-    walkthrough_company_id: companyId,
-    walkthrough_contact_id: contactId,
-    updated_at: ts(),
+async function addWalkthrough(id, data, actorId) {
+  const M = getModels();
+  const bid = await loadBid(id);
+  const { companyId, contactId } = await resolveWalkthroughCompanyContact(data);
+  const wid = await nextId('walkthroughs');
+  const entry = {
+    _id: wid, date: data.date || null, time: data.time || null,
+    company_id: companyId, contact_id: contactId, reminder_sent: false,
   };
-  // A rescheduled (or newly set) walk-through needs its own fresh 24h-before
-  // reminder — otherwise the old date's "already sent" flag would silently
-  // suppress the reminder for the new date/time.
-  if (upd.walkthrough_date !== bid.walkthrough_date || upd.walkthrough_time !== bid.walkthrough_time) {
-    upd.walkthrough_reminder_sent = false;
-  }
-  await M.Bid.updateOne({ _id: bid._id }, { $set: upd });
+  await M.Bid.updateOne({ _id: bid._id }, { $push: { walkthroughs: entry }, $set: { updated_at: ts() } });
+  return { bid_id: bid._id, walkthrough_id: wid };
+}
+
+async function updateWalkthrough(bidId, walkthroughId, data, actorId) {
+  const M = getModels();
+  const bid = await loadBid(bidId);
+  const wid = Number(walkthroughId);
+  const existing = (bid.walkthroughs || []).find(w => w._id === wid);
+  if (!existing) throw new Error('Walk-through not found');
+  const { companyId, contactId } = await resolveWalkthroughCompanyContact(data);
+  const newDate = data.date || null, newTime = data.time || null;
+  // A rescheduled walk-through needs its own fresh 24h-before reminder —
+  // otherwise the old date's "already sent" flag would silently suppress
+  // the reminder for the new date/time.
+  const reminderSent = (newDate !== existing.date || newTime !== existing.time) ? false : existing.reminder_sent;
+  await M.Bid.updateOne(
+    { _id: bid._id, 'walkthroughs._id': wid },
+    { $set: {
+      'walkthroughs.$.date': newDate, 'walkthroughs.$.time': newTime,
+      'walkthroughs.$.company_id': companyId, 'walkthroughs.$.contact_id': contactId,
+      'walkthroughs.$.reminder_sent': reminderSent, updated_at: ts(),
+    }}
+  );
+  return { bid_id: bid._id, walkthrough_id: wid };
+}
+
+async function removeWalkthrough(bidId, walkthroughId) {
+  const M = getModels();
+  const bid = await loadBid(bidId);
+  const wid = Number(walkthroughId);
+  await M.Bid.updateOne({ _id: bid._id }, { $pull: { walkthroughs: { _id: wid } }, $set: { updated_at: ts() } });
   return { bid_id: bid._id };
 }
 
-// For the hourly walk-through-reminder cron — bids whose walk-through falls
-// in the 24-to-25-hours-from-now window (a 1-hour bucket, matching the
-// cron's own cadence, so nothing gets checked twice or skipped between runs).
-// Needs both date AND time set: a walk-through with no time has nothing to
-// be "24 hours before" of, so it's excluded rather than guessed at.
+// For the hourly walk-through-reminder cron — walk-through entries whose
+// date/time fall in the 24-to-25-hours-from-now window (a 1-hour bucket,
+// matching the cron's own cadence, so nothing gets checked twice or skipped
+// between runs). Needs both date AND time set: a walk-through with no time
+// has nothing to be "24 hours before" of, so it's excluded rather than
+// guessed at. Returns one {bid, walkthrough} pair per due entry — a bid with
+// two walk-throughs due at different times gets reminded about each separately.
 async function getBidsNeedingWalkthroughReminder() {
   const M = getModels();
   const candidates = await M.Bid.find({
-    walkthrough_date: { $ne: null }, walkthrough_time: { $ne: null },
-    walkthrough_reminder_sent: { $ne: true }, superseded: { $ne: 1 },
+    walkthroughs: { $elemMatch: { date: { $ne: null }, time: { $ne: null }, reminder_sent: { $ne: true } } },
+    superseded: { $ne: 1 },
   }).lean();
   const now = Date.now();
-  return candidates.filter(b => {
-    const hoursUntil = (etWallClockToUTCms(b.walkthrough_date, b.walkthrough_time) - now) / 3600000;
-    return hoursUntil <= 24 && hoursUntil > 23;
-  });
+  const out = [];
+  for (const bid of candidates) {
+    for (const w of (bid.walkthroughs || [])) {
+      if (!w.date || !w.time || w.reminder_sent) continue;
+      const hoursUntil = (etWallClockToUTCms(w.date, w.time) - now) / 3600000;
+      if (hoursUntil <= 24 && hoursUntil > 23) out.push({ bid, walkthrough: w });
+    }
+  }
+  return out;
 }
-async function markWalkthroughReminderSent(bidId) {
+async function markWalkthroughReminderSent(bidId, walkthroughId) {
   const M = getModels();
-  await M.Bid.updateOne({ _id: Number(bidId) }, { $set: { walkthrough_reminder_sent: true, updated_at: ts() } });
+  await M.Bid.updateOne(
+    { _id: Number(bidId), 'walkthroughs._id': Number(walkthroughId) },
+    { $set: { 'walkthroughs.$.reminder_sent': true, updated_at: ts() } }
+  );
 }
 
 // Notes — dateless, freeform, append-only log on a bid/opportunity or change
@@ -1989,7 +2031,7 @@ async function getBidList(stage) {
       sub_estimators: (b.sub_estimators || []).map(s => ({ ...(tm[s.estimator_id] || {}), scope: s.scope })),
       customers: [...new Set((custByBid[b._id] || []).filter(Boolean))],
       date_received: b.date_received, due_date: b.due_date, due_time: b.due_time,
-      walkthrough_date: b.walkthrough_date, walkthrough_time: b.walkthrough_time,
+      walkthroughs: (b.walkthroughs || []).map(w => ({ id: w._id, date: w.date, time: w.time })),
       estimate_amount: b.estimate_amount, date_submitted: b.date_submitted, next_followup_date: b.next_followup_date,
       award_date: b.award_date, awarded_company: b.awarded_company_id ? coName[b.awarded_company_id] : null,
       job_number: job ? job.job_number : null, pm: job?.pm_id ? tm[job.pm_id] : null,
@@ -2871,7 +2913,7 @@ module.exports = {
   createChangeOrder, submitCO, approveCO, notApproveCO, voidCO, reopenCO, reviseCO,
   _norm, resolveCompanyByName, ensureBidCustomer, teamMap,
   addReminder, dismissReminder, deleteReminder, getRemindersFor, getDueReminders, markReminderEmailed,
-  setWalkthrough, getBidsNeedingWalkthroughReminder, markWalkthroughReminderSent,
+  addWalkthrough, updateWalkthrough, removeWalkthrough, getBidsNeedingWalkthroughReminder, markWalkthroughReminderSent,
   addNote, deleteNote, getNotesFor,
   getDigest,
   getTeamV2, createTeamMemberV2, updateTeamMemberV2, updateMyNotificationPrefs, updateSettingsV2, getSettings,

@@ -254,6 +254,23 @@
 <script>
 const fmt$ = n => n == null ? '' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
 const fmtD = d => { if (!d) return ''; const [y,m,dd] = d.split('-'); return `${Number(m)}/${Number(dd)}/${String(y).slice(2)}`; };
+// Calendar-day difference between two "YYYY-MM-DD" strings, parsed as UTC
+// noon (not midnight) so DST transitions in between can't shift the count
+// by a day — a due date is a calendar date, not a moment in time.
+function daysBetween(dateStr, fromStr) {
+  const a = new Date(dateStr + 'T12:00:00Z');
+  const b = new Date(fromStr + 'T12:00:00Z');
+  return Math.round((a - b) / 86400000);
+}
+function daysUntilLabel(dateStr) {
+  if (!dateStr) return '';
+  const n = daysBetween(dateStr, today);
+  if (n === 0) return 'Due today';
+  if (n === 1) return '1 day left';
+  if (n > 1) return `${n} days left`;
+  if (n === -1) return '1 day overdue';
+  return `${-n} days overdue`;
+}
 // Activity log `ts` is stored as a naive "YYYY-MM-DD HH:MM:SS" UTC string (no
 // offset marker) — must be explicitly parsed as UTC, then rendered in the
 // office's timezone (America/New_York), 12hr clock, or it silently drifts by
@@ -711,7 +728,7 @@ async function fetchCalendarItems(mineOnly) {
     api('GET', '/api/v2/co-list?stage=active_co'), api('GET', '/api/v2/co-list?stage=submitted_co'),
   ]);
   let items = [
-    ...[...opp, ...active, ...sub].map(b => ({ kind: 'bid', id: b.id, project_id: b.project_id, title: b.project, label: b.bid_number, due_date: b.due_date, due_time: b.due_time, next_followup_date: b.next_followup_date, walkthrough_date: b.walkthrough_date, walkthrough_time: b.walkthrough_time, estimator: b.estimator, salesperson: b.salesperson, sub_estimators: b.sub_estimators || [], customer: (b.customers || []).join(', '), stage: b.stage })),
+    ...[...opp, ...active, ...sub].map(b => ({ kind: 'bid', id: b.id, project_id: b.project_id, title: b.project, label: b.bid_number, due_date: b.due_date, due_time: b.due_time, next_followup_date: b.next_followup_date, walkthroughs: b.walkthroughs || [], estimator: b.estimator, salesperson: b.salesperson, sub_estimators: b.sub_estimators || [], customer: (b.customers || []).join(', '), stage: b.stage })),
     ...[...activeCo, ...subCo].map(c => ({ kind: 'co', id: c.id, project_id: c.project_id, title: `${c.co_number} — ${c.name}`, label: c.project, due_date: c.due_date, next_followup_date: c.next_followup_date, estimator: c.estimator, salesperson: c.salesperson, customer: null, stage: c.stage })),
   ];
   if (mineOnly && CURRENT_USER) {
@@ -789,7 +806,9 @@ function buildCalendarGrid(year, month, items, filter) {
   items.forEach(it => {
     if (filter !== 'followups_only') add(it.due_date, it, 'due');
     if (filter !== 'due_only') add(it.next_followup_date, it, 'fu');
-    if (filter !== 'followups_only') add(it.walkthrough_date, it, 'walkthrough');
+    // A bid can have several walk-throughs — each gets its own chip on its
+    // own day, rather than only ever showing the first/only one.
+    if (filter !== 'followups_only') (it.walkthroughs || []).forEach(w => add(w.date, { ...it, walkthrough_time: w.time }, 'walkthrough'));
   });
 
   // Office runs Monday–Friday only — weekends are skipped entirely rather
@@ -1416,7 +1435,10 @@ async function renderDashboard() {
           return `<div class="proj-row" onclick="openBidFlyout(${b.project_id},${b.id})">
             <div style="flex:1"><strong style="font-size:13px">${esc(b.project || '—')}</strong>
               <span style="color:var(--text-muted);font-size:12px">${b.bid_number ? '#'+esc(b.bid_number) : ''} · ${STAGE[b.stage]}</span></div>
-            <span style="font-size:12px;font-weight:700;color:${dot}">Due ${fmtD(b.due_date)}${b.due_time ? ' · ' + fmtTimeShort(b.due_time) : ''}</span>
+            <div style="text-align:right">
+              <div style="font-size:12px;font-weight:700;color:${dot}">Due ${fmtD(b.due_date)}${b.due_time ? ' · ' + fmtTimeShort(b.due_time) : ''}</div>
+              <div style="font-size:11px;color:${dot}">${daysUntilLabel(b.due_date)}</div>
+            </div>
           </div>`; }).join('') : '<div class="text-muted" style="font-size:13px;padding:6px 0">Nothing due in the next 14 days</div>'}
       </div>
       <div class="card">
@@ -1724,21 +1746,30 @@ function bidNode(b) {
 // walk-through is genuinely hard to miss when scanning a bid card.
 function walkthroughHtml(b) {
   // Trigger button lives in the box it controls (like Reminders/Notes' own
-  // "+" button) instead of a generic bottom action bar, so setting or
+  // "+" button) instead of a generic bottom action bar, so scheduling or
   // editing a walk-through happens right where the walk-through info is.
+  // A bid can have several — different companies/contacts at different
+  // times — so each gets its own row with its own edit/remove links, plus
+  // an "+ Add another" trigger rather than a single set-once field.
   const canEditBid = CURRENT_USER?.is_admin || CURRENT_USER?.id === b.estimator?.id || CURRENT_USER?.id === b.salesperson?.id;
   const canSetWalkthrough = canEditBid && !b.superseded && BID_EDITABLE_STAGES.includes(b.stage);
-  if (!b.walkthrough_date) {
-    return canSetWalkthrough ? `<button class="v2-btn outline" style="font-size:11px;padding:3px 8px;margin-top:6px" onclick="actSetWalkthrough(${b.id})">🚶 + Walk-through</button>` : '';
+  const walkthroughs = b.walkthroughs || [];
+  if (!walkthroughs.length) {
+    return canSetWalkthrough ? `<button class="v2-btn outline" style="font-size:11px;padding:3px 8px;margin-top:6px" onclick="actAddWalkthrough(${b.id})">🚶 + Walk-through</button>` : '';
   }
-  const contact = b.walkthrough_contact;
-  const company = b.walkthrough_company;
+  const rows = walkthroughs.map(w => {
+    const contact = w.contact, company = w.company;
+    return `<div style="padding:6px 0;${w !== walkthroughs[0] ? 'border-top:1px solid #a5f3fc' : ''}">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <div style="font-weight:700;color:#0e7490;font-size:12px">🚶 ${fmtD(w.date)}${w.time ? ' · ' + fmtTimeShort(w.time) : ''}</div>
+        ${canSetWalkthrough ? `<span style="font-size:11px"><a href="#" onclick="event.preventDefault();actEditWalkthrough(${b.id},${w.id})" style="color:#0e7490">edit</a> · <a href="#" onclick="event.preventDefault();actRemoveWalkthrough(${b.id},${w.id})" style="color:#dc2626">remove</a></span>` : ''}
+      </div>
+      ${(contact || company) ? `<div style="font-size:11.5px;color:#155e75;margin-top:2px">Site contact: ${contact ? esc(contact.full_name) : '—'}${company ? ' · ' + esc(company.name) : ''}${contact?.phone ? ' · ' + esc(contact.phone) : ''}</div>` : ''}
+    </div>`;
+  }).join('');
   return `<div class="v2-fu" style="background:#ecfeff;border:1px solid #a5f3fc;border-radius:6px;padding:8px 10px;margin-top:6px">
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-      <div style="font-weight:700;color:#0e7490;font-size:12px">🚶 Walk-through: ${fmtD(b.walkthrough_date)}${b.walkthrough_time ? ' · ' + fmtTimeShort(b.walkthrough_time) : ''}</div>
-      ${canSetWalkthrough ? `<a href="#" onclick="event.preventDefault();actSetWalkthrough(${b.id})" style="font-size:11px;color:#0e7490">edit</a>` : ''}
-    </div>
-    ${(contact || company) ? `<div style="font-size:11.5px;color:#155e75;margin-top:2px">Site contact: ${contact ? esc(contact.full_name) : '—'}${company ? ' · ' + esc(company.name) : ''}${contact?.phone ? ' · ' + esc(contact.phone) : ''}</div>` : ''}
+    ${rows}
+    ${canSetWalkthrough ? `<a href="#" onclick="event.preventDefault();actAddWalkthrough(${b.id})" style="font-size:11px;color:#0e7490;display:inline-block;margin-top:4px">+ Add another walk-through</a>` : ''}
   </div>`;
 }
 
@@ -2090,6 +2121,25 @@ function formatCurrencyField(el) {
   const digits = el.value.replace(/[^\d]/g, '');
   el.value = digits ? (negative ? '-$' : '$') + Number(digits).toLocaleString('en-US') : (negative ? '-' : '');
 }
+// US 10-digit phone → xxx-xxx-xxxx as you type. Anything past 10 digits
+// (an extension, a typo) is left alone rather than truncated, so it's
+// still visible and editable instead of silently disappearing.
+function fmtPhoneInput(v) {
+  const digits = String(v || '').replace(/[^\d]/g, '').slice(0, 10);
+  if (digits.length <= 3) return digits;
+  if (digits.length <= 6) return `${digits.slice(0, 3)}-${digits.slice(3)}`;
+  return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
+}
+function formatPhoneField(el) {
+  const digits = el.value.replace(/[^\d]/g, '');
+  if (digits.length > 10) return; // extension or non-standard — leave it as free text
+  const pos = el.selectionStart;
+  const before = el.value.length;
+  el.value = fmtPhoneInput(el.value);
+  // Keep the cursor roughly where it was instead of always jumping to the end.
+  const after = el.value.length;
+  el.selectionStart = el.selectionEnd = Math.max(0, pos + (after - before));
+}
 function showForm(title, fields, onSubmit, submitLabel = 'Save', submitClass = 'blue') {
   document.getElementById('v2-form-overlay')?.remove();
   const ov = document.createElement('div');
@@ -2130,6 +2180,10 @@ function showForm(title, fields, onSubmit, submitLabel = 'Save', submitClass = '
     if (f.type === 'currency') {
       return `<div class="v2-field"><label>${f.label}${req}</label>
         <input id="vf-${f.id}" type="text" inputmode="decimal" value="${f.value != null ? fmtCurrencyInput(f.value) : ''}" placeholder="${esc(f.placeholder || '$0')}" oninput="formatCurrencyField(this)"></div>`;
+    }
+    if (f.type === 'phone') {
+      return `<div class="v2-field"><label>${f.label}${req}</label>
+        <input id="vf-${f.id}" type="tel" inputmode="tel" value="${f.value ? fmtPhoneInput(f.value) : ''}" placeholder="${esc(f.placeholder || '215-555-0100')}" oninput="formatPhoneField(this)"></div>`;
     }
     if (f.type === 'custom') {
       // An empty placeholder the caller fills in after showForm renders (via
@@ -2543,42 +2597,68 @@ function renderWalkthroughContactPicker(contactsByCompany, preselectContactId) {
       : `<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">${selected.id ? `No contacts on file yet for ${esc(selected.name)}.` : 'New company — add the contact below.'}</div>`}
     <div id="wt-new-contact-fields" style="margin-top:8px;display:${contacts.some(c => c.id === preselectContactId) ? 'none' : 'flex'};flex-direction:column;gap:6px">
       <input id="wt-new-contact-name" type="text" placeholder="Contact name">
-      <input id="wt-new-contact-phone" type="text" placeholder="Phone">
+      <input id="wt-new-contact-phone" type="tel" placeholder="Phone" oninput="formatPhoneField(this)">
     </div>
   </div>`;
 }
 // Its own dedicated action rather than a couple of fields buried in Edit Bid
 // — the estimating team specifically asked for this to be easy to find, not
-// just another line in a long form.
-async function actSetWalkthrough(bidId) {
-  const b = DETAIL_CACHE[OPEN_PROJECT]?.bids.find(x => x.id === bidId) || {};
-  const preselectContactId = b.walkthrough_contact?.id ?? null;
+// just another line in a long form. A bid can have several walk-throughs
+// (different companies/contacts/dates/times), so this is add/edit/remove on
+// one entry at a time rather than a single set-once field.
+function walkthroughFormFields(existing, contactsByCompany) {
+  return [
+    { id: 'walkthrough_date', label: 'Date', type: 'date', value: existing?.date },
+    { id: 'walkthrough_time', label: 'Time', type: 'time', value: existing?.time },
+    { id: 'walkthrough_company_id', label: 'Site Company', type: 'company', multi: false, newKey: 'new_company', options: companyOpts(),
+      value: existing?.company?.id, placeholder: 'Type company name…',
+      onChange: () => renderWalkthroughContactPicker(contactsByCompany) },
+    { id: 'walkthrough_contact_section', type: 'custom' },
+  ];
+}
+function walkthroughSubmitData(data) {
+  const sel = document.getElementById('wt-contact-select');
+  const contact_id = sel?.value ? Number(sel.value) : null;
+  return {
+    date: data.walkthrough_date, time: data.walkthrough_time,
+    company_id: data.walkthrough_company_id, new_company: data.new_company,
+    contact_id,
+    new_contact_name: contact_id ? null : document.getElementById('wt-new-contact-name')?.value?.trim() || null,
+    new_contact_phone: contact_id ? null : document.getElementById('wt-new-contact-phone')?.value?.trim() || null,
+  };
+}
+async function actAddWalkthrough(bidId) {
   let contactsByCompany = {};
   try {
     const contacts = await api('GET', '/api/v2/contacts');
     contacts.forEach(c => { if (c.company_id) (contactsByCompany[c.company_id] = contactsByCompany[c.company_id] || []).push(c); });
   } catch { /* per-company contact lists just come up empty if this fails */ }
 
-  showForm('🚶 Jobsite Walk-through', [
-    { id: 'walkthrough_date', label: 'Date', type: 'date', value: b.walkthrough_date },
-    { id: 'walkthrough_time', label: 'Time', type: 'time', value: b.walkthrough_time },
-    { id: 'walkthrough_company_id', label: 'Site Company', type: 'company', multi: false, newKey: 'new_company', options: companyOpts(),
-      value: b.walkthrough_company?.id, placeholder: 'Type company name…',
-      onChange: () => renderWalkthroughContactPicker(contactsByCompany) },
-    { id: 'walkthrough_contact_section', type: 'custom' },
-  ], data => {
-    const sel = document.getElementById('wt-contact-select');
-    const contact_id = sel?.value ? Number(sel.value) : null;
-    return api('POST', `/api/v2/bids/${bidId}/walkthrough`, {
-      walkthrough_date: data.walkthrough_date, walkthrough_time: data.walkthrough_time,
-      company_id: data.walkthrough_company_id, new_company: data.new_company,
-      contact_id,
-      new_contact_name: contact_id ? null : document.getElementById('wt-new-contact-name')?.value?.trim() || null,
-      new_contact_phone: contact_id ? null : document.getElementById('wt-new-contact-phone')?.value?.trim() || null,
-    });
-  }, b.walkthrough_date ? 'Update Walk-through' : 'Schedule Walk-through', 'blue');
+  showForm('🚶 Add Walk-through', walkthroughFormFields(null, contactsByCompany),
+    data => api('POST', `/api/v2/bids/${bidId}/walkthroughs`, walkthroughSubmitData(data)),
+    'Add Walk-through', 'blue');
+  renderWalkthroughContactPicker(contactsByCompany);
+}
+async function actEditWalkthrough(bidId, walkthroughId) {
+  const b = DETAIL_CACHE[OPEN_PROJECT]?.bids.find(x => x.id === bidId) || {};
+  const w = (b.walkthroughs || []).find(x => x.id === walkthroughId);
+  if (!w) return;
+  const preselectContactId = w.contact?.id ?? null;
+  let contactsByCompany = {};
+  try {
+    const contacts = await api('GET', '/api/v2/contacts');
+    contacts.forEach(c => { if (c.company_id) (contactsByCompany[c.company_id] = contactsByCompany[c.company_id] || []).push(c); });
+  } catch { /* per-company contact lists just come up empty if this fails */ }
 
+  showForm('🚶 Edit Walk-through', walkthroughFormFields(w, contactsByCompany),
+    data => api('PATCH', `/api/v2/bids/${bidId}/walkthroughs/${walkthroughId}`, walkthroughSubmitData(data)),
+    'Save Changes', 'blue');
   renderWalkthroughContactPicker(contactsByCompany, preselectContactId);
+}
+async function actRemoveWalkthrough(bidId, walkthroughId) {
+  if (!confirm('Remove this walk-through?')) return;
+  try { await api('DELETE', `/api/v2/bids/${bidId}/walkthroughs/${walkthroughId}`); await refresh(); }
+  catch (e) { alert('Failed to remove: ' + e.message); }
 }
 
 function subEstimatorListHtml(bidId, b) {
@@ -3849,7 +3929,7 @@ function actNewCompany() {
     { id: 'city', label: 'City', type: 'text' },
     { id: 'state', label: 'State', type: 'text', placeholder: 'PA' },
     { id: 'zip', label: 'ZIP', type: 'text' },
-    { id: 'phone', label: 'Phone', type: 'text' },
+    { id: 'phone', label: 'Phone', type: 'phone' },
     { id: 'domain', label: 'Website', type: 'text', placeholder: 'www.example.com' },
   ], async data => {
     const c = await api('POST', '/api/v2/companies', data);
@@ -3863,7 +3943,7 @@ function actNewContact(prefillCompanyId) {
     { id: 'last_name', label: 'Last Name', type: 'text' },
     { id: 'company_id', label: 'Company', type: 'project', noun: 'company', multi: false, required: true, newKey: 'new_company',
       options: META.companies.map(c => ({ value: c.id, label: c.name })), value: prefillCompanyId, placeholder: 'Type company name…' },
-    { id: 'phone', label: 'Phone', type: 'text' },
+    { id: 'phone', label: 'Phone', type: 'phone' },
     { id: 'email', label: 'Email', type: 'text' },
     { id: 'title', label: 'Position', type: 'text', placeholder: 'e.g. Project Manager, Purchasing…' },
     { id: 'vendor_categories', label: 'Vendor Categories (if this person reps equipment/services)', type: 'multicheck', stringValues: true, options: (META.vendorCategories || []).map(v => ({ value: v, label: v })) },
@@ -3884,7 +3964,7 @@ function actEditContact(id) {
     { id: 'last_name', label: 'Last Name', type: 'text', value: c.last_name },
     { id: 'company_id', label: 'Company', type: 'project', noun: 'company', multi: false, required: true, newKey: 'new_company',
       options: META.companies.map(co => ({ value: co.id, label: co.name })), value: c.company_id, placeholder: 'Type company name…' },
-    { id: 'phone', label: 'Phone', type: 'text', value: c.phone },
+    { id: 'phone', label: 'Phone', type: 'phone', value: c.phone },
     { id: 'email', label: 'Email', type: 'text', value: c.email },
     { id: 'title', label: 'Position', type: 'text', value: c.title, placeholder: 'e.g. Project Manager, Purchasing…' },
     { id: 'vendor_categories', label: 'Vendor Categories (if this person reps equipment/services)', type: 'multicheck', stringValues: true, value: c.vendor_categories, options: (META.vendorCategories || []).map(v => ({ value: v, label: v })) },
@@ -4017,7 +4097,7 @@ async function actLinkContact(bidCustomerId, companyId) {
         <div id="lc-new-block">
           <div class="v2-field"><label>First Name</label><input id="lc-first" type="text"></div>
           <div class="v2-field"><label>Last Name</label><input id="lc-last" type="text"></div>
-          <div class="v2-field"><label>Phone</label><input id="lc-phone" type="text"></div>
+          <div class="v2-field"><label>Phone</label><input id="lc-phone" type="tel" oninput="formatPhoneField(this)"></div>
           <div class="v2-field"><label>Email</label><input id="lc-email" type="text"></div>
         </div>
       </div>

@@ -871,17 +871,17 @@ cron.schedule('0 * * * *', async () => {
   try {
     const due = await v2db.getBidsNeedingWalkthroughReminder();
     if (!due.length) return;
-    console.log(`[cron] walk-through reminders: ${due.length} bid(s) due`);
-    for (const bid of due) {
+    console.log(`[cron] walk-through reminders: ${due.length} due`);
+    for (const { bid, walkthrough } of due) {
       const shape = await v2notify.bidEmailShape(bid._id);
       if (!shape) continue;
-      const recipients = await v2notify.bidRecipients(bid);
-      const contact = await v2notify.walkthroughContactInfo(bid);
+      const recipients = await v2notify.bidRecipients(bid, 'walkthrough');
+      const contact = await v2notify.walkthroughContactInfo(walkthrough);
       for (const r of recipients) {
-        const { subject, html } = mailer.emailWalkthroughReminder(shape, bid.walkthrough_date, bid.walkthrough_time, r.name, contact);
+        const { subject, html } = mailer.emailWalkthroughReminder(shape, walkthrough.date, walkthrough.time, r.name, contact);
         await mailer.sendMail({ to: r.email, subject, html });
       }
-      await v2db.markWalkthroughReminderSent(bid._id);
+      await v2db.markWalkthroughReminderSent(bid._id, walkthrough._id);
     }
   } catch (e) {
     console.error('[cron] walk-through reminder error:', e.message);

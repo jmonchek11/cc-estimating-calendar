@@ -67,15 +67,24 @@ const BidSchema = new mongoose.Schema({
   drawings:       { type: String, default: null },               // drawing SET description, e.g. "Rev 2 dated 5/1/26 prepared by XYZ Architects" — from the JIS title sheet, distinct from drawing_stage
   notes:          { type: String, default: null },
 
-  // Jobsite walk-through — optional, independent of due_date/stage. Both
-  // fields reset walkthrough_reminder_sent to false when either changes
-  // (see adminUpdate), so a rescheduled walk-through gets its 24h-before
-  // reminder again instead of silently keeping the old one's "already sent" flag.
-  walkthrough_date:          { type: String, default: null },
-  walkthrough_time:          { type: String, default: null },    // "HH:MM", 24-hour — reminder only fires when both date AND time are set
-  walkthrough_company_id:    { type: Number, default: null },    // FK -> Company — site contact's company, found-or-created same as any other company field
-  walkthrough_contact_id:    { type: Number, default: null },    // FK -> Contact
-  walkthrough_reminder_sent: { type: Boolean, default: false },
+  // Jobsite walk-throughs — a bid can have several (different companies at
+  // different times), each independent of due_date/stage. `_id` is a real
+  // sequential id (via nextId('walkthroughs')) so one entry can be edited or
+  // removed without disturbing its siblings. date/time reset reminder_sent
+  // to false when either changes (see updateWalkthrough), so a rescheduled
+  // walk-through gets its own fresh 24h-before reminder instead of silently
+  // keeping the old one's "already sent" flag.
+  walkthroughs: {
+    type: [{
+      _id:            Number,
+      date:           { type: String, default: null },
+      time:           { type: String, default: null },    // "HH:MM", 24-hour — reminder only fires when both date AND time are set
+      company_id:     { type: Number, default: null },    // FK -> Company — site contact's company, found-or-created same as any other company field
+      contact_id:     { type: Number, default: null },    // FK -> Contact
+      reminder_sent:  { type: Boolean, default: false },
+    }],
+    default: [],
+  },
 
   // Denormalized "headline" snapshot of the bid's current submission — kept in
   // sync from BidSubmission (most-recent current submission, or the awarded

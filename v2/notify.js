@@ -21,7 +21,7 @@ const { getModels } = require('./models');
 async function emailForV2Member(memberId) {
   const M = getModels();
   const m = await M.TeamMember.findById(Number(memberId)).lean();
-  return m?.email ? { email: m.email, name: m.name, notification_prefs: m.notification_prefs } : null;
+  return m?.email ? { id: m._id, email: m.email, name: m.name, notification_prefs: m.notification_prefs } : null;
 }
 
 async function bidEmailShape(bidId) {
@@ -69,47 +69,50 @@ async function notifyAssigned(bidId, recipientId, actorId, role, scope) {
 }
 
 // Everyone assigned to a bid — estimator, salesperson, and any sub-estimators
-// — as {email, name} pairs, already filtered to people who haven't opted out
-// of the 'walkthrough' category. Shared by the walk-through "set"
-// notification below and the 24h-before cron reminder in server.js, so both
-// reach the same people the same way. (Only used for walk-throughs today —
-// if this is ever reused for something else, the category filter baked in
-// here needs to move to the caller instead.)
-async function bidRecipients(bid) {
+// — as {id, email, name} triples, filtered to people who haven't opted out
+// of the given notification category. Shared by the walk-through "set"
+// notification, the 24h-before cron reminder in server.js, and follow-up
+// notifications — same "who's actually on this bid" roster every time,
+// just gated by whichever category the caller cares about.
+async function bidRecipients(bid, category) {
   const ids = [...new Set([bid.estimator_id, bid.salesperson_id, ...(bid.sub_estimators || []).map(s => s.estimator_id)].filter(Boolean))];
   const members = (await Promise.all(ids.map(emailForV2Member))).filter(Boolean);
-  return members.filter(m => mailer.wantsNotification(m, 'walkthrough'));
+  return members.filter(m => mailer.wantsNotification(m, category));
 }
 
-// Site contact is a real Company + Contact now (see setWalkthrough in
+// Site contact is a real Company + Contact now (see addWalkthrough in
 // v2/db.js) — this resolves them for display, tagging the contact's name
 // with their company so "John Smith" reads as "John Smith (ABC Electric)"
-// rather than a bare name with no context.
-async function walkthroughContactInfo(bid) {
-  if (!bid.walkthrough_contact_id) return null;
+// rather than a bare name with no context. Takes one walk-through entry
+// (a bid now has several), not the whole bid.
+async function walkthroughContactInfo(walkthrough) {
+  if (!walkthrough?.contact_id) return null;
   const M = getModels();
-  const contact = await M.Contact.findById(Number(bid.walkthrough_contact_id)).lean();
+  const contact = await M.Contact.findById(Number(walkthrough.contact_id)).lean();
   if (!contact) return null;
-  const company = bid.walkthrough_company_id ? await M.Company.findById(Number(bid.walkthrough_company_id)).lean() : null;
+  const company = walkthrough.company_id ? await M.Company.findById(Number(walkthrough.company_id)).lean() : null;
   const name = [contact.first_name, contact.last_name].filter(Boolean).join(' ') || null;
   return { name: name && company ? `${name} (${company.name})` : name, phone: contact.phone || null };
 }
 
-// Fires once, right when a walk-through date/time is set or rescheduled —
-// notifyAssignmentDiff-style diff check lives in v2/routes.js; this just
-// sends once it's confirmed there's something new to announce.
-async function notifyWalkthroughSet(bidId, actorId) {
+// Fires once, right when one walk-through entry's date/time is set or
+// rescheduled — notifyAssignmentDiff-style diff check lives in
+// v2/routes.js; this just sends once it's confirmed there's something new
+// to announce. Takes the specific walk-through entry (identified by id),
+// since a bid can have several and only one changed.
+async function notifyWalkthroughSet(bidId, walkthroughId, actorId) {
   try {
     const M = getModels();
     const bid = await M.Bid.findById(Number(bidId)).lean();
-    if (!bid?.walkthrough_date) return;
+    const walkthrough = bid?.walkthroughs?.find(w => w._id === Number(walkthroughId));
+    if (!walkthrough?.date) return;
     const shape = await bidEmailShape(bidId);
     if (!shape) return;
     const actor = actorId ? await maindb.getMember(actorId) : null;
-    const recipients = await bidRecipients(bid);
-    const contact = await walkthroughContactInfo(bid);
+    const recipients = await bidRecipients(bid, 'walkthrough');
+    const contact = await walkthroughContactInfo(walkthrough);
     for (const r of recipients) {
-      const { subject, html } = mailer.emailWalkthroughSet(shape, bid.walkthrough_date, bid.walkthrough_time, r.name, actor?.name || 'A team member', contact);
+      const { subject, html } = mailer.emailWalkthroughSet(shape, walkthrough.date, walkthrough.time, r.name, actor?.name || 'A team member', contact);
       await mailer.sendMail({ to: r.email, subject, html });
     }
   } catch (e) { console.error('[v2 notify] walkthrough-set email failed:', e.message); }
@@ -146,4 +149,46 @@ async function emailShapeForReminder(reminder) {
   return reminder.parent_type === 'change_order' ? coEmailShape(reminder.parent_id) : bidEmailShape(reminder.parent_id);
 }
 
-module.exports = { bidEmailShape, coEmailShape, emailShapeForReminder, notifyAwarded, notifyAssigned, notifyWalkthroughSet, bidRecipients, walkthroughContactInfo, emailForV2Member };
+// A follow-up was logged — notify only the people actually on this bid/CO
+// (estimator, salesperson, sub-estimators; a CO's estimator + its Job's PM),
+// not the whole department, and skip whoever just logged it themselves.
+// parent_type is whatever logFollowupV2 was called with — 'bid_submission'
+// resolves up to its parent bid first, same as the reminder/digest paths do.
+async function notifyFollowup(parentType, parentId, followupData, actorId) {
+  try {
+    const M = getModels();
+    let bid = null, co = null;
+    if (parentType === 'bid_submission') {
+      const sub = await M.BidSubmission.findById(Number(parentId)).lean();
+      if (sub) bid = await M.Bid.findById(sub.bid_id).lean();
+    } else if (parentType === 'bid') {
+      bid = await M.Bid.findById(Number(parentId)).lean();
+    } else if (parentType === 'change_order') {
+      co = await M.ChangeOrder.findById(Number(parentId)).lean();
+    }
+
+    let shape = null, recipients = [];
+    if (bid) {
+      shape = await bidEmailShape(bid._id);
+      recipients = await bidRecipients(bid, 'followup');
+    } else if (co) {
+      shape = await coEmailShape(co._id);
+      const job = await M.Job.findById(co.job_id).lean();
+      const ids = [...new Set([co.estimator_id, job?.pm_id].filter(Boolean))];
+      const members = (await Promise.all(ids.map(emailForV2Member))).filter(Boolean);
+      recipients = members.filter(m => mailer.wantsNotification(m, 'followup'));
+    }
+    if (!shape || !recipients.length) return;
+
+    const actorIdNum = actorId ? Number(actorId) : null;
+    const actor = actorIdNum ? await maindb.getMember(actorIdNum) : null;
+    const actorName = actor?.name || 'A team member';
+    for (const r of recipients) {
+      if (actorIdNum && r.id === actorIdNum) continue; // don't notify whoever just logged it
+      const { subject, html } = mailer.emailFollowup(shape, followupData.notes || '', followupData.next_followup_date || null, actorName);
+      await mailer.sendMail({ to: r.email, subject, html });
+    }
+  } catch (e) { console.error('[v2 notify] followup email failed:', e.message); }
+}
+
+module.exports = { bidEmailShape, coEmailShape, emailShapeForReminder, notifyAwarded, notifyAssigned, notifyWalkthroughSet, notifyFollowup, bidRecipients, walkthroughContactInfo, emailForV2Member };
