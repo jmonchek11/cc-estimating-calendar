@@ -35,7 +35,6 @@ const ProjectSchema = new mongoose.Schema({
   name:       { type: String, required: true },
   description:{ type: String, default: null },   // brief scope-of-work description, captured at opportunity intake
   location:   { type: String, default: null },   // freeform "City, State" or site description — separate from the JIS-sourced street/city/state/zip below
-  folder_url: { type: String, default: null },   // link to the project's OneDrive folder — pasted in manually, not resolved via Graph API
   source_key: { type: String, default: null },   // stable import key: "job:<#>" or "name:<norm>" — survives re-import
   street:     { type: String, default: null },   // job site address — from the JIS title sheet
   city:       { type: String, default: null },
@@ -66,6 +65,7 @@ const BidSchema = new mongoose.Schema({
   source:         { type: String, default: null },                // where it came from (iSqFt, BuildingConnected, referral, email invite location, etc.)
   rfi_due_date:   { type: String, default: null },               // official RFI (Request for Information) cutoff, when a project has one — independent of due_date/stage
   rfi_due_time:   { type: String, default: null },               // "HH:MM", 24-hour — optional
+  folder_url:     { type: String, default: null },               // link to THIS bid's own OneDrive folder — a new folder is created per bid (not per project); at award, the team renames it from "bid# - bid name" to "job# - job name" but the link itself stays valid
   drawing_stage:  { type: String, default: null },               // "50% budget", "80% budget", "100% CD"…
   drawings:       { type: String, default: null },               // drawing SET description, e.g. "Rev 2 dated 5/1/26 prepared by XYZ Architects" — from the JIS title sheet, distinct from drawing_stage
   notes:          { type: String, default: null },

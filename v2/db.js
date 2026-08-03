@@ -257,6 +257,7 @@ async function getProjectDetail(projectId) {
     due_time: b.due_time,
     rfi_due_date: b.rfi_due_date,
     rfi_due_time: b.rfi_due_time,
+    folder_url: b.folder_url,
     walkthroughs: (b.walkthroughs || []).map(w => ({
       id: w._id, date: w.date, time: w.time,
       company: companyById[w.company_id] || null,
@@ -335,7 +336,6 @@ async function getProjectDetail(projectId) {
   return {
     id: project._id,
     name: project.name,
-    folder_url: project.folder_url,
     bids: bids
       .map(fmtBid)
       .sort((a, b) => stageRank(a.stage) - stageRank(b.stage)),
@@ -346,6 +346,10 @@ async function getProjectDetail(projectId) {
       awarded_company: j.awarded_company_id ? companyById[j.awarded_company_id] : null,
       pm: tm[j.pm_id] || null,
       award_date: j.award_date,
+      // The Job's folder IS the winning bid's folder — same OneDrive folder,
+      // just renamed at award from "bid# - bid name" to "job# - job name".
+      // No separate field on Job; look it up via the bid relationship instead.
+      folder_url: j.winning_bid_id ? (bids.find(b => b._id === j.winning_bid_id)?.folder_url || null) : null,
       change_orders: cos
         .filter(c => c.job_id === j._id)
         .map(fmtCo)
@@ -608,16 +612,16 @@ async function updateSettingsV2(data) {
 
 // ── Opportunity creation ──────────────────────────────────────────────────────
 // Creates a Project (or attaches to an existing one) + an opportunity Bid.
-async function createOpportunity({ project_id, project_name, notes, description, location, folder_url, due_date, due_time, owner_id, source, company_ids, new_companies, contact_ids_by_company, created_by }) {
+async function createOpportunity({ project_id, project_name, notes, description, location, due_date, due_time, owner_id, source, company_ids, new_companies, contact_ids_by_company, created_by }) {
   const M = getModels();
   let pid = project_id ? Number(project_id) : null;
   let isNewProject = false;
   if (!pid) {
     require_({ project_name }, ['project_name']);
     pid = await nextId('projects');
-    // description/location/folder_url only apply when creating a brand-new
-    // project — attaching to an existing one leaves its own data alone.
-    await M.Project.create({ _id: pid, name: project_name.trim(), description: description || null, location: location || null, folder_url: folder_url || null, created_by: created_by || null });
+    // description/location only apply when creating a brand-new project —
+    // attaching to an existing one leaves its own data alone.
+    await M.Project.create({ _id: pid, name: project_name.trim(), description: description || null, location: location || null, created_by: created_by || null });
     isNewProject = true;
   }
   const bidId = await nextId('bids');
@@ -675,6 +679,7 @@ async function startBid(id, data, actorId) {
     due_time: data.due_time || null,
     start_date: data.start_date || null,
     drawing_stage: data.drawing_stage || null,
+    folder_url: data.folder_url || null,
     updated_at: ts(),
   }});
   for (const companyId of companyIds) {
@@ -1206,14 +1211,14 @@ async function reactivateBid(id, data, actorId) {
 // Bid submission fields (estimate $, date sent, approved by) are edited on the
 // bid_submission entity, not the bid — the bid's headline is derived from them.
 const ADMIN_EDITABLE = {
-  project:        ['name', 'folder_url'],
+  project:        ['name'],
   company:        ['name', 'city', 'state'],
   // Walk-throughs are NOT here — they go through the dedicated add/update/
   // remove walk-through endpoints, which need find-or-create logic for the
   // site company/contact (and array-entry targeting) this generic whitelist
   // path can't do.
   bid:            ['bid_number', 'estimator_id', 'salesperson_id', 'date_received', 'due_date', 'due_time', 'start_date',
-                   'drawing_stage', 'notes', 'jurisdiction', 'superseded', 'owner_id', 'source', 'rfi_due_date', 'rfi_due_time'],
+                   'drawing_stage', 'notes', 'jurisdiction', 'superseded', 'owner_id', 'source', 'rfi_due_date', 'rfi_due_time', 'folder_url'],
   job:            ['job_number', 'pm_id', 'awarded_company_id', 'award_date'],
   change_order:   ['co_number', 'name', 'due_date', 'start_date', 'estimator_id', 'notes',
                    'estimate_amount', 'date_submitted', 'approved_by', 'approval_date'],
@@ -2034,7 +2039,7 @@ async function getBidList(stage) {
       sub_estimators: (b.sub_estimators || []).map(s => ({ ...(tm[s.estimator_id] || {}), scope: s.scope })),
       customers: [...new Set((custByBid[b._id] || []).filter(Boolean))],
       date_received: b.date_received, due_date: b.due_date, due_time: b.due_time,
-      rfi_due_date: b.rfi_due_date, rfi_due_time: b.rfi_due_time,
+      rfi_due_date: b.rfi_due_date, rfi_due_time: b.rfi_due_time, folder_url: b.folder_url,
       walkthroughs: (b.walkthroughs || []).map(w => ({ id: w._id, date: w.date, time: w.time })),
       estimate_amount: b.estimate_amount, date_submitted: b.date_submitted, next_followup_date: b.next_followup_date,
       award_date: b.award_date, awarded_company: b.awarded_company_id ? coName[b.awarded_company_id] : null,

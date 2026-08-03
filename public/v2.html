@@ -1532,10 +1532,7 @@ async function renderProjectPage(projectId) {
         <div class="page-title">🏗️ ${esc(d.name)}</div>
         <div class="page-subtitle">${bidN} bid${bidN!==1?'s':''} · ${jobN} job${jobN!==1?'s':''} · ${coN} change order${coN!==1?'s':''}</div>
       </div>
-      <div style="display:flex;gap:8px">
-        ${d.folder_url ? `<a class="v2-btn outline" href="${esc(d.folder_url)}" target="_blank" rel="noopener">📁 Open Project Folder</a>` : ''}
-        <button class="v2-btn outline" onclick="navigate('projects')">← All Projects</button>
-      </div>
+      <button class="v2-btn outline" onclick="navigate('projects')">← All Projects</button>
     </div>
     ${renderHierarchy(d)}`;
 }
@@ -1574,11 +1571,12 @@ async function renderFlyout(fresh) {
   const d = await api('GET', '/api/v2/projects/' + FLYOUT.projectId);
   DETAIL_CACHE[FLYOUT.projectId] = d;
 
-  let title = '', sub = '', body = '';
+  let title = '', sub = '', body = '', folderUrl = null;
   if (FLYOUT.kind === 'bid') {
     const b = d.bids.find(x => x.id === FLYOUT.id);
     if (!b) { closeFlyout(); return; }
     title = `${b.bid_number || 'Bid'}`; sub = esc(d.name);
+    folderUrl = b.folder_url;
     body = bidNode(b);
     if (b.stage === 'awarded') { const job = d.jobs.find(j => j.winning_bid_id === b.id); if (job) body += jobNode(job); }
   } else {
@@ -1586,12 +1584,13 @@ async function renderFlyout(fresh) {
     for (const j of d.jobs) { const c = j.change_orders.find(x => x.id === FLYOUT.id); if (c) { co = c; job = j; break; } }
     if (!co) { closeFlyout(); return; }
     title = `${esc(co.co_number)}`; sub = `${esc(d.name)}${job.job_number ? ' · Job ' + esc(job.job_number) : ''}`;
+    folderUrl = job.folder_url;
     body = `<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">🏭 ${job.job_number ? 'Job ' + esc(job.job_number) : 'Job'}${job.pm ? ` · PM ${ini(job.pm)} ${esc(job.pm.name)}` : ' · <span style="color:#dc2626">no PM assigned</span>'}</div>` + coNode(co);
   }
   panel.querySelector('.fly-head').outerHTML = `
     <div class="fly-head">
       <div style="flex:1;min-width:0"><div class="fly-title">${title}</div><div class="fly-sub">${sub}</div></div>
-      ${d.folder_url ? `<a href="${esc(d.folder_url)}" target="_blank" rel="noopener" title="Open Project Folder">📁</a>` : ''}
+      ${folderUrl ? `<a href="${esc(folderUrl)}" target="_blank" rel="noopener" title="Open Folder">📁</a>` : ''}
       <a href="#" onclick="event.preventDefault();renderProjectPage(${FLYOUT.projectId})">Open full project →</a>
       <button class="fly-close" onclick="closeFlyout()">✕</button>
     </div>`;
@@ -1720,6 +1719,7 @@ function bidNode(b) {
   if (!b.customers.length) metaBits.push('<span style="color:#dc2626">no customer</span>');
   if (b.owner) metaBits.push(`Added by ${ini(b.owner)}`);
   if (b.source) metaBits.push(`via ${esc(b.source)}`);
+  if (b.folder_url) metaBits.push(`<a href="${esc(b.folder_url)}" target="_blank" rel="noopener">📁 Open Folder</a>`);
   if (b.awarded_company) metaBits.push(`Won by <strong style="color:#166534">${esc(b.awarded_company.name)}</strong> ${fmtD(b.award_date)}`);
   if (b.estimator) metaBits.push(`Est. ${ini(b.estimator)}`);
   b.sub_estimators.forEach(s => metaBits.push(`${ini(s)}<span style="font-size:10px">${esc(s.scope)}<a href="#" onclick="event.preventDefault();actRemoveSubEstimator(${b.id},${s.id},'${escJs(s.scope)}')" style="color:#dc2626;margin-left:2px">✕</a></span>`));
@@ -1939,6 +1939,7 @@ function jobNode(j, legacy = false) {
           ${j.award_date ? ` ${fmtD(j.award_date)}` : ''}
           ${j.pm ? ` · PM: ${ini(j.pm)} ${esc(j.pm.name)}` : ''}
           · ${j.change_orders.length} change order${j.change_orders.length!==1?'s':''}
+          ${j.folder_url ? ` · <a href="${esc(j.folder_url)}" target="_blank" rel="noopener">📁 Open Folder</a>` : ''}
         </div>
         <div class="v2-actions">
           ${!j.job_number ? `<button class="v2-btn amber" onclick="actSetJobNumber(${j.id})">Set Job #</button>` : ''}
@@ -2306,6 +2307,7 @@ const startBidFields = () => ([
   { id: 'due_time', label: 'Due Time (optional)', type: 'time' },
   { id: 'start_date', label: 'Start Date', type: 'date' },
   { id: 'drawing_stage', label: 'Drawing Stage', type: 'text', placeholder: '50% budget, 70% budget, 100% CD…' },
+  { id: 'folder_url', label: 'Bid Folder Link (OneDrive)', type: 'text', placeholder: 'https://onedrive.live.com/…' },
 ]);
 
 // + New Bid → choose new vs existing project, then go straight to active_bid
@@ -2402,7 +2404,6 @@ async function actNewOpportunity() {
     { id: 'source', label: 'Source (where did this come from?)', type: 'text', placeholder: 'iSqFt, BuildingConnected, email invite, referral, phone call…' },
     { id: 'description', label: 'Project Description', type: 'textarea', placeholder: 'Brief description of the scope of work…' },
     { id: 'location', label: 'Location', type: 'text', placeholder: 'City, State or site address…' },
-    { id: 'folder_url', label: 'Project Folder Link (OneDrive)', type: 'text', placeholder: 'https://onedrive.live.com/…' },
     { id: 'due_date', label: 'Due Date', type: 'date' },
     { id: 'due_time', label: 'Due Time (optional)', type: 'time' },
     { id: 'company_ids', label: 'Customer(s)', type: 'company', multi: true, newKey: 'new_companies', options: companyOpts(), placeholder: 'Type customer name…',
@@ -2554,10 +2555,8 @@ function findCO(coId) {
 
 function actEditProject(projectId) {
   const name = (ALL_PROJECTS.find(p => p.id === projectId) || {}).name || '';
-  const folderUrl = DETAIL_CACHE[projectId]?.folder_url || '';
   showForm('✏️ Edit Project (admin)', [
     { id: 'name', label: 'Project Name', type: 'text', required: true, value: name },
-    { id: 'folder_url', label: 'Project Folder Link (OneDrive)', type: 'text', value: folderUrl, placeholder: 'https://onedrive.live.com/…' },
   ], data => api('PATCH', `/api/v2/admin/project/${projectId}`, data), 'Save Changes');
 }
 
@@ -2584,6 +2583,7 @@ function actEditBid(bidId) {
       { id: 'drawing_stage', label: 'Drawing Stage', type: 'text', value: b.drawing_stage },
       { id: 'owner_id', label: 'Opportunity Owner', type: 'select', emptyLabel: 'TBD', options: teamOpts(), value: b.owner?.id },
       { id: 'source', label: 'Source (where did this come from?)', type: 'text', value: b.source, placeholder: 'iSqFt, BuildingConnected, email invite, referral, phone call…' },
+      { id: 'folder_url', label: 'Bid Folder Link (OneDrive)', type: 'text', value: b.folder_url, placeholder: 'https://onedrive.live.com/…' },
     );
     // Walk-through has its own dedicated action (🚶 button in the actions row,
     // plus a visible line on the bid card) rather than living buried in here —

@@ -48,7 +48,9 @@ async function bidEmailShape(bidId) {
     // templates simply won't have these, and fall back gracefully.
     bid_id: bid._id,
     project_id: bid.project_id,
-    folder_url: project?.folder_url || null,
+    // Each bid has its OWN OneDrive folder (renamed to job#/job name at
+    // award, but the same folder/link) — not a project-level link.
+    folder_url: bid.folder_url || null,
   };
 }
 
@@ -137,13 +139,16 @@ async function coEmailShape(coId) {
   if (!co) return null;
   const job = await M.Job.findById(co.job_id).lean();
   const project = job ? await M.Project.findById(job.project_id).lean() : null;
+  // The Job's folder IS its winning bid's folder (renamed at award, same
+  // OneDrive folder) — look it up via that relationship, same as getProjectDetail does.
+  const winningBid = job?.winning_bid_id ? await M.Bid.findById(job.winning_bid_id).lean() : null;
   return {
     project_name: `${co.co_number} — ${co.name}`,
     bid_number: project?.name || null,
     project_entity_name: project?.name || null,
     customer: null, stage: co.stage,
     estimate_due_date: co.due_date, estimate_amount: co.estimate_amount,
-    folder_url: project?.folder_url || null,
+    folder_url: winningBid?.folder_url || null,
   };
 }
 
