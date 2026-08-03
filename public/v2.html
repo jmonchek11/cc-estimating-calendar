@@ -728,7 +728,7 @@ async function fetchCalendarItems(mineOnly) {
     api('GET', '/api/v2/co-list?stage=active_co'), api('GET', '/api/v2/co-list?stage=submitted_co'),
   ]);
   let items = [
-    ...[...opp, ...active, ...sub].map(b => ({ kind: 'bid', id: b.id, project_id: b.project_id, title: b.project, label: b.bid_number, due_date: b.due_date, due_time: b.due_time, next_followup_date: b.next_followup_date, walkthroughs: b.walkthroughs || [], estimator: b.estimator, salesperson: b.salesperson, sub_estimators: b.sub_estimators || [], customer: (b.customers || []).join(', '), stage: b.stage })),
+    ...[...opp, ...active, ...sub].map(b => ({ kind: 'bid', id: b.id, project_id: b.project_id, title: b.project, label: b.bid_number, due_date: b.due_date, due_time: b.due_time, next_followup_date: b.next_followup_date, walkthroughs: b.walkthroughs || [], rfi_due_date: b.rfi_due_date, rfi_due_time: b.rfi_due_time, estimator: b.estimator, salesperson: b.salesperson, sub_estimators: b.sub_estimators || [], customer: (b.customers || []).join(', '), stage: b.stage })),
     ...[...activeCo, ...subCo].map(c => ({ kind: 'co', id: c.id, project_id: c.project_id, title: `${c.co_number} — ${c.name}`, label: c.project, due_date: c.due_date, next_followup_date: c.next_followup_date, estimator: c.estimator, salesperson: c.salesperson, customer: null, stage: c.stage })),
   ];
   if (mineOnly && CURRENT_USER) {
@@ -749,6 +749,7 @@ function calendarLegendHtml() {
     ...estimators.map(m => `<span class="cal-legend-item"><span class="cal-legend-dot" style="background:${estimatorColor(m.id)}"></span>${esc(m.initials)}</span>`),
     `<span class="cal-legend-item"><span class="cal-legend-dot" style="background:#1e293b;border:1px dashed #94a3b8"></span>Follow-up</span>`,
     `<span class="cal-legend-item"><span class="cal-legend-dot" style="background:#0891b2"></span>🚶 Walk-through</span>`,
+    `<span class="cal-legend-item"><span class="cal-legend-dot" style="background:#7c3aed"></span>📋 RFI Due</span>`,
   ].join('');
 }
 function calendarControlsHtml(reRenderFn) {
@@ -809,6 +810,7 @@ function buildCalendarGrid(year, month, items, filter) {
     // A bid can have several walk-throughs — each gets its own chip on its
     // own day, rather than only ever showing the first/only one.
     if (filter !== 'followups_only') (it.walkthroughs || []).forEach(w => add(w.date, { ...it, walkthrough_time: w.time }, 'walkthrough'));
+    if (filter !== 'followups_only') add(it.rfi_due_date, it, 'rfi');
   });
 
   // Office runs Monday–Friday only — weekends are skipped entirely rather
@@ -858,6 +860,11 @@ function buildCalendarGrid(year, month, items, filter) {
           <span class="cal-chip-txt">🚶 ${esc(item.title)}${item.walkthrough_time ? ' · ' + fmtTimeShort(item.walkthrough_time) : ''}</span>
         </div>`;
       }
+      if (type === 'rfi') {
+        return `<div class="cal-chip" style="background:#7c3aeda6;border-left-color:#7c3aed">
+          <span class="cal-chip-txt">📋 RFI: ${esc(item.title)}${item.rfi_due_time ? ' · ' + fmtTimeShort(item.rfi_due_time) : ''}</span>
+        </div>`;
+      }
       return `<div class="cal-chip cal-chip-fu"><span class="cal-chip-txt">📞 ${esc(item.title)}</span></div>`;
     }).join('');
 
@@ -903,8 +910,8 @@ function openCalDayModal(dateStr) {
   if (!items.length) return;
   const label = new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
   const rows = items.map(({ item, type }) => {
-    const color = type === 'due' ? estimatorColor(item.estimator?.id) : type === 'walkthrough' ? '#0891b2' : '#64748b';
-    const typeLabel = type === 'due' ? `📐 Due date${item.due_time ? ' · ' + fmtTimeShort(item.due_time) : ''}` : type === 'walkthrough' ? `🚶 Walk-through${item.walkthrough_time ? ' · ' + fmtTimeShort(item.walkthrough_time) : ''}` : '📞 Follow-up';
+    const color = type === 'due' ? estimatorColor(item.estimator?.id) : type === 'walkthrough' ? '#0891b2' : type === 'rfi' ? '#7c3aed' : '#64748b';
+    const typeLabel = type === 'due' ? `📐 Due date${item.due_time ? ' · ' + fmtTimeShort(item.due_time) : ''}` : type === 'walkthrough' ? `🚶 Walk-through${item.walkthrough_time ? ' · ' + fmtTimeShort(item.walkthrough_time) : ''}` : type === 'rfi' ? `📋 RFI Due${item.rfi_due_time ? ' · ' + fmtTimeShort(item.rfi_due_time) : ''}` : '📞 Follow-up';
     return `<div class="proj-row" onclick="closeProfileModal();${item.kind === 'bid' ? `openBidFlyout(${item.project_id},${item.id})` : `openCoFlyout(${item.project_id},${item.id})`}">
       <div style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0;margin-top:5px"></div>
       <div style="flex:1;min-width:0">
@@ -1525,7 +1532,10 @@ async function renderProjectPage(projectId) {
         <div class="page-title">🏗️ ${esc(d.name)}</div>
         <div class="page-subtitle">${bidN} bid${bidN!==1?'s':''} · ${jobN} job${jobN!==1?'s':''} · ${coN} change order${coN!==1?'s':''}</div>
       </div>
-      <button class="v2-btn outline" onclick="navigate('projects')">← All Projects</button>
+      <div style="display:flex;gap:8px">
+        ${d.folder_url ? `<a class="v2-btn outline" href="${esc(d.folder_url)}" target="_blank" rel="noopener">📁 Open Project Folder</a>` : ''}
+        <button class="v2-btn outline" onclick="navigate('projects')">← All Projects</button>
+      </div>
     </div>
     ${renderHierarchy(d)}`;
 }
@@ -1581,6 +1591,7 @@ async function renderFlyout(fresh) {
   panel.querySelector('.fly-head').outerHTML = `
     <div class="fly-head">
       <div style="flex:1;min-width:0"><div class="fly-title">${title}</div><div class="fly-sub">${sub}</div></div>
+      ${d.folder_url ? `<a href="${esc(d.folder_url)}" target="_blank" rel="noopener" title="Open Project Folder">📁</a>` : ''}
       <a href="#" onclick="event.preventDefault();renderProjectPage(${FLYOUT.projectId})">Open full project →</a>
       <button class="fly-close" onclick="closeFlyout()">✕</button>
     </div>`;
@@ -1695,6 +1706,7 @@ function activitySectionHtml(b) {
   return `<div class="bc-section">
     <div class="bc-sec-hd"><span class="bc-sec-title">Activity</span></div>
     ${walkthroughHtml(b)}
+    ${rfiHtml(b)}
     ${bidFollowups}
     ${remindersHtml('bid', b.id, b.reminders)}
     ${notesHtml('bid', b.id, b.notes_log)}
@@ -1770,6 +1782,27 @@ function walkthroughHtml(b) {
   return `<div class="v2-fu" style="background:#ecfeff;border:1px solid #a5f3fc;border-radius:6px;padding:8px 10px;margin-top:6px">
     ${rows}
     ${canSetWalkthrough ? `<a href="#" onclick="event.preventDefault();actAddWalkthrough(${b.id})" style="font-size:11px;color:#0e7490;display:inline-block;margin-top:4px">+ Add another walk-through</a>` : ''}
+  </div>`;
+}
+
+// RFI (Request for Information) cutoff — an official deadline some projects
+// set for asking the architect/engineer questions before bidding closes.
+// Single optional date/time (a project either has one official cutoff or it
+// doesn't), so unlike walk-throughs there's just one set-once slot rather
+// than a list — same trigger/edit-in-place pattern as walk-throughs though,
+// so it reads consistently on the card.
+function rfiHtml(b) {
+  const canEditBid = CURRENT_USER?.is_admin || CURRENT_USER?.id === b.estimator?.id || CURRENT_USER?.id === b.salesperson?.id;
+  const canSetRFI = canEditBid && !b.superseded && BID_EDITABLE_STAGES.includes(b.stage);
+  if (!b.rfi_due_date) {
+    return canSetRFI ? `<button class="v2-btn outline" style="font-size:11px;padding:3px 8px;margin-top:6px" onclick="actSetRFI(${b.id})">📋 + RFI Due Date</button>` : '';
+  }
+  const overdue = b.rfi_due_date < today;
+  return `<div class="v2-fu" style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:6px;padding:8px 10px;margin-top:6px">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+      <div style="font-weight:700;color:${overdue ? '#dc2626' : '#6d28d9'};font-size:12px">📋 RFI Due: ${fmtD(b.rfi_due_date)}${b.rfi_due_time ? ' · ' + fmtTimeShort(b.rfi_due_time) : ''}${overdue ? ' — PASSED' : ''}</div>
+      ${canSetRFI ? `<span style="font-size:11px"><a href="#" onclick="event.preventDefault();actSetRFI(${b.id})" style="color:#6d28d9">edit</a> · <a href="#" onclick="event.preventDefault();actClearRFI(${b.id})" style="color:#dc2626">clear</a></span>` : ''}
+    </div>
   </div>`;
 }
 
@@ -2369,6 +2402,7 @@ async function actNewOpportunity() {
     { id: 'source', label: 'Source (where did this come from?)', type: 'text', placeholder: 'iSqFt, BuildingConnected, email invite, referral, phone call…' },
     { id: 'description', label: 'Project Description', type: 'textarea', placeholder: 'Brief description of the scope of work…' },
     { id: 'location', label: 'Location', type: 'text', placeholder: 'City, State or site address…' },
+    { id: 'folder_url', label: 'Project Folder Link (OneDrive)', type: 'text', placeholder: 'https://onedrive.live.com/…' },
     { id: 'due_date', label: 'Due Date', type: 'date' },
     { id: 'due_time', label: 'Due Time (optional)', type: 'time' },
     { id: 'company_ids', label: 'Customer(s)', type: 'company', multi: true, newKey: 'new_companies', options: companyOpts(), placeholder: 'Type customer name…',
@@ -2520,8 +2554,10 @@ function findCO(coId) {
 
 function actEditProject(projectId) {
   const name = (ALL_PROJECTS.find(p => p.id === projectId) || {}).name || '';
+  const folderUrl = DETAIL_CACHE[projectId]?.folder_url || '';
   showForm('✏️ Edit Project (admin)', [
     { id: 'name', label: 'Project Name', type: 'text', required: true, value: name },
+    { id: 'folder_url', label: 'Project Folder Link (OneDrive)', type: 'text', value: folderUrl, placeholder: 'https://onedrive.live.com/…' },
   ], data => api('PATCH', `/api/v2/admin/project/${projectId}`, data), 'Save Changes');
 }
 
@@ -2659,6 +2695,23 @@ async function actRemoveWalkthrough(bidId, walkthroughId) {
   if (!confirm('Remove this walk-through?')) return;
   try { await api('DELETE', `/api/v2/bids/${bidId}/walkthroughs/${walkthroughId}`); await refresh(); }
   catch (e) { alert('Failed to remove: ' + e.message); }
+}
+
+// Single set-once RFI cutoff — goes through the same admin-or-assigned
+// bid-edit endpoint as any other simple bid field (no find-or-create
+// complexity like walk-throughs need), just via its own small form so it's
+// as quick to set as a walk-through rather than buried in the full Edit Bid form.
+function actSetRFI(bidId) {
+  const b = DETAIL_CACHE[OPEN_PROJECT]?.bids.find(x => x.id === bidId) || {};
+  showForm('📋 RFI Due Date', [
+    { id: 'rfi_due_date', label: 'RFI Cutoff Date', type: 'date', required: true, value: b.rfi_due_date },
+    { id: 'rfi_due_time', label: 'Time (optional)', type: 'time', value: b.rfi_due_time },
+  ], data => api('PATCH', `/api/v2/admin/bid/${bidId}`, data), b.rfi_due_date ? 'Save Changes' : 'Set RFI Due Date', 'blue');
+}
+async function actClearRFI(bidId) {
+  if (!confirm('Clear the RFI due date?')) return;
+  try { await api('PATCH', `/api/v2/admin/bid/${bidId}`, { rfi_due_date: '', rfi_due_time: '' }); await refresh(); }
+  catch (e) { alert('Failed to clear: ' + e.message); }
 }
 
 function subEstimatorListHtml(bidId, b) {

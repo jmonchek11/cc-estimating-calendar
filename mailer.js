@@ -206,6 +206,15 @@ function actionButtons(bid, primary) {
   return buttonRow(primary, calLink ? { href: calLink, label: '📅 Add Due Date to Outlook' } : null);
 }
 
+// A separate, always-optional row (not folded into actionButtons/buttonRow's
+// primary+secondary pair) so it can be dropped into any template that has a
+// bid/CO shape carrying folder_url, without disturbing each template's own
+// primary action or "Add to Outlook" button.
+function folderButtonHtml(bid) {
+  if (!bid?.folder_url) return '';
+  return buttonRow({ href: bid.folder_url, label: '📁 Open Project Folder' });
+}
+
 function fmtCurrency(n) {
   if (!n) return null;
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
@@ -260,6 +269,7 @@ function emailAssigned(bid, recipientName, actorName, role, scope) {
       <p>Hi <strong>${recipientName}</strong>, <strong>${actorName}</strong> has added you as ${roleText} on a bid${role === 'sub_estimator' && scope ? ` — scope: <strong>${scope}</strong>` : ''}.</p>
       ${bidTable(bid)}
       ${actionButtons(bid, { href: link, label: hasDeepLink ? 'Open Bid' : 'Open App' })}
+      ${folderButtonHtml(bid)}
     `),
   };
 }
@@ -274,6 +284,7 @@ function emailFollowup(bid, note, nextDate, loggedByName) {
       ${note ? `<div style="margin:14px 0;padding:12px 16px;background:#f8fafc;border-left:3px solid #cbd5e1;border-radius:4px;font-size:14px;color:#475569;font-style:italic">"${note}"</div>` : ''}
       ${nextDate ? `<p style="margin-top:12px">Next follow-up scheduled: <strong>${fmtDate(nextDate)}</strong></p>` : ''}
       ${actionButtons(bid, { href: APP_URL, label: 'Open App' })}
+      ${folderButtonHtml(bid)}
     `),
   };
 }
@@ -287,6 +298,7 @@ function emailAwarded(bid, actorName) {
       <p><strong>${actorName}</strong> marked a bid as awarded${amtStr ? ` for <strong>${amtStr}</strong>` : ''}.</p>
       ${bidTable(bid)}
       ${buttonRow({ href: APP_URL, label: 'Open App' })}
+      ${folderButtonHtml(bid)}
     `),
   };
 }
@@ -300,6 +312,7 @@ function emailReminder(bid, reminder, recipientName) {
       ${bidTable(bid)}
       ${reminder.note ? `<div style="margin:14px 0;padding:12px 16px;background:#fffbeb;border-left:3px solid #f59e0b;border-radius:4px;font-size:14px;color:#78350f">${reminder.note}</div>` : ''}
       ${actionButtons(bid, { href: APP_URL, label: 'Open App' })}
+      ${folderButtonHtml(bid)}
     `),
   };
 }
@@ -330,6 +343,7 @@ function emailWalkthroughSet(bid, walkthroughDate, walkthroughTime, recipientNam
       ${bidTable(bid)}
       ${walkthroughContactLine(contact)}
       ${buttonRow({ href: link, label: hasDeepLink ? 'Open Bid' : 'Open App' }, calLink ? { href: calLink, label: '📅 Add Walk-through to Outlook' } : null)}
+      ${folderButtonHtml(bid)}
     `),
   };
 }
@@ -348,6 +362,7 @@ function emailWalkthroughReminder(bid, walkthroughDate, walkthroughTime, recipie
       ${bidTable(bid)}
       ${walkthroughContactLine(contact)}
       ${buttonRow({ href: link, label: hasDeepLink ? 'Open Bid' : 'Open App' })}
+      ${folderButtonHtml(bid)}
     `),
   };
 }

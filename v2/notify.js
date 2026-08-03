@@ -48,6 +48,7 @@ async function bidEmailShape(bidId) {
     // templates simply won't have these, and fall back gracefully.
     bid_id: bid._id,
     project_id: bid.project_id,
+    folder_url: project?.folder_url || null,
   };
 }
 
@@ -142,6 +143,7 @@ async function coEmailShape(coId) {
     project_entity_name: project?.name || null,
     customer: null, stage: co.stage,
     estimate_due_date: co.due_date, estimate_amount: co.estimate_amount,
+    folder_url: project?.folder_url || null,
   };
 }
 
