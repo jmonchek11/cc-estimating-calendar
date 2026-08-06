@@ -2297,6 +2297,20 @@ const nameOpts = (roleFilter) => META.team
   .map(t => ({ value: t.name, label: `${t.name} (${t.initials})` }));
 const companyOpts = () => META.companies.map(c => ({ value: c.id, label: c.name }));
 const projectOpts = () => ALL_PROJECTS.map(p => ({ value: p.id, label: p.name }));
+// certified_payroll/tax_exempt are 3-state (null = TBD, not yet known —
+// distinct from a real "No"). Whoever starts a bid often can't answer this
+// yet, so TBD stays available everywhere EXCEPT Submit Bid, where a real
+// answer is required (submitBid rejects a missing value) — same pattern as
+// jurisdiction, which is also only ever asked for at that point.
+const tbdYesNoOptions = (yesLabel) => [{ value: '', label: 'TBD — not yet known' }, { value: 0, label: 'No' }, { value: 1, label: yesLabel }];
+const yesNoOptions = (yesLabel) => [{ value: 0, label: 'No' }, { value: 1, label: yesLabel }];
+const boolToSelectValue = (v) => v == null ? '' : (v ? 1 : 0);
+// Submit Bid's version: no TBD option (a real answer is required here), but
+// if the bid arrives here still unanswered, an explicit "— Choose —"
+// placeholder is needed so the field starts genuinely blank — a bare
+// <select> defaults to showing its first real option as if already chosen,
+// which would silently submit "No" instead of actually forcing a choice.
+const submitYesNoOptions = (yesLabel, alreadyKnown) => alreadyKnown ? yesNoOptions(yesLabel) : [{ value: '', label: '— Choose —' }, ...yesNoOptions(yesLabel)];
 
 // Shared Start-Bid field set (used by direct-bid creation)
 const startBidFields = () => ([
@@ -2310,10 +2324,10 @@ const startBidFields = () => ([
   { id: 'start_date', label: 'Start Date', type: 'date' },
   { id: 'drawing_stage', label: 'Drawing Stage', type: 'text', placeholder: '50% budget, 70% budget, 100% CD…' },
   { id: 'folder_url', label: 'Bid Folder Link (OneDrive)', type: 'text', placeholder: 'https://onedrive.live.com/…' },
-  { id: 'certified_payroll', label: 'Certified Payroll Job?', type: 'select', value: 0,
-    options: [{ value: 0, label: 'No' }, { value: 1, label: 'Yes — notifies Accounting on award' }] },
-  { id: 'tax_exempt', label: 'Tax Exempt Job?', type: 'select', value: 0,
-    options: [{ value: 0, label: 'No' }, { value: 1, label: 'Yes — notifies Purchasing on award' }] },
+  { id: 'certified_payroll', label: 'Certified Payroll Job?', type: 'select', value: '',
+    options: tbdYesNoOptions('Yes — notifies Accounting on award') },
+  { id: 'tax_exempt', label: 'Tax Exempt Job?', type: 'select', value: '',
+    options: tbdYesNoOptions('Yes — notifies Purchasing on award') },
 ]);
 
 // + New Bid → choose new vs existing project, then go straight to active_bid
@@ -2479,12 +2493,23 @@ function bidCustomerOpts(bidId, { excludeSubmitted } = {}) {
 function actSubmitBid(bidId) {
   const custs = bidCustomerOpts(bidId, { excludeSubmitted: true });
   if (!custs.length) { alert('Every customer on this bid already has a submission. Use "+ Add Submission" if you need to revise one.'); return; }
+  const b = DETAIL_CACHE[OPEN_PROJECT]?.bids.find(x => x.id === bidId) || {};
   showForm('📤 Submit Bid', [
     { id: 'company_ids', label: 'Submit to which customer(s)?', type: 'multicheck', required: true, options: custs },
     { id: 'amount', label: 'Estimate Amount $', type: 'currency', required: true },
     { id: 'jurisdiction', label: 'IBEW Local Jurisdiction', type: 'text', required: true, placeholder: '98' },
     { id: 'date_submitted', label: 'Date Estimate Sent', type: 'date', required: true, value: today },
     { id: 'approved_by', label: 'Estimate Approved By', type: 'select', required: true, options: nameOpts(['estimator', 'sales']) },
+    // A real answer is required by this point — the backend rejects a
+    // missing value here — but if it was already answered earlier (Start
+    // Bid / Edit Bid), it's pre-filled so nobody has to re-enter it; only a
+    // still-TBD bid actually forces a fresh choice.
+    { id: 'certified_payroll', label: 'Certified Payroll Job?', type: 'select', required: true,
+      value: b.certified_payroll == null ? '' : (b.certified_payroll ? 1 : 0),
+      options: submitYesNoOptions('Yes — notifies Accounting on award', b.certified_payroll != null) },
+    { id: 'tax_exempt', label: 'Tax Exempt Job?', type: 'select', required: true,
+      value: b.tax_exempt == null ? '' : (b.tax_exempt ? 1 : 0),
+      options: submitYesNoOptions('Yes — notifies Purchasing on award', b.tax_exempt != null) },
     { id: 'notes', label: 'Notes', type: 'textarea' },
   ], async data => {
     const r = await api('POST', `/api/v2/bids/${bidId}/submit`, data);
@@ -2590,10 +2615,10 @@ function actEditBid(bidId) {
       { id: 'owner_id', label: 'Opportunity Owner', type: 'select', emptyLabel: 'TBD', options: teamOpts(), value: b.owner?.id },
       { id: 'source', label: 'Source (where did this come from?)', type: 'text', value: b.source, placeholder: 'iSqFt, BuildingConnected, email invite, referral, phone call…' },
       { id: 'folder_url', label: 'Bid Folder Link (OneDrive)', type: 'text', value: b.folder_url, placeholder: 'https://onedrive.live.com/…' },
-      { id: 'certified_payroll', label: 'Certified Payroll Job?', type: 'select', value: b.certified_payroll ? 1 : 0,
-        options: [{ value: 0, label: 'No' }, { value: 1, label: 'Yes — notifies Accounting on award' }] },
-      { id: 'tax_exempt', label: 'Tax Exempt Job?', type: 'select', value: b.tax_exempt ? 1 : 0,
-        options: [{ value: 0, label: 'No' }, { value: 1, label: 'Yes — notifies Purchasing on award' }] },
+      { id: 'certified_payroll', label: 'Certified Payroll Job?', type: 'select', value: boolToSelectValue(b.certified_payroll),
+        options: tbdYesNoOptions('Yes — notifies Accounting on award') },
+      { id: 'tax_exempt', label: 'Tax Exempt Job?', type: 'select', value: boolToSelectValue(b.tax_exempt),
+        options: tbdYesNoOptions('Yes — notifies Purchasing on award') },
     );
     // Walk-through has its own dedicated action (🚶 button in the actions row,
     // plus a visible line on the bid card) rather than living buried in here —

@@ -258,8 +258,10 @@ async function getProjectDetail(projectId) {
     rfi_due_date: b.rfi_due_date,
     rfi_due_time: b.rfi_due_time,
     folder_url: b.folder_url,
-    certified_payroll: !!b.certified_payroll,
-    tax_exempt: !!b.tax_exempt,
+    // Three-state — leave null (TBD) as null, don't collapse it to false,
+    // or the edit form and badges can't tell "not yet known" from "No".
+    certified_payroll: b.certified_payroll == null ? null : !!b.certified_payroll,
+    tax_exempt: b.tax_exempt == null ? null : !!b.tax_exempt,
     walkthroughs: (b.walkthroughs || []).map(w => ({
       id: w._id, date: w.date, time: w.time,
       company: companyById[w.company_id] || null,
@@ -682,6 +684,10 @@ async function startBid(id, data, actorId) {
     start_date: data.start_date || null,
     drawing_stage: data.drawing_stage || null,
     folder_url: data.folder_url || null,
+    // Left TBD (null) if not answered here — this select's own '' option —
+    // submitBid() requires a real answer before the bid can be submitted.
+    certified_payroll: data.certified_payroll === '' || data.certified_payroll == null ? null : (Number(data.certified_payroll) === 1),
+    tax_exempt: data.tax_exempt === '' || data.tax_exempt == null ? null : (Number(data.tax_exempt) === 1),
     updated_at: ts(),
   }});
   for (const companyId of companyIds) {
@@ -1073,7 +1079,11 @@ async function submitBid(id, data, actorId) {
   const M = getModels();
   const bid = await loadBid(id);
   if (bid.stage !== 'active_bid') throw new Error(`Cannot submit from stage '${bid.stage}'`);
-  require_(data, ['amount', 'jurisdiction', 'date_submitted', 'approved_by']);
+  // certified_payroll/tax_exempt can be left TBD while a bid is being set up
+  // (whoever starts it often doesn't know yet) but must be a real Yes/No by
+  // the time it's actually submitted — same "force an answer here" pattern
+  // as jurisdiction, which has never had a value before this point either.
+  require_(data, ['amount', 'jurisdiction', 'date_submitted', 'approved_by', 'certified_payroll', 'tax_exempt']);
   requireNonZeroAmount(data.amount);
   const companyIds = await resolveCompanyIds(data.company_ids, data.new_companies);
   if (!companyIds.length) throw new Error('Pick at least one customer to submit to');
@@ -1090,7 +1100,12 @@ async function submitBid(id, data, actorId) {
     });
   }
 
-  const upd = { jurisdiction: String(data.jurisdiction), updated_at: ts() };
+  const upd = {
+    jurisdiction: String(data.jurisdiction),
+    certified_payroll: Number(data.certified_payroll) === 1,
+    tax_exempt: Number(data.tax_exempt) === 1,
+    updated_at: ts(),
+  };
   const [allCustomers, currentSubs] = await Promise.all([
     M.BidCustomer.find({ bid_id: bid._id }).lean(),
     M.BidSubmission.find({ bid_id: bid._id, is_current: 1 }).lean(),
@@ -1250,7 +1265,9 @@ async function adminUpdate(entity, id, data) {
     // forcing every submitted-bid edit to 1 regardless of which option was
     // actually chosen. Numeric comparison first, then coerce to 1/0.
     else if (f === 'superseded' || f === 'is_current') v = Number(v) === 1 ? 1 : 0;
-    else if (f === 'certified_payroll' || f === 'tax_exempt') v = Number(v) === 1 || v === true;
+    // Three-state — '' (TBD) already became null above and stays null;
+    // anything else is a real Yes/No answer.
+    else if (f === 'certified_payroll' || f === 'tax_exempt') v = (v == null) ? null : (Number(v) === 1 || v === true);
     upd[f] = v;
   }
   const r = await Model.updateOne({ _id: Number(id) }, { $set: upd });
@@ -2048,7 +2065,8 @@ async function getBidList(stage) {
       customers: [...new Set((custByBid[b._id] || []).filter(Boolean))],
       date_received: b.date_received, due_date: b.due_date, due_time: b.due_time,
       rfi_due_date: b.rfi_due_date, rfi_due_time: b.rfi_due_time, folder_url: b.folder_url,
-      certified_payroll: !!b.certified_payroll, tax_exempt: !!b.tax_exempt,
+      certified_payroll: b.certified_payroll == null ? null : !!b.certified_payroll,
+      tax_exempt: b.tax_exempt == null ? null : !!b.tax_exempt,
       walkthroughs: (b.walkthroughs || []).map(w => ({ id: w._id, date: w.date, time: w.time })),
       estimate_amount: b.estimate_amount, date_submitted: b.date_submitted, next_followup_date: b.next_followup_date,
       award_date: b.award_date, awarded_company: b.awarded_company_id ? coName[b.awarded_company_id] : null,
