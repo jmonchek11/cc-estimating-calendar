@@ -229,6 +229,7 @@
       <div class="nav-section-label">OPPORTUNITIES</div>
       <a class="nav-item" data-page="opportunities" href="#opportunities" onclick="navigate('opportunities');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="0.8" fill="currentColor" stroke="none"/></svg></span> Active Opportunities</a>
       <a class="nav-item" data-page="closed-opportunities" href="#closed-opportunities" onclick="navigate('closed-opportunities');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg></span> Closed Opportunities</a>
+      <a class="nav-item" data-page="queue" href="#queue" onclick="navigate('queue');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span> Queue</a>
       <div class="nav-section-label">BIDS</div>
       <a class="nav-item" data-page="active-bids" href="#active-bids" onclick="navigate('active-bids');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 11 14 10 22 21 10 13 10 13 2"/></svg></span> Active Bids</a>
       <a class="nav-item" data-page="submitted-bids" href="#submitted-bids" onclick="navigate('submitted-bids');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="21" y1="3" x2="10" y2="14"/><polygon points="21 3 14 21 10 14 3 10 21 3"/></svg></span> Submitted Bids</a>
@@ -419,6 +420,7 @@ function navigate(page) {
   if (page === 'history') { VIEW = { name: 'history' }; return renderHistory(); }
   if (page === 'opportunities') { VIEW = { name: 'bidlist', arg: 'opportunity' }; return renderBidList('opportunity'); }
   if (page === 'closed-opportunities') { VIEW = { name: 'bidlist', arg: 'closed' }; return renderBidList('closed'); }
+  if (page === 'queue') { VIEW = { name: 'bidlist', arg: 'queue' }; return renderBidList('queue'); }
   if (page === 'active-bids') { VIEW = { name: 'bidlist', arg: 'active_bid' }; return renderBidList('active_bid'); }
   if (page === 'submitted-bids') { VIEW = { name: 'bidlist', arg: 'submitted' }; return renderBidList('submitted'); }
   if (page === 'awarded-bids') { VIEW = { name: 'bidlist', arg: 'awarded' }; return renderBidList('awarded'); }
@@ -679,6 +681,15 @@ async function renderSettings() {
       </div>
     </div>
 
+    <div class="card" style="margin-bottom:14px">
+      <div style="padding:12px 16px;border-bottom:1px solid var(--border);font-weight:700;font-size:14px">🟣 Queue Notification</div>
+      <div style="padding:14px 16px">
+        <div class="v2-field"><label>Email to notify when an opportunity is approved to bid</label>
+          <input id="set-queue-email" type="text" placeholder="e.g. carrie@libertyintegrated.com" value="${esc(settings.queue_notify_email || '')}" ${isAdmin ? '' : 'disabled'} style="max-width:320px"></div>
+        ${isAdmin ? `<button class="v2-btn blue" onclick="actSaveQueueEmail()">Save</button>` : ''}
+      </div>
+    </div>
+
     ${isAdmin ? `
     <div class="card">
       <div style="padding:12px 16px;border-bottom:1px solid var(--border);font-weight:700;font-size:14px">✉️ Email Tools</div>
@@ -721,6 +732,12 @@ async function actSaveFollowupSettings() {
       fu_initial_days: Number(document.getElementById('set-fu-initial').value),
       fu_recurring_days: Number(document.getElementById('set-fu-recurring').value),
     });
+    alert('Saved.');
+  } catch (e) { alert('Failed: ' + e.message); }
+}
+async function actSaveQueueEmail() {
+  try {
+    await api('PUT', '/api/v2/settings', { queue_notify_email: document.getElementById('set-queue-email').value.trim() });
     alert('Saved.');
   } catch (e) { alert('Failed: ' + e.message); }
 }
@@ -1081,6 +1098,7 @@ async function renderDigest() {
 const BID_LIST_META = {
   opportunity: { page: 'opportunities',        title: '🔵 Active Opportunities', sub: 'considering — not yet bidding' },
   closed:      { page: 'closed-opportunities', title: '⚪ Closed Opportunities', sub: 'declined or called off' },
+  queue:       { page: 'queue',                title: '🟣 Queue', sub: 'approved — awaiting bid setup' },
   active_bid:  { page: 'active-bids',    title: '🟡 Active Bids',   sub: 'estimating in progress' },
   submitted:   { page: 'submitted-bids', title: '📤 Submitted Bids', sub: 'awaiting customer decision' },
   awarded:     { page: 'awarded-bids',   title: '✅ Awarded Bids',  sub: 'won — check job # / PM assignment' },
@@ -1232,8 +1250,15 @@ function renderBidListBody(stage) {
     if (stage === 'opportunity') {
       return `${b.due_date ? `<div style="font-size:12px;font-weight:700;color:${b.due_date < today ? '#dc2626' : 'var(--text-muted)'};margin-bottom:6px">Due ${fmtD(b.due_date)}${b.due_time ? ' · ' + fmtTimeShort(b.due_time) : ''}</div>` : ''}
         <div style="display:flex;gap:6px;justify-content:flex-end" onclick="event.stopPropagation()">
-          <button class="v2-btn green" style="padding:4px 10px;font-size:11px" onclick="actStartBid(${b.id})">✓ Bid</button>
+          <button class="v2-btn green" style="padding:4px 10px;font-size:11px" onclick="actApproveToBid(${b.id})">✓ Approve to Bid</button>
           <button class="v2-btn gray" style="padding:4px 10px;font-size:11px" onclick="actCloseBid(${b.id})">✗ No Bid</button>
+        </div>`;
+    }
+    if (stage === 'queue') {
+      return `${b.approved_to_bid_at ? `<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">Approved ${fmtD(b.approved_to_bid_at)}</div>` : ''}
+        <div style="display:flex;gap:6px;justify-content:flex-end" onclick="event.stopPropagation()">
+          <button class="v2-btn blue" style="padding:4px 10px;font-size:11px" onclick="actStartBid(${b.id})">→ Start Bid</button>
+          <button class="v2-btn outline" style="padding:4px 10px;font-size:11px" onclick="actUnapproveToBid(${b.id})">↩ Back to Opportunities</button>
         </div>`;
     }
     return b.due_date ? `<span style="font-size:12px;font-weight:700;color:${b.due_date < today ? '#dc2626' : 'var(--text-muted)'}">Due ${fmtD(b.due_date)}${b.due_time ? ' · ' + fmtTimeShort(b.due_time) : ''}</span>` : '';
@@ -1767,6 +1792,7 @@ function bidNode(b) {
           <span class="bc-bidnum">${b.bid_number ? esc(b.bid_number) : 'No bid #'}</span>
           ${isAwarded ? '<span class="awarded-pill">AWARDED</span>' : stageBadge(b.stage)}
           ${b.superseded ? '<span class="badge" style="background:#e2e8f0;color:#64748b">SUPERSEDED</span>' : ''}
+          ${b.stage === 'opportunity' && b.approved_to_bid ? `<span class="badge" style="background:#ede9fe;color:#6d28d9" title="Approved ${esc(b.approved_to_bid_at || '')} — in the Queue">QUEUED</span>` : ''}
           ${b.drawing_stage ? `<span class="badge" style="background:#ede9fe;color:#5b21b6">${esc(b.drawing_stage)}</span>` : ''}
           ${b.certified_payroll ? `<span class="badge" style="background:#fef3c7;color:#92400e" title="Notifies Accounting on award">CERTIFIED PAYROLL</span>` : ''}
           ${b.tax_exempt ? `<span class="badge" style="background:#dbeafe;color:#1e40af" title="Notifies Purchasing on award">TAX EXEMPT</span>` : ''}
@@ -1931,7 +1957,12 @@ function bidActions(b) {
   if (!b.superseded) {
     const canEditBid = CURRENT_USER?.is_admin || CURRENT_USER?.id === b.estimator?.id || CURRENT_USER?.id === b.salesperson?.id;
     if (b.stage === 'opportunity') {
-      primary = `<button class="v2-btn blue" onclick="actStartBid(${b.id})">→ Start Bid</button>`;
+      if (b.approved_to_bid) {
+        primary = `<button class="v2-btn blue" onclick="actStartBid(${b.id})">→ Start Bid</button>`;
+        menu.push({ label: '↩ Back to Opportunities', fn: `actUnapproveToBid(${b.id})` });
+      } else {
+        primary = `<button class="v2-btn green" onclick="actApproveToBid(${b.id})">✓ Approve to Bid</button>`;
+      }
       menu.push({ label: '📝 Log Follow-up', fn: `actLogFollowup('bid',${b.id})` });
       menu.push({ label: '📅 Due Date / Assign', fn: `actEditOpportunityDetails(${b.id})` });
       menu.push({ label: 'Close bid', fn: `actCloseBid(${b.id})`, danger: true });
@@ -3019,6 +3050,16 @@ function actNotAwardSubmission(submissionId) {
   ], data => api('POST', `/api/v2/submissions/${submissionId}/not-awarded`, data), 'Confirm Not Awarded', 'red');
 }
 
+async function actApproveToBid(bidId) {
+  if (!confirm('Approve this opportunity to move forward? It will move to the Queue and (if configured) notify the setup contact.')) return;
+  try { await api('POST', `/api/v2/bids/${bidId}/approve-to-bid`); await refresh(); }
+  catch (e) { alert('Failed: ' + e.message); }
+}
+async function actUnapproveToBid(bidId) {
+  if (!confirm('Move this back to Opportunities? It will leave the Queue.')) return;
+  try { await api('POST', `/api/v2/bids/${bidId}/unapprove-to-bid`); await refresh(); }
+  catch (e) { alert('Failed: ' + e.message); }
+}
 function actCloseBid(bidId) {
   showForm('Close Opportunity / Bid', [
     { id: 'closed_date', label: 'Closure Date', type: 'date', required: true, value: today },

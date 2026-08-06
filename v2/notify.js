@@ -162,6 +162,22 @@ async function notifyRoleAward(bidId, actorName) {
   } catch (e) { console.error('[v2 notify] role award email failed:', e.message); }
 }
 
+// Recipient is whoever Settings has configured (e.g. Carrie, who begins bid
+// setup once something's approved) — no-op if nothing's configured, rather
+// than guessing at an email/role.
+async function notifyApprovedToBid(bidId, actorName) {
+  try {
+    const M = getModels();
+    const settings = await M.Settings.findById('company').lean();
+    const to = settings?.queue_notify_email;
+    if (!to) return;
+    const shape = await bidEmailShape(bidId);
+    if (!shape) return;
+    const { subject, html } = mailer.emailApprovedToBid(shape, actorName || 'Someone');
+    await mailer.sendMail({ to, subject, html });
+  } catch (e) { console.error('[v2 notify] approved-to-bid email failed:', e.message); }
+}
+
 // change_order doesn't have a project/customer join worth the trip for a
 // reminder ping — reuses the same bidTable-shaped object, just thinner.
 async function coEmailShape(coId) {
@@ -229,4 +245,4 @@ async function notifyFollowup(parentType, parentId, followupData, actorId) {
   } catch (e) { console.error('[v2 notify] followup email failed:', e.message); }
 }
 
-module.exports = { bidEmailShape, coEmailShape, emailShapeForReminder, notifyAwarded, notifyRoleAward, notifyAssigned, notifyWalkthroughSet, notifyFollowup, bidRecipients, walkthroughContactInfo, emailForV2Member };
+module.exports = { bidEmailShape, coEmailShape, emailShapeForReminder, notifyAwarded, notifyRoleAward, notifyApprovedToBid, notifyAssigned, notifyWalkthroughSet, notifyFollowup, bidRecipients, walkthroughContactInfo, emailForV2Member };

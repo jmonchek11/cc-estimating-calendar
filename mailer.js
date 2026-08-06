@@ -325,6 +325,22 @@ function emailRoleAwardNotice(bid, actorName, reasonLabel, recipientName) {
   };
 }
 
+// Sent to whoever Settings has configured as the Queue notification
+// recipient (e.g. Carrie) the moment an opportunity is approved to move
+// forward, so setup can start — bid #, folder, estimator assignment, etc.
+// haven't happened yet at this point, this is just the "yes, bid it" signal.
+function emailApprovedToBid(bid, actorName) {
+  return {
+    subject: `📋 Ready for Setup — ${bid.project_name || bid.bid_number || 'Unnamed'}`,
+    html: base(`
+      ${iconHeading(`${APP_URL}/icon-active-bids.png`, 'Approved to Bid')}
+      <p><strong>${actorName}</strong> just approved this opportunity to move forward — it's in the Queue and ready for bid setup.</p>
+      ${bidTable(bid)}
+      ${buttonRow({ href: APP_URL, label: 'Open App' })}
+    `),
+  };
+}
+
 function emailReminder(bid, reminder, recipientName) {
   return {
     subject: `⏰ Reminder — ${bid.project_name || bid.bid_number || 'Unnamed'}`,
@@ -560,4 +576,4 @@ function emailIdeaStatusChanged(idea, newStatus) {
   };
 }
 
-module.exports = { sendMail, emailAssigned, emailFollowup, emailAwarded, emailRoleAwardNotice, emailReminder, emailWalkthroughSet, emailWalkthroughReminder, emailDigest, emailIdeaSubmitted, emailIdeaStatusChanged, wantsNotification, NOTIFICATION_CATEGORIES };
+module.exports = { sendMail, emailAssigned, emailFollowup, emailAwarded, emailRoleAwardNotice, emailApprovedToBid, emailReminder, emailWalkthroughSet, emailWalkthroughReminder, emailDigest, emailIdeaSubmitted, emailIdeaStatusChanged, wantsNotification, NOTIFICATION_CATEGORIES };

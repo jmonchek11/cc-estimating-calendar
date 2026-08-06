@@ -73,6 +73,13 @@ const BidSchema = new mongoose.Schema({
   // directory has tagged with the 'accounting'/'purchasing' role respectively.
   certified_payroll: { type: Boolean, default: null },
   tax_exempt:        { type: Boolean, default: null },
+  // Sales/LE decision that this opportunity should move forward — still
+  // stage 'opportunity' (bid #/dates aren't known yet), but pulled out of
+  // the Opportunities list into the Queue list so whoever does bid setup
+  // knows what's ready. Distinct from startBid() itself, which is the
+  // actual setup step and moves stage to 'active_bid'.
+  approved_to_bid:    { type: Boolean, default: false },
+  approved_to_bid_at: { type: String, default: null },
   drawing_stage:  { type: String, default: null },               // "50% budget", "80% budget", "100% CD"…
   drawings:       { type: String, default: null },               // drawing SET description, e.g. "Rev 2 dated 5/1/26 prepared by XYZ Architects" — from the JIS title sheet, distinct from drawing_stage
   notes:          { type: String, default: null },
@@ -298,6 +305,10 @@ const SettingsSchema = new mongoose.Schema({
   _id: String,                                                   // 'company'
   fu_initial_days:   { type: Number, default: 3 },
   fu_recurring_days: { type: Number, default: 7 },
+  // Who gets emailed when an opportunity is approved to bid (e.g. Carrie, to
+  // kick off setup) — configurable rather than hardcoded since that's a
+  // person/role, not something derivable from the data. Null/unset = no email.
+  queue_notify_email: { type: String, default: null },
 }, opts);
 
 const CounterSchema = new mongoose.Schema({

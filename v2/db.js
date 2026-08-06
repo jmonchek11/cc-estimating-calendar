@@ -81,6 +81,7 @@ const UNDOABLE_ACTIONS = {
   'bid.sub_estimator_add': async (u) => removeSubEstimator(u.bid_id, u.estimator_id, u.scope),
   'bid.sub_estimator_remove': async (u) => addSubEstimator(u.bid_id, { estimator_id: u.estimator_id, scope: u.scope }),
   'reminder.dismiss': async (u) => { const M = getModels(); await M.Reminder.updateOne({ _id: u.reminder_id }, { $set: { dismissed: 0 } }); },
+  'bid.approved_to_bid': async (u) => unapproveToBid(u.bid_id, null),
 };
 
 async function undoActivity(logId) {
@@ -262,6 +263,7 @@ async function getProjectDetail(projectId) {
     // or the edit form and badges can't tell "not yet known" from "No".
     certified_payroll: b.certified_payroll == null ? null : !!b.certified_payroll,
     tax_exempt: b.tax_exempt == null ? null : !!b.tax_exempt,
+    approved_to_bid: !!b.approved_to_bid, approved_to_bid_at: b.approved_to_bid_at,
     walkthroughs: (b.walkthroughs || []).map(w => ({
       id: w._id, date: w.date, time: w.time,
       company: companyById[w.company_id] || null,
@@ -513,7 +515,7 @@ function etWallClockToUTCms(dateStr, timeStr) {
 
 async function getSettings() {
   const { Settings } = getModels();
-  return (await Settings.findById('company').lean()) || { fu_initial_days: 3, fu_recurring_days: 7 };
+  return (await Settings.findById('company').lean()) || { fu_initial_days: 3, fu_recurring_days: 7, queue_notify_email: null };
 }
 
 function require_(data, fields) {
@@ -612,6 +614,7 @@ async function updateSettingsV2(data) {
   const upd = {};
   if ('fu_initial_days' in data) upd.fu_initial_days = Number(data.fu_initial_days);
   if ('fu_recurring_days' in data) upd.fu_recurring_days = Number(data.fu_recurring_days);
+  if ('queue_notify_email' in data) upd.queue_notify_email = data.queue_notify_email ? String(data.queue_notify_email).trim() : null;
   await M.Settings.findByIdAndUpdate('company', { $set: upd }, { upsert: true });
   return getSettings();
 }
@@ -1443,6 +1446,38 @@ async function closeBid(id, data, actorId) {
   return { bid_id: bid._id };
 }
 
+// ── Sales/LE approval to move forward, ahead of full bid setup ───────────────
+async function approveToBid(id, actor) {
+  const M = getModels();
+  const bid = await loadBid(id);
+  if (bid.stage !== 'opportunity') throw new Error(`Cannot approve to bid from stage '${bid.stage}'`);
+  if (bid.approved_to_bid) throw new Error('Already approved to bid');
+  await M.Bid.updateOne({ _id: bid._id }, { $set: { approved_to_bid: true, approved_to_bid_at: today(), updated_at: ts() } });
+  const proj = await M.Project.findById(bid.project_id).lean();
+  await logActivity({
+    actor_id: actor?.id, actor_name: actor?.name, action: 'bid.approved_to_bid', entity_type: 'bid', entity_id: bid._id,
+    summary: `Approved "${proj?.name || 'project'}" to bid — moved to Queue`,
+    undo: { bid_id: bid._id },
+  });
+  await events.safeEmit('bid.approved_to_bid', {
+    project_id: bid.project_id, bid_id: bid._id, actor_id: actor?.id || null,
+    payload: { project_name: proj?.name || null },
+  });
+  return { bid_id: bid._id };
+}
+async function unapproveToBid(id, actor) {
+  const M = getModels();
+  const bid = await loadBid(id);
+  if (!bid.approved_to_bid) throw new Error('Not currently approved to bid');
+  await M.Bid.updateOne({ _id: bid._id }, { $set: { approved_to_bid: false, approved_to_bid_at: null, updated_at: ts() } });
+  const proj = await M.Project.findById(bid.project_id).lean();
+  await logActivity({
+    actor_id: actor?.id, actor_name: actor?.name, action: 'bid.unapproved_to_bid', entity_type: 'bid', entity_id: bid._id,
+    summary: `Moved "${proj?.name || 'project'}" back to Opportunities`,
+  });
+  return { bid_id: bid._id };
+}
+
 // ── Follow-up logging (bid or change_order; no_decision restarts the timer) ───
 async function logFollowupV2(data) {
   const M = getModels();
@@ -2059,7 +2094,13 @@ async function getSearchResults(q) {
 
 async function getBidList(stage) {
   const M = getModels();
-  const bids = await M.Bid.find({ stage, superseded: { $ne: 1 } }).sort({ due_date: 1, _id: 1 }).lean();
+  // 'queue' is a view onto 'opportunity' rows that have been approved to
+  // move forward, not a real stage in the bid state machine — approving one
+  // pulls it out of the plain Opportunities list (below) and into this one.
+  const filter = stage === 'queue' ? { stage: 'opportunity', approved_to_bid: true, superseded: { $ne: 1 } }
+    : stage === 'opportunity' ? { stage, approved_to_bid: { $ne: true }, superseded: { $ne: 1 } }
+    : { stage, superseded: { $ne: 1 } };
+  const bids = await M.Bid.find(filter).sort({ due_date: 1, _id: 1 }).lean();
   const ids = bids.map(b => b._id);
   // Awarded bids also want their Job's number/PM surfaced — that's exactly
   // the data-cleanup gap (missing job # / PM assignment) an "all awarded
@@ -2087,6 +2128,7 @@ async function getBidList(stage) {
       rfi_due_date: b.rfi_due_date, rfi_due_time: b.rfi_due_time, folder_url: b.folder_url,
       certified_payroll: b.certified_payroll == null ? null : !!b.certified_payroll,
       tax_exempt: b.tax_exempt == null ? null : !!b.tax_exempt,
+      approved_to_bid: !!b.approved_to_bid, approved_to_bid_at: b.approved_to_bid_at,
       walkthroughs: (b.walkthroughs || []).map(w => ({ id: w._id, date: w.date, time: w.time })),
       estimate_amount: b.estimate_amount, date_submitted: b.date_submitted, next_followup_date: b.next_followup_date,
       award_date: b.award_date, awarded_company: b.awarded_company_id ? coName[b.awarded_company_id] : null,
@@ -2964,7 +3006,7 @@ module.exports = {
   createOpportunity, createDirectBid, startBid, submitBid, addSubmission, reactivateBid, addBidCustomers, updateOpportunity, adminUpdate,
   getContacts, getContactDetail, createContact, updateContact, deleteContact, getContactBids, getCompanyBids,
   addBidCustomerContact, removeBidCustomerContact,
-  awardSubmission, notAwardSubmission, closeBid, logFollowupV2, updateFollowup,
+  awardSubmission, notAwardSubmission, closeBid, approveToBid, unapproveToBid, logFollowupV2, updateFollowup,
   createLegacyJob, updateJob,
   createChangeOrder, submitCO, approveCO, notApproveCO, voidCO, reopenCO, reviseCO,
   _norm, resolveCompanyByName, ensureBidCustomer, teamMap,

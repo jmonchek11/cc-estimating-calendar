@@ -239,6 +239,13 @@ router.delete('/api/v2/admin/company/:id',     requireAdmin, t(req => v2db.delet
 router.delete('/api/v2/admin/change-order/:id', requireAdmin, t(req => v2db.deleteChangeOrder(req.params.id),
   (req, r) => ({ action: 'admin.delete_co', summary: `Deleted change order ${r.label}`, entity_type: 'change_order', entity_id: Number(req.params.id) })));
 router.delete('/api/v2/admin/override/:id',    requireAdmin, t(req => v2db.removeOverride(req.params.id)));
+router.post('/api/v2/bids/:id/approve-to-bid', t(async req => {
+    const actor = await actorOf(req);
+    const r = await v2db.approveToBid(req.params.id, actor);
+    notify.notifyApprovedToBid(Number(req.params.id), actor?.name);
+    return r;
+  }));
+router.post('/api/v2/bids/:id/unapprove-to-bid', t(async req => v2db.unapproveToBid(req.params.id, await actorOf(req))));
 router.post('/api/v2/bids/:id/close',         t(req => v2db.closeBid(req.params.id, req.body, req.session.userId),
   async (req) => ({ action: 'bid.close', summary: `Closed bid ${await v2db.bidLabel(req.params.id)} — ${req.body.close_reason || 'no reason given'}`, entity_type: 'bid', entity_id: Number(req.params.id) })));
 router.post('/api/v2/bids/:id/submissions',   t(req => v2db.addSubmission(req.params.id, req.body, req.session.userId),
