@@ -85,7 +85,8 @@
   .onedrive-icon-box { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 6px; flex-shrink: 0; }
   .onedrive-icon-box.has-link { background: #e8f1fb; border: 1px solid #c7e0f4; cursor: pointer; }
   .onedrive-icon-box.has-link:hover { background: #d7e9fa; }
-  .onedrive-icon-box.no-link { background: var(--bg); border: 1px dashed var(--border); opacity: .5; cursor: default; }
+  .onedrive-icon-box.no-link { background: var(--bg); border: 1px dashed var(--border); opacity: .5; cursor: pointer; }
+  .onedrive-icon-box.no-link:hover { opacity: .85; }
   .bc-meta { padding: 0 16px 12px; font-size: 12px; color: var(--text-muted); line-height: 1.6; }
   .bc-divider { height: 1px; background: var(--border); margin: 0 16px; }
   .bc-section { padding: 14px 16px; }
@@ -268,11 +269,14 @@ const ONEDRIVE_ICON = `<svg viewBox="0 0 24 24" width="14" height="14" xmlns="ht
 const onedriveButtonHtml = (url) => url
   ? `<a class="onedrive-btn" href="${esc(url)}" target="_blank" rel="noopener">${ONEDRIVE_ICON} Open in OneDrive</a>` : '';
 // Compact icon-only indicator for list rows — clickable (and colored) when
-// a link exists, dimmed/outlined and inert when it doesn't, so scanning a
-// list makes it obvious at a glance which bids still need one set.
-const onedriveIconBoxHtml = (url) => url
+// a link exists (opens it), and ALSO clickable when it doesn't (opens a
+// quick "set the link" prompt right there) — every state in this list is
+// actionable, so scanning a list makes it obvious at a glance which bids
+// still need one set, and fixing that is one click away instead of a trip
+// into Edit Bid. `bidId` is required for the no-link state.
+const onedriveIconBoxHtml = (url, bidId) => url
   ? `<a class="onedrive-icon-box has-link" href="${esc(url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Open in OneDrive">${ONEDRIVE_ICON}</a>`
-  : `<span class="onedrive-icon-box no-link" title="No OneDrive folder link set">${ONEDRIVE_ICON}</span>`;
+  : `<span class="onedrive-icon-box no-link" onclick="event.stopPropagation();actSetBidFolder(${bidId})" title="OneDrive link not set yet — click to add">${ONEDRIVE_ICON}</span>`;
 // Calendar-day difference between two "YYYY-MM-DD" strings, parsed as UTC
 // noon (not midnight) so DST transitions in between can't shift the count
 // by a day — a due date is a calendar date, not a moment in time.
@@ -1247,8 +1251,10 @@ function renderBidListBody(stage) {
             ${b.salesperson ? ` Sales ${ini(b.salesperson)}` : ''}
           </div>
         </div>
-        ${onedriveIconBoxHtml(b.folder_url)}
-        <div style="text-align:right;flex-shrink:0">${right(b)}</div>
+        <div style="display:flex;align-items:center;gap:12px;flex-shrink:0">
+          ${onedriveIconBoxHtml(b.folder_url, b.id)}
+          <div style="text-align:right;min-width:108px">${right(b)}</div>
+        </div>
       </div>`).join('') : '<div style="padding:24px;text-align:center;color:var(--text-muted)">No matches</div>';
 }
 
@@ -1596,7 +1602,9 @@ async function renderFlyout(fresh) {
     const b = d.bids.find(x => x.id === FLYOUT.id);
     if (!b) { closeFlyout(); return; }
     title = `${b.bid_number || 'Bid'}`; sub = esc(d.name);
-    folderUrl = b.folder_url;
+    // Not set here — bidNode() already shows the "Open in OneDrive" button
+    // in the card itself, right under the bid #, so a second one up in the
+    // header would just be redundant.
     body = bidNode(b);
     if (b.stage === 'awarded') { const job = d.jobs.find(j => j.winning_bid_id === b.id); if (job) body += jobNode(job); }
   } else {
@@ -2767,6 +2775,16 @@ async function actClearRFI(bidId) {
   if (!confirm('Clear the RFI due date?')) return;
   try { await api('PATCH', `/api/v2/admin/bid/${bidId}`, { rfi_due_date: '', rfi_due_time: '' }); await refresh(); }
   catch (e) { alert('Failed to clear: ' + e.message); }
+}
+// Triggered from the dimmed "no-link" OneDrive icon in a bid-list row —
+// deliberately doesn't look up the bid's current data first (list rows span
+// every project, so DETAIL_CACHE[OPEN_PROJECT] can't be trusted to hold the
+// right one), which is fine since this only ever fires when the link is
+// already known to be empty.
+function actSetBidFolder(bidId) {
+  showForm('📁 OneDrive Folder Link', [
+    { id: 'folder_url', label: 'Bid Folder Link (OneDrive)', type: 'text', required: true, placeholder: 'https://onedrive.live.com/…' },
+  ], data => api('PATCH', `/api/v2/admin/bid/${bidId}`, data), 'Save', 'blue');
 }
 
 function subEstimatorListHtml(bidId, b) {
