@@ -77,6 +77,10 @@ const BidSchema = new mongoose.Schema({
   // directory has tagged with the 'accounting'/'purchasing' role respectively.
   certified_payroll: { type: Boolean, default: null },
   tax_exempt:        { type: Boolean, default: null },
+  // Same TBD/forced-answer pattern as certified_payroll/tax_exempt above —
+  // no automatic award notification for this one though, since (unlike
+  // accounting/purchasing for those) there's no obvious department owner.
+  prevailing_wage:   { type: Boolean, default: null },
   // Sales/LE decision that this opportunity should move forward — still
   // stage 'opportunity' (bid #/dates aren't known yet), but pulled out of
   // the Opportunities list into the Queue list so whoever does bid setup

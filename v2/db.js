@@ -263,6 +263,7 @@ async function getProjectDetail(projectId) {
     // or the edit form and badges can't tell "not yet known" from "No".
     certified_payroll: b.certified_payroll == null ? null : !!b.certified_payroll,
     tax_exempt: b.tax_exempt == null ? null : !!b.tax_exempt,
+    prevailing_wage: b.prevailing_wage == null ? null : !!b.prevailing_wage,
     approved_to_bid: !!b.approved_to_bid, approved_to_bid_at: b.approved_to_bid_at,
     walkthroughs: (b.walkthroughs || []).map(w => ({
       id: w._id, date: w.date, time: w.time,
@@ -712,6 +713,7 @@ async function startBid(id, data, actorId) {
     // submitBid() requires a real answer before the bid can be submitted.
     certified_payroll: data.certified_payroll === '' || data.certified_payroll == null ? null : (Number(data.certified_payroll) === 1),
     tax_exempt: data.tax_exempt === '' || data.tax_exempt == null ? null : (Number(data.tax_exempt) === 1),
+    prevailing_wage: data.prevailing_wage === '' || data.prevailing_wage == null ? null : (Number(data.prevailing_wage) === 1),
     updated_at: ts(),
   }});
   for (const companyId of companyIds) {
@@ -1107,7 +1109,7 @@ async function submitBid(id, data, actorId) {
   // (whoever starts it often doesn't know yet) but must be a real Yes/No by
   // the time it's actually submitted — same "force an answer here" pattern
   // as jurisdiction, which has never had a value before this point either.
-  require_(data, ['amount', 'jurisdiction', 'date_submitted', 'approved_by', 'certified_payroll', 'tax_exempt']);
+  require_(data, ['amount', 'jurisdiction', 'date_submitted', 'approved_by', 'certified_payroll', 'tax_exempt', 'prevailing_wage']);
   requireNonZeroAmount(data.amount);
   const companyIds = await resolveCompanyIds(data.company_ids, data.new_companies);
   if (!companyIds.length) throw new Error('Pick at least one customer to submit to');
@@ -1128,6 +1130,7 @@ async function submitBid(id, data, actorId) {
     jurisdiction: String(data.jurisdiction),
     certified_payroll: Number(data.certified_payroll) === 1,
     tax_exempt: Number(data.tax_exempt) === 1,
+    prevailing_wage: Number(data.prevailing_wage) === 1,
     updated_at: ts(),
   };
   const [allCustomers, currentSubs] = await Promise.all([
@@ -1260,7 +1263,7 @@ const ADMIN_EDITABLE = {
   // path can't do.
   bid:            ['bid_number', 'estimator_id', 'salesperson_id', 'date_received', 'due_date', 'due_time', 'start_date',
                    'drawing_stage', 'notes', 'jurisdiction', 'superseded', 'owner_id', 'source', 'rfi_due_date', 'rfi_due_time', 'folder_url',
-                   'certified_payroll', 'tax_exempt'],
+                   'certified_payroll', 'tax_exempt', 'prevailing_wage'],
   job:            ['job_number', 'pm_id', 'awarded_company_id', 'award_date'],
   change_order:   ['co_number', 'name', 'due_date', 'start_date', 'estimator_id', 'notes',
                    'estimate_amount', 'date_submitted', 'approved_by', 'approval_date'],
@@ -1291,7 +1294,7 @@ async function adminUpdate(entity, id, data) {
     else if (f === 'superseded' || f === 'is_current') v = Number(v) === 1 ? 1 : 0;
     // Three-state — '' (TBD) already became null above and stays null;
     // anything else is a real Yes/No answer.
-    else if (f === 'certified_payroll' || f === 'tax_exempt') v = (v == null) ? null : (Number(v) === 1 || v === true);
+    else if (f === 'certified_payroll' || f === 'tax_exempt' || f === 'prevailing_wage') v = (v == null) ? null : (Number(v) === 1 || v === true);
     upd[f] = v;
   }
   const r = await Model.updateOne({ _id: Number(id) }, { $set: upd });

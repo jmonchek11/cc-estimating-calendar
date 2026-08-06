@@ -1797,6 +1797,7 @@ function bidNode(b) {
           ${b.drawing_stage ? `<span class="badge" style="background:#ede9fe;color:#5b21b6">${esc(b.drawing_stage)}</span>` : ''}
           ${b.certified_payroll ? `<span class="badge" style="background:#fef3c7;color:#92400e" title="Notifies Accounting on award">CERTIFIED PAYROLL</span>` : ''}
           ${b.tax_exempt ? `<span class="badge" style="background:#dbeafe;color:#1e40af" title="Notifies Purchasing on award">TAX EXEMPT</span>` : ''}
+          ${b.prevailing_wage ? `<span class="badge" style="background:#dcfce7;color:#166534">PREVAILING WAGE</span>` : ''}
           ${onedriveButtonHtml(b.folder_url)}
         </div>
         ${(b.estimate_amount || b.due_date) ? `<div class="bc-hd-right">
@@ -2402,6 +2403,8 @@ const startBidFields = () => ([
     options: tbdYesNoOptions('Yes — notifies Accounting on award') },
   { id: 'tax_exempt', label: 'Tax Exempt Job?', type: 'select', value: '',
     options: tbdYesNoOptions('Yes — notifies Purchasing on award') },
+  { id: 'prevailing_wage', label: 'Prevailing Wage Job?', type: 'select', value: '',
+    options: tbdYesNoOptions('Yes') },
 ]);
 
 // + New Bid → choose new vs existing project, then go straight to active_bid
@@ -2616,6 +2619,9 @@ function actSubmitBid(bidId) {
     { id: 'tax_exempt', label: 'Tax Exempt Job?', type: 'select', required: true,
       value: b.tax_exempt == null ? '' : (b.tax_exempt ? 1 : 0),
       options: submitYesNoOptions('Yes — notifies Purchasing on award', b.tax_exempt != null) },
+    { id: 'prevailing_wage', label: 'Prevailing Wage Job?', type: 'select', required: true,
+      value: b.prevailing_wage == null ? '' : (b.prevailing_wage ? 1 : 0),
+      options: submitYesNoOptions('Yes', b.prevailing_wage != null) },
     { id: 'notes', label: 'Notes', type: 'textarea' },
   ], async data => {
     const r = await api('POST', `/api/v2/bids/${bidId}/submit`, data);
@@ -2729,6 +2735,8 @@ function actEditBid(bidId) {
         options: tbdYesNoOptions('Yes — notifies Accounting on award') },
       { id: 'tax_exempt', label: 'Tax Exempt Job?', type: 'select', value: boolToSelectValue(b.tax_exempt),
         options: tbdYesNoOptions('Yes — notifies Purchasing on award') },
+      { id: 'prevailing_wage', label: 'Prevailing Wage Job?', type: 'select', value: boolToSelectValue(b.prevailing_wage),
+        options: tbdYesNoOptions('Yes') },
     );
     // Walk-through has its own dedicated action (🚶 button in the actions row,
     // plus a visible line on the bid card) rather than living buried in here —
