@@ -1558,10 +1558,11 @@ async function renderProjectPage(projectId) {
     <div class="page-header">
       <div>
         <div class="page-title">🏗️ ${esc(d.name)}</div>
-        <div class="page-subtitle">${bidN} bid${bidN!==1?'s':''} · ${jobN} job${jobN!==1?'s':''} · ${coN} change order${coN!==1?'s':''}</div>
+        <div class="page-subtitle">${bidN} bid${bidN!==1?'s':''} · ${jobN} job${jobN!==1?'s':''} · ${coN} change order${coN!==1?'s':''}${d.location ? ' · ' + esc(d.location) : ''}</div>
       </div>
       <button class="v2-btn outline" onclick="navigate('projects')">← All Projects</button>
     </div>
+    ${d.description ? `<div class="card" style="padding:12px 16px;margin-bottom:14px;font-size:13px;color:var(--text-muted)">${esc(d.description)}</div>` : ''}
     ${renderHierarchy(d)}`;
 }
 
@@ -2419,6 +2420,14 @@ function newBidForm({ projectId, projectName } = {}) {
 // company each contact actually belongs to. New (not-yet-in-system)
 // companies have no contacts to pick from; add those after creating the
 // opportunity, same as always.
+// One fuzzy-search + add-new combo per selected company — same picker the
+// company field itself uses (comboRenderChips/comboRenderMenu/comboPick/
+// comboAddNew), just registered dynamically since these fields don't exist
+// yet when the form first opens (they come and go as companies are added/
+// removed). `type: 'company'` here only borrows comboRenderMenu's plain
+// substring-match behavior (not 'project's typo-tolerant fuzzy scoring,
+// which doesn't make sense for a short contact list) — it's never rendered
+// through showForm's own field-type switch, just read by the combo helpers.
 function renderOppContactPickers(contactsByCompany) {
   const container = document.getElementById('custom-opp_contacts_section');
   if (!container) return;
@@ -2430,15 +2439,34 @@ function renderOppContactPickers(contactsByCompany) {
     return;
   }
   const rows = existing.map(s => {
+    const fid = 'opp_contact_' + s.id;
     const contacts = contactsByCompany[s.id] || [];
-    return `<div style="margin-bottom:8px">
+    COMBO_FIELDS[fid] = { id: fid, type: 'company', noun: 'contact', multi: true, allowNew: true,
+      options: contacts.map(c => ({ value: c.id, label: c.full_name + (c.title ? ` (${c.title})` : '') })) };
+    if (!COMBO_STATE[fid]) COMBO_STATE[fid] = [];
+    return `<div style="margin-bottom:10px">
       <div style="font-size:12px;font-weight:600;margin-bottom:3px">${esc(s.name)}</div>
-      ${contacts.length ? contacts.map(c => `<label class="v2-check"><input type="checkbox" data-opp-contact="${s.id}" value="${c.id}"> ${esc(c.full_name)}${c.title ? ` <span style="color:var(--text-muted)">(${esc(c.title)})</span>` : ''}</label>`).join('')
-        : `<div style="font-size:11px;color:var(--text-muted)">No contacts on file yet — add one after creating the opportunity.</div>`}
+      <div class="v2-combo">
+        <div class="v2-combo-box">
+          <span id="cc-${fid}-chips"></span>
+          <input id="vf-${fid}" class="v2-combo-input" type="text" autocomplete="off" placeholder="Type a contact name…">
+        </div>
+        <div class="v2-combo-menu" id="cc-${fid}-menu"></div>
+      </div>
     </div>`;
   }).join('');
-  const freshNote = fresh.length ? `<div style="font-size:11px;color:var(--text-muted);margin-top:4px">${esc(fresh.map(s => s.name).join(', '))} — new compan${fresh.length > 1 ? 'ies' : 'y'}, no contacts yet.</div>` : '';
+  const freshNote = fresh.length ? `<div style="font-size:11px;color:var(--text-muted);margin-top:4px">${esc(fresh.map(s => s.name).join(', '))} — new compan${fresh.length > 1 ? 'ies' : 'y'}, add contacts after creating the opportunity.</div>` : '';
   container.innerHTML = `<div class="v2-field"><label>Contact(s)</label>${rows}${freshNote}</div>`;
+
+  existing.forEach(s => {
+    const fid = 'opp_contact_' + s.id;
+    comboRenderChips(fid);
+    const input = document.getElementById('vf-' + fid), menu = document.getElementById('cc-' + fid + '-menu');
+    if (!input) return;
+    input.addEventListener('input', () => comboRenderMenu(fid));
+    input.addEventListener('focus', () => comboRenderMenu(fid));
+    input.addEventListener('blur', () => setTimeout(() => { if (menu) menu.style.display = 'none'; }, 150));
+  });
 }
 async function actNewOpportunity() {
   let contactsByCompany = {};
@@ -2462,11 +2490,15 @@ async function actNewOpportunity() {
     { id: 'notes', label: 'Notes (internal discussion)', type: 'textarea', placeholder: 'Why are we considering this?' },
   ], data => {
     const contact_ids_by_company = {};
-    document.querySelectorAll('#v2-form-overlay [data-opp-contact]:checked').forEach(el => {
-      const cid = el.dataset.oppContact;
-      (contact_ids_by_company[cid] = contact_ids_by_company[cid] || []).push(Number(el.value));
+    const new_contacts_by_company = {};
+    (COMBO_STATE['company_ids'] || []).filter(s => s.id).forEach(s => {
+      const picks = COMBO_STATE['opp_contact_' + s.id] || [];
+      const existingIds = picks.filter(p => p.id).map(p => p.id);
+      const newNames = picks.filter(p => !p.id).map(p => p.name);
+      if (existingIds.length) contact_ids_by_company[s.id] = existingIds;
+      if (newNames.length) new_contacts_by_company[s.id] = newNames;
     });
-    return api('POST', '/api/v2/opportunities', { ...data, contact_ids_by_company });
+    return api('POST', '/api/v2/opportunities', { ...data, contact_ids_by_company, new_contacts_by_company });
   }, 'Create Opportunity');
 
   renderOppContactPickers(contactsByCompany);
@@ -2616,8 +2648,11 @@ function findCO(coId) {
 
 function actEditProject(projectId) {
   const name = (ALL_PROJECTS.find(p => p.id === projectId) || {}).name || '';
+  const d = DETAIL_CACHE[projectId] || {};
   showForm('✏️ Edit Project (admin)', [
     { id: 'name', label: 'Project Name', type: 'text', required: true, value: name },
+    { id: 'description', label: 'Project Description', type: 'textarea', value: d.description, placeholder: 'Brief description of the scope of work…' },
+    { id: 'location', label: 'Location', type: 'text', value: d.location, placeholder: 'City, State or site address…' },
   ], data => api('PATCH', `/api/v2/admin/project/${projectId}`, data), 'Save Changes');
 }
 

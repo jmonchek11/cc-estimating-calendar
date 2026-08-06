@@ -340,6 +340,8 @@ async function getProjectDetail(projectId) {
   return {
     id: project._id,
     name: project.name,
+    description: project.description,
+    location: project.location,
     bids: bids
       .map(fmtBid)
       .sort((a, b) => stageRank(a.stage) - stageRank(b.stage)),
@@ -616,7 +618,7 @@ async function updateSettingsV2(data) {
 
 // ── Opportunity creation ──────────────────────────────────────────────────────
 // Creates a Project (or attaches to an existing one) + an opportunity Bid.
-async function createOpportunity({ project_id, project_name, notes, description, location, due_date, due_time, owner_id, source, company_ids, new_companies, contact_ids_by_company, created_by }) {
+async function createOpportunity({ project_id, project_name, notes, description, location, due_date, due_time, owner_id, source, company_ids, new_companies, contact_ids_by_company, new_contacts_by_company, created_by }) {
   const M = getModels();
   let pid = project_id ? Number(project_id) : null;
   let isNewProject = false;
@@ -643,6 +645,24 @@ async function createOpportunity({ project_id, project_name, notes, description,
       if (!companyIds.includes(companyId) || !contactIds?.length) continue;
       const bc = await M.BidCustomer.findOne({ bid_id: bidId, company_id: companyId }).lean();
       if (bc) await M.BidCustomer.updateOne({ _id: bc._id }, { $addToSet: { contact_ids: { $each: contactIds.map(Number) } } });
+    }
+  }
+  // Contacts typed in fresh via the picker's "add new" option — create the
+  // Contact record first, then attach it same as an existing pick.
+  if (new_contacts_by_company) {
+    for (const [companyIdStr, names] of Object.entries(new_contacts_by_company)) {
+      const companyId = Number(companyIdStr);
+      if (!companyIds.includes(companyId) || !names?.length) continue;
+      const bc = await M.BidCustomer.findOne({ bid_id: bidId, company_id: companyId }).lean();
+      if (!bc) continue;
+      for (const rawName of names) {
+        const name = String(rawName || '').trim();
+        if (!name) continue;
+        const [first, ...rest] = name.split(/\s+/);
+        const contactId = await nextId('contacts');
+        await M.Contact.create({ _id: contactId, company_id: companyId, first_name: first || null, last_name: rest.join(' ') || null, active: 1 });
+        await M.BidCustomer.updateOne({ _id: bc._id }, { $addToSet: { contact_ids: contactId } });
+      }
     }
   }
 
@@ -1228,7 +1248,7 @@ async function reactivateBid(id, data, actorId) {
 // Bid submission fields (estimate $, date sent, approved by) are edited on the
 // bid_submission entity, not the bid — the bid's headline is derived from them.
 const ADMIN_EDITABLE = {
-  project:        ['name'],
+  project:        ['name', 'description', 'location'],
   company:        ['name', 'city', 'state'],
   // Walk-throughs are NOT here — they go through the dedicated add/update/
   // remove walk-through endpoints, which need find-or-create logic for the
