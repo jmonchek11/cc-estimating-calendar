@@ -66,6 +66,8 @@ const BidSchema = new mongoose.Schema({
   rfi_due_date:   { type: String, default: null },               // official RFI (Request for Information) cutoff, when a project has one — independent of due_date/stage
   rfi_due_time:   { type: String, default: null },               // "HH:MM", 24-hour — optional
   folder_url:     { type: String, default: null },               // link to THIS bid's own OneDrive folder — a new folder is created per bid (not per project); at award, the team renames it from "bid# - bid name" to "job# - job name" but the link itself stays valid
+  certified_payroll: { type: Boolean, default: false },           // on award, notifies everyone the Hub directory has tagged with the 'accounting' role
+  tax_exempt:        { type: Boolean, default: false },           // on award, notifies everyone the Hub directory has tagged with the 'purchasing' role
   drawing_stage:  { type: String, default: null },               // "50% budget", "80% budget", "100% CD"…
   drawings:       { type: String, default: null },               // drawing SET description, e.g. "Rev 2 dated 5/1/26 prepared by XYZ Architects" — from the JIS title sheet, distinct from drawing_stage
   notes:          { type: String, default: null },

@@ -258,6 +258,8 @@ async function getProjectDetail(projectId) {
     rfi_due_date: b.rfi_due_date,
     rfi_due_time: b.rfi_due_time,
     folder_url: b.folder_url,
+    certified_payroll: !!b.certified_payroll,
+    tax_exempt: !!b.tax_exempt,
     walkthroughs: (b.walkthroughs || []).map(w => ({
       id: w._id, date: w.date, time: w.time,
       company: companyById[w.company_id] || null,
@@ -1218,7 +1220,8 @@ const ADMIN_EDITABLE = {
   // site company/contact (and array-entry targeting) this generic whitelist
   // path can't do.
   bid:            ['bid_number', 'estimator_id', 'salesperson_id', 'date_received', 'due_date', 'due_time', 'start_date',
-                   'drawing_stage', 'notes', 'jurisdiction', 'superseded', 'owner_id', 'source', 'rfi_due_date', 'rfi_due_time', 'folder_url'],
+                   'drawing_stage', 'notes', 'jurisdiction', 'superseded', 'owner_id', 'source', 'rfi_due_date', 'rfi_due_time', 'folder_url',
+                   'certified_payroll', 'tax_exempt'],
   job:            ['job_number', 'pm_id', 'awarded_company_id', 'award_date'],
   change_order:   ['co_number', 'name', 'due_date', 'start_date', 'estimator_id', 'notes',
                    'estimate_amount', 'date_submitted', 'approved_by', 'approval_date'],
@@ -1243,6 +1246,7 @@ async function adminUpdate(entity, id, data) {
       if (v != null) requireNonZeroAmount(v);
     }
     else if (f === 'superseded' || f === 'is_current') v = v ? 1 : 0;
+    else if (f === 'certified_payroll' || f === 'tax_exempt') v = Number(v) === 1 || v === true;
     upd[f] = v;
   }
   const r = await Model.updateOne({ _id: Number(id) }, { $set: upd });
@@ -2040,6 +2044,7 @@ async function getBidList(stage) {
       customers: [...new Set((custByBid[b._id] || []).filter(Boolean))],
       date_received: b.date_received, due_date: b.due_date, due_time: b.due_time,
       rfi_due_date: b.rfi_due_date, rfi_due_time: b.rfi_due_time, folder_url: b.folder_url,
+      certified_payroll: !!b.certified_payroll, tax_exempt: !!b.tax_exempt,
       walkthroughs: (b.walkthroughs || []).map(w => ({ id: w._id, date: w.date, time: w.time })),
       estimate_amount: b.estimate_amount, date_submitted: b.date_submitted, next_followup_date: b.next_followup_date,
       award_date: b.award_date, awarded_company: b.awarded_company_id ? coName[b.awarded_company_id] : null,

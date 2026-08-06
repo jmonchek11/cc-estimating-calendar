@@ -306,6 +306,7 @@ router.post('/api/v2/submissions/:id/award', async (req, res) => {
     // fire-and-forget — never let a mail failure (or a logging failure) affect the award itself
     maindb.getMember(req.session.userId).then(async actor => {
       notify.notifyAwarded(result.bid_id, actor?.name);
+      notify.notifyRoleAward(result.bid_id, actor?.name);
       v2db.logActivity({ actor_id: actor?.id, actor_name: actor?.name, action: 'bid.award',
         summary: `Awarded bid ${await v2db.bidLabel(result.bid_id)}`, entity_type: 'bid', entity_id: result.bid_id }).catch(() => {});
     }).catch(() => {});

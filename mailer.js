@@ -303,6 +303,28 @@ function emailAwarded(bid, actorName) {
   };
 }
 
+// Role-gated award notice — sent to whoever the Liberty Hub directory has
+// tagged with a given role (accounting for certified payroll, purchasing
+// for tax exempt) the moment a bid is awarded, so that team finds out about
+// a project needing their attention as soon as it's won rather than
+// whenever someone remembers to loop them in. `reasonLabel` is the flag
+// that triggered it ("Certified Payroll" / "Tax Exempt"); `recipientName`
+// comes from the Hub directory, not TeamMember, since these people may not
+// have an Estimating Calendar login at all.
+function emailRoleAwardNotice(bid, actorName, reasonLabel, recipientName) {
+  const amtStr = fmtCurrency(bid.estimate_amount);
+  return {
+    subject: `⚠️ ${reasonLabel} Job Awarded — ${bid.project_name || bid.bid_number || 'Unnamed'}`,
+    html: base(`
+      ${iconHeading(`${APP_URL}/icon-awarded.png`, `${reasonLabel} Job Awarded`)}
+      <p>Hi <strong>${recipientName}</strong>, <strong>${actorName}</strong> just marked a bid flagged <strong>${reasonLabel}</strong> as awarded${amtStr ? ` for <strong>${amtStr}</strong>` : ''} — heads up for whenever this project needs your attention.</p>
+      ${bidTable(bid)}
+      ${buttonRow({ href: APP_URL, label: 'Open App' })}
+      ${folderButtonHtml(bid)}
+    `),
+  };
+}
+
 function emailReminder(bid, reminder, recipientName) {
   return {
     subject: `⏰ Reminder — ${bid.project_name || bid.bid_number || 'Unnamed'}`,
@@ -538,4 +560,4 @@ function emailIdeaStatusChanged(idea, newStatus) {
   };
 }
 
-module.exports = { sendMail, emailAssigned, emailFollowup, emailAwarded, emailReminder, emailWalkthroughSet, emailWalkthroughReminder, emailDigest, emailIdeaSubmitted, emailIdeaStatusChanged, wantsNotification, NOTIFICATION_CATEGORIES };
+module.exports = { sendMail, emailAssigned, emailFollowup, emailAwarded, emailRoleAwardNotice, emailReminder, emailWalkthroughSet, emailWalkthroughReminder, emailDigest, emailIdeaSubmitted, emailIdeaStatusChanged, wantsNotification, NOTIFICATION_CATEGORIES };

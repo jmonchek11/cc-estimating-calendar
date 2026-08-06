@@ -1738,6 +1738,8 @@ function bidNode(b) {
           ${isAwarded ? '<span class="awarded-pill">AWARDED</span>' : stageBadge(b.stage)}
           ${b.superseded ? '<span class="badge" style="background:#e2e8f0;color:#64748b">SUPERSEDED</span>' : ''}
           ${b.drawing_stage ? `<span class="badge" style="background:#ede9fe;color:#5b21b6">${esc(b.drawing_stage)}</span>` : ''}
+          ${b.certified_payroll ? `<span class="badge" style="background:#fef3c7;color:#92400e" title="Notifies Accounting on award">CERTIFIED PAYROLL</span>` : ''}
+          ${b.tax_exempt ? `<span class="badge" style="background:#dbeafe;color:#1e40af" title="Notifies Purchasing on award">TAX EXEMPT</span>` : ''}
         </div>
         ${(b.estimate_amount || b.due_date) ? `<div class="bc-hd-right">
           ${b.estimate_amount ? `<div class="bc-amount">${fmt$(b.estimate_amount)}</div>` : ''}
@@ -2308,6 +2310,10 @@ const startBidFields = () => ([
   { id: 'start_date', label: 'Start Date', type: 'date' },
   { id: 'drawing_stage', label: 'Drawing Stage', type: 'text', placeholder: '50% budget, 70% budget, 100% CD…' },
   { id: 'folder_url', label: 'Bid Folder Link (OneDrive)', type: 'text', placeholder: 'https://onedrive.live.com/…' },
+  { id: 'certified_payroll', label: 'Certified Payroll Job?', type: 'select', value: 0,
+    options: [{ value: 0, label: 'No' }, { value: 1, label: 'Yes — notifies Accounting on award' }] },
+  { id: 'tax_exempt', label: 'Tax Exempt Job?', type: 'select', value: 0,
+    options: [{ value: 0, label: 'No' }, { value: 1, label: 'Yes — notifies Purchasing on award' }] },
 ]);
 
 // + New Bid → choose new vs existing project, then go straight to active_bid
@@ -2584,6 +2590,10 @@ function actEditBid(bidId) {
       { id: 'owner_id', label: 'Opportunity Owner', type: 'select', emptyLabel: 'TBD', options: teamOpts(), value: b.owner?.id },
       { id: 'source', label: 'Source (where did this come from?)', type: 'text', value: b.source, placeholder: 'iSqFt, BuildingConnected, email invite, referral, phone call…' },
       { id: 'folder_url', label: 'Bid Folder Link (OneDrive)', type: 'text', value: b.folder_url, placeholder: 'https://onedrive.live.com/…' },
+      { id: 'certified_payroll', label: 'Certified Payroll Job?', type: 'select', value: b.certified_payroll ? 1 : 0,
+        options: [{ value: 0, label: 'No' }, { value: 1, label: 'Yes — notifies Accounting on award' }] },
+      { id: 'tax_exempt', label: 'Tax Exempt Job?', type: 'select', value: b.tax_exempt ? 1 : 0,
+        options: [{ value: 0, label: 'No' }, { value: 1, label: 'Yes — notifies Purchasing on award' }] },
     );
     // Walk-through has its own dedicated action (🚶 button in the actions row,
     // plus a visible line on the bid card) rather than living buried in here —

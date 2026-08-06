@@ -16,6 +16,7 @@
  */
 const mailer = require('../mailer');
 const maindb = require('../db');
+const directory = require('./directory');
 const { getModels } = require('./models');
 
 async function emailForV2Member(memberId) {
@@ -131,6 +132,36 @@ async function notifyAwarded(bidId, actorName) {
   } catch (e) { console.error('[v2 notify] awarded email failed:', e.message); }
 }
 
+// First real consumer of the Hub's role directory (see v2/directory.js):
+// a bid flagged certified_payroll/tax_exempt notifies whoever the Hub says
+// holds the 'accounting'/'purchasing' role the moment it's awarded — not a
+// TeamMember roster, since Accounting/Purchasing may not have Estimating
+// Calendar logins at all. Deliberately not gated by wantsNotification()
+// (that's a TeamMember/notification_prefs concept these recipients don't
+// have) — this is a compliance-relevant heads-up, always sent when the flag
+// is set, not an opt-out-able convenience ping.
+async function notifyRoleAward(bidId, actorName) {
+  try {
+    const M = getModels();
+    const bid = await M.Bid.findById(Number(bidId)).lean();
+    if (!bid) return;
+    const flags = [
+      bid.certified_payroll ? { role: 'accounting', label: 'Certified Payroll' } : null,
+      bid.tax_exempt ? { role: 'purchasing', label: 'Tax Exempt' } : null,
+    ].filter(Boolean);
+    if (!flags.length) return;
+    const shape = await bidEmailShape(bidId);
+    if (!shape) return;
+    for (const { role, label } of flags) {
+      const recipients = await directory.getUsersByRole(role);
+      for (const r of recipients) {
+        const { subject, html } = mailer.emailRoleAwardNotice(shape, actorName || 'Someone', label, r.name);
+        await mailer.sendMail({ to: r.email, subject, html });
+      }
+    }
+  } catch (e) { console.error('[v2 notify] role award email failed:', e.message); }
+}
+
 // change_order doesn't have a project/customer join worth the trip for a
 // reminder ping — reuses the same bidTable-shaped object, just thinner.
 async function coEmailShape(coId) {
@@ -198,4 +229,4 @@ async function notifyFollowup(parentType, parentId, followupData, actorId) {
   } catch (e) { console.error('[v2 notify] followup email failed:', e.message); }
 }
 
-module.exports = { bidEmailShape, coEmailShape, emailShapeForReminder, notifyAwarded, notifyAssigned, notifyWalkthroughSet, notifyFollowup, bidRecipients, walkthroughContactInfo, emailForV2Member };
+module.exports = { bidEmailShape, coEmailShape, emailShapeForReminder, notifyAwarded, notifyRoleAward, notifyAssigned, notifyWalkthroughSet, notifyFollowup, bidRecipients, walkthroughContactInfo, emailForV2Member };
