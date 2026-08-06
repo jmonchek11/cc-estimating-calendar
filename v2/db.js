@@ -1245,7 +1245,11 @@ async function adminUpdate(entity, id, data) {
       v = (v == null) ? null : Number(v);
       if (v != null) requireNonZeroAmount(v);
     }
-    else if (f === 'superseded' || f === 'is_current') v = v ? 1 : 0;
+    // These arrive from a <select> as the STRING "0"/"1" — `v ? 1 : 0` is a
+    // trap here since the non-empty string "0" is truthy in JS, silently
+    // forcing every submitted-bid edit to 1 regardless of which option was
+    // actually chosen. Numeric comparison first, then coerce to 1/0.
+    else if (f === 'superseded' || f === 'is_current') v = Number(v) === 1 ? 1 : 0;
     else if (f === 'certified_payroll' || f === 'tax_exempt') v = Number(v) === 1 || v === true;
     upd[f] = v;
   }
