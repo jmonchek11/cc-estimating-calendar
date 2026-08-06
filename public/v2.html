@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>LIS Estimating Calendar</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
@@ -201,13 +201,80 @@
   .fly-head a { color: #7dd3fc; text-decoration: none; font-size: 12px; }
   .fly-head .fly-close { background: rgba(255,255,255,.12); color: #fff; border: none; border-radius: 6px; width: 28px; height: 28px; cursor: pointer; font-size: 15px; }
   .fly-body { flex: 1; overflow-y: auto; padding: 14px 16px; }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     MOBILE — bottom tab bar replaces the desktop sidebar so content gets
+     the full screen width instead of losing ~220px to a left column that
+     doesn't work at phone widths. The sidebar itself becomes an off-canvas
+     "More" drawer (same markup, no duplication) reached via the tab bar's
+     last tab. Hidden entirely above the breakpoint via the second query.
+     ═══════════════════════════════════════════════════════════════════════ */
+  #mobile-nav-backdrop, #mobile-tabbar, #mobile-fab, #mobile-nav-close { display: none; }
+
+  @media (max-width: 860px) {
+    #app { display: block; height: auto; min-height: 100dvh; }
+    #sidebar {
+      position: fixed; top: 0; left: 0; height: 100dvh; width: 84vw; max-width: 320px;
+      transform: translateX(-100%); transition: transform .28s cubic-bezier(.32,.72,0,1); z-index: 75;
+    }
+    #sidebar.mobile-open { transform: translateX(0); }
+    #mobile-nav-close {
+      display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+      width: 32px; height: 32px; border-radius: 50%; border: none; background: var(--sidebar-hover-bg);
+      color: var(--sidebar-text); cursor: pointer;
+    }
+    #mobile-nav-backdrop {
+      display: block; position: fixed; inset: 0; background: rgba(15,23,42,0);
+      pointer-events: none; z-index: 70; transition: background .25s ease;
+    }
+    #mobile-nav-backdrop.open { background: rgba(15,23,42,.45); pointer-events: auto; }
+
+    #main {
+      width: 100%; padding: 14px 14px calc(86px + env(safe-area-inset-bottom));
+    }
+
+    #mobile-tabbar {
+      display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
+      background: rgba(249,250,252,.86); backdrop-filter: blur(20px) saturate(180%);
+      -webkit-backdrop-filter: blur(20px) saturate(180%);
+      border-top: 1px solid rgba(0,0,0,.08);
+      padding: 6px 2px calc(4px + env(safe-area-inset-bottom));
+    }
+    .mtab {
+      flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 2px; min-height: 48px; padding: 4px 2px; color: #8a8f9c; text-decoration: none;
+      font-size: 10.5px; font-weight: 600; letter-spacing: .1px; -webkit-tap-highlight-color: transparent;
+    }
+    .mtab svg { width: 23px; height: 23px; transition: transform .15s ease; }
+    .mtab:active svg { transform: scale(.88); }
+    .mtab.active { color: var(--primary); }
+
+    #mobile-fab {
+      display: flex; align-items: center; justify-content: center;
+      position: fixed; right: 16px; bottom: calc(80px + env(safe-area-inset-bottom));
+      width: 54px; height: 54px; border-radius: 50%; border: none; z-index: 55;
+      background: var(--primary); color: #fff; box-shadow: 0 8px 20px rgba(37,99,235,.4), 0 2px 6px rgba(37,99,235,.3);
+      cursor: pointer; -webkit-tap-highlight-color: transparent;
+    }
+    #mobile-fab svg { width: 24px; height: 24px; }
+    #mobile-fab:active { transform: scale(.94); }
+
+    /* Forms/dialogs become bottom sheets on mobile — a native-feeling
+       pattern instead of a small centered dialog with awkward margins. */
+    .v2-overlay { align-items: flex-end; padding: 0; }
+    .v2-modal { max-width: 100%; width: 100%; border-radius: 18px 18px 0 0; max-height: 90vh; }
+  }
+  @media (min-width: 861px) {
+    #mobile-tabbar, #mobile-fab, #mobile-nav-backdrop { display: none !important; }
+  }
 </style>
 </head>
 <body>
   <div id="app">
     <nav id="sidebar">
-      <div class="sidebar-header">
-        <a href="#dashboard" onclick="navigate('dashboard');return false" class="logo" style="display:block;cursor:pointer"><img src="logo.png" alt="Liberty Integrated Solutions" style="width:100%;max-width:213px;object-fit:contain;padding:4px 0" /></a>
+      <div class="sidebar-header" style="display:flex;align-items:center;gap:8px">
+        <a href="#dashboard" onclick="navigate('dashboard');return false" class="logo" style="display:block;cursor:pointer;flex:1;min-width:0"><img src="logo.png" alt="Liberty Integrated Solutions" style="width:100%;max-width:213px;object-fit:contain;padding:4px 0" /></a>
+        <button id="mobile-nav-close" onclick="closeMobileNav()" aria-label="Close menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
       <div class="app-switcher" id="app-switcher"></div>
       <div class="sidebar-search-wrap">
@@ -255,7 +322,33 @@
         <a href="#" onclick="actLogout();return false" title="Sign out" style="color:var(--sidebar-text);text-decoration:none;flex-shrink:0;display:flex"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></a>
       </div>
     </nav>
+    <div id="mobile-nav-backdrop" onclick="closeMobileNav()"></div>
     <main id="main"><div style="padding:30px;color:var(--text-muted)">Loading…</div></main>
+    <button id="mobile-fab" onclick="actQuickFollowup()" title="Log a follow-up" aria-label="Log a follow-up">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg>
+    </button>
+    <nav id="mobile-tabbar">
+      <a class="mtab" data-page="dashboard" href="#dashboard" onclick="navigate('dashboard');return false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11.5 12 4l9 7.5"/><path d="M5 10v10h14V10"/></svg>
+        <span>Home</span>
+      </a>
+      <a class="mtab" data-page="opportunities" href="#opportunities" onclick="navigate('opportunities');return false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="0.8" fill="currentColor" stroke="none"/></svg>
+        <span>Opps</span>
+      </a>
+      <a class="mtab" data-page="active-bids" href="#active-bids" onclick="navigate('active-bids');return false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 11 14 10 22 21 10 13 10 13 2"/></svg>
+        <span>Bids</span>
+      </a>
+      <a class="mtab" data-page="calendar" href="#calendar" onclick="navigate('calendar');return false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        <span>Calendar</span>
+      </a>
+      <a class="mtab" id="mtab-more" href="#" onclick="toggleMobileNav();return false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>
+        <span>More</span>
+      </a>
+    </nav>
   </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
@@ -361,8 +454,21 @@ async function api(method, url, body, _isRetry) {
   return data;
 }
 
+const MOBILE_TAB_PAGES = ['dashboard', 'opportunities', 'active-bids', 'calendar'];
 function setActiveNav(page) {
   document.querySelectorAll('#sidebar .nav-item[data-page]').forEach(a => a.classList.toggle('active', a.dataset.page === page));
+  document.querySelectorAll('#mobile-tabbar .mtab[data-page]').forEach(a => a.classList.toggle('active', a.dataset.page === page));
+  // Any page reachable only through the drawer (Settings, Reports, Queue,
+  // etc.) still lights up "More" so the tab bar always shows where you are.
+  document.getElementById('mtab-more')?.classList.toggle('active', !!page && !MOBILE_TAB_PAGES.includes(page));
+}
+function toggleMobileNav() {
+  document.getElementById('sidebar')?.classList.toggle('mobile-open');
+  document.getElementById('mobile-nav-backdrop')?.classList.toggle('open');
+}
+function closeMobileNav() {
+  document.getElementById('sidebar')?.classList.remove('mobile-open');
+  document.getElementById('mobile-nav-backdrop')?.classList.remove('open');
 }
 
 async function ensureMeta() {
@@ -414,6 +520,7 @@ window.addEventListener('popstate', routeFromHash);
 function navigate(page) {
   setHash(page);
   closeFlyout();
+  closeMobileNav();
   if (page !== 'projects') OPEN_PROJECT = null;
   if (page === 'dashboard') { VIEW = { name: 'dashboard' }; return renderDashboard(); }
   if (page === 'health') { VIEW = { name: 'health' }; return showHealth(); }
@@ -3115,6 +3222,59 @@ function actLogFollowup(parentType, parentId) {
     { id: 'notes', label: 'What was discussed?', type: 'textarea', required: true },
   ], data => api('POST', '/api/v2/followups', { ...data, parent_type: parentType, parent_id: parentId, outcome: 'no_decision' }),
   'Log (no decision yet — timer restarts)');
+}
+
+// Mobile FAB entry point — on the computer you're usually already looking
+// at the bid/CO you want to log against, so its own "Log Follow-up" button
+// is enough; on mobile that context is more likely gone (you're calling
+// from the truck), so this is a search-first shortcut to the same form.
+let QUICK_FU_RESULTS = [];
+let quickFuTimer;
+function actQuickFollowup() {
+  document.getElementById('v2-form-overlay')?.remove();
+  const ov = document.createElement('div');
+  ov.className = 'v2-overlay'; ov.id = 'v2-form-overlay';
+  ov.innerHTML = `
+    <div class="v2-modal" style="max-width:420px">
+      <div class="v2-modal-hd">📝 Log a Follow-up<button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">✕</button></div>
+      <div class="v2-modal-bd">
+        <div class="v2-field"><label>Which bid or change order?</label>
+          <input id="qfu-input" type="text" autocomplete="off" placeholder="Project name, bid #, CO #, company…" oninput="quickFollowupSearch()">
+        </div>
+        <div id="qfu-results" style="display:flex;flex-direction:column;gap:6px"></div>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+  setTimeout(() => document.getElementById('qfu-input')?.focus(), 60);
+}
+function quickFollowupSearch() {
+  clearTimeout(quickFuTimer);
+  const input = document.getElementById('qfu-input');
+  const results = document.getElementById('qfu-results');
+  if (!input || !results) return;
+  const q = input.value.trim();
+  if (q.length < 2) { results.innerHTML = ''; QUICK_FU_RESULTS = []; return; }
+  quickFuTimer = setTimeout(async () => {
+    let res;
+    try { res = await api('GET', '/api/v2/search?q=' + encodeURIComponent(q)); } catch { return; }
+    QUICK_FU_RESULTS = [
+      ...(res.bids || []).map(b => ({ kind: 'bid', id: b.id, label: b.bid_number || 'No bid #', project: b.project, sub: (b.customers || []).join(', ') })),
+      ...(res.change_orders || []).map(c => ({ kind: 'change_order', id: c.id, label: c.co_number, project: c.project, sub: c.name })),
+    ].slice(0, 10);
+    results.innerHTML = QUICK_FU_RESULTS.length
+      ? QUICK_FU_RESULTS.map((r, i) => `
+        <div onclick="pickQuickFollowup(${i})" style="padding:10px 12px;border:1px solid var(--border);border-radius:9px;cursor:pointer">
+          <div style="font-weight:700;font-size:13px">${esc(r.label)} <span style="font-weight:400;color:var(--text-muted)">— ${esc(r.project || '—')}</span></div>
+          ${r.sub ? `<div style="font-size:11.5px;color:var(--text-muted);margin-top:1px">${esc(r.sub)}</div>` : ''}
+        </div>`).join('')
+      : '<div style="padding:10px 2px;font-size:13px;color:var(--text-muted)">No matches</div>';
+  }, 220);
+}
+function pickQuickFollowup(i) {
+  const r = QUICK_FU_RESULTS[i];
+  if (!r) return;
+  document.getElementById('v2-form-overlay')?.remove();
+  actLogFollowup(r.kind, r.id);
 }
 
 function actSetJobNumber(jobId) {
