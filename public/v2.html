@@ -276,7 +276,7 @@
   .cal-week-day-today { border-color: var(--primary); }
   .cal-week-day-hdr {
     display: flex; align-items: center; gap: 8px; padding: 8px 12px;
-    background: var(--sidebar-hover-bg); font-size: 12.5px; font-weight: 700; color: var(--text);
+    background: var(--bg); font-size: 12.5px; font-weight: 700; color: var(--text);
   }
   .cal-week-day-today .cal-week-day-hdr { background: rgba(37,99,235,.08); color: var(--primary); }
   .cal-week-today-pill { background: var(--primary); color: #fff; font-size: 10px; font-weight: 800; padding: 1px 7px; border-radius: 8px; letter-spacing: .02em; }
@@ -297,6 +297,11 @@
     .stat-sub { font-size: 10.5px; }
     .dash-actions { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 2px; margin-left: -14px; margin-right: -14px; padding-left: 14px; padding-right: 14px; }
     .dash-actions .v2-btn { flex-shrink: 0; white-space: nowrap; }
+    /* Import JIS / Legacy Job / direct New Bid / New Change Order are all
+       desk-bound tasks (a JIS file to upload, a bid # you're transcribing
+       from a spreadsheet) — on mobile the one thing worth a tap is starting
+       a new opportunity, so only that stays. */
+    .dash-action-desktop { display: none; }
   }
 </style>
 </head>
@@ -1419,7 +1424,7 @@ async function renderBidList(stage) {
   if (stage === 'closed' && filterState(stage).sort === 'due') filterState(stage).sort = 'closed';
 
   const headerActions = stage === 'active_bid' ? `
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <div style="display:flex;gap:8px;flex-wrap:wrap" class="dash-action-desktop">
         <button class="v2-btn green" style="padding:8px 14px;font-size:12px" onclick="actNewBid()">+ New Bid</button>
         <button class="v2-btn amber" style="padding:8px 14px;font-size:12px" onclick="actImportJIS()">📄 Import Bid (JIS)</button>
         <button class="v2-btn outline" style="padding:8px 14px;font-size:12px" onclick="actNewLegacyJob()">+ Legacy Job</button>
@@ -1593,11 +1598,11 @@ async function load() {
   main.innerHTML = `
     <div class="page-header">
       <div><div class="page-title">🏗️ Projects</div><div class="page-subtitle" id="proj-count">${PROJECTS_RAW.length} projects · Project → Bids → Job → Change Orders</div></div>
-      <div style="display:flex;gap:8px">
-        <button class="v2-btn green" style="padding:8px 14px;font-size:12px" onclick="actNewBid()">+ New Bid</button>
+      <div style="display:flex;gap:8px" class="dash-actions">
+        <button class="v2-btn green dash-action-desktop" style="padding:8px 14px;font-size:12px" onclick="actNewBid()">+ New Bid</button>
         <button class="v2-btn blue" style="padding:8px 14px;font-size:12px" onclick="actNewOpportunity()">+ New Opportunity</button>
-        <button class="v2-btn outline" style="padding:8px 14px;font-size:12px" onclick="actNewLegacyJob()">+ Legacy Job</button>
-        <button class="v2-btn amber" style="padding:8px 14px;font-size:12px" onclick="actImportJIS()">📄 Import Bid (JIS)</button>
+        <button class="v2-btn outline dash-action-desktop" style="padding:8px 14px;font-size:12px" onclick="actNewLegacyJob()">+ Legacy Job</button>
+        <button class="v2-btn amber dash-action-desktop" style="padding:8px 14px;font-size:12px" onclick="actImportJIS()">📄 Import Bid (JIS)</button>
       </div>
     </div>
     <div class="card" style="padding:0">
@@ -1692,11 +1697,11 @@ async function renderDashboard() {
       </div>` : ''}
     </div>
     <div class="dash-actions">
-      <button class="v2-btn green" style="padding:8px 14px;font-size:12px" onclick="actNewBid()">+ New Bid</button>
+      <button class="v2-btn green dash-action-desktop" style="padding:8px 14px;font-size:12px" onclick="actNewBid()">+ New Bid</button>
       <button class="v2-btn blue" style="padding:8px 14px;font-size:12px" onclick="actNewOpportunity()">+ New Opportunity</button>
-      <button class="v2-btn outline" style="padding:8px 14px;font-size:12px" onclick="actNewLegacyJob()">+ Legacy Job</button>
-      <button class="v2-btn amber" style="padding:8px 14px;font-size:12px" onclick="actImportJIS()">📄 Import Bid (JIS)</button>
-      <button class="v2-btn outline" style="padding:8px 14px;font-size:12px" onclick="actNewChangeOrder()">+ New Change Order</button>
+      <button class="v2-btn outline dash-action-desktop" style="padding:8px 14px;font-size:12px" onclick="actNewLegacyJob()">+ Legacy Job</button>
+      <button class="v2-btn amber dash-action-desktop" style="padding:8px 14px;font-size:12px" onclick="actImportJIS()">📄 Import Bid (JIS)</button>
+      <button class="v2-btn outline dash-action-desktop" style="padding:8px 14px;font-size:12px" onclick="actNewChangeOrder()">+ New Change Order</button>
     </div>
     <div class="stat-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px">
       ${stat('Opportunities', d.pipeline.opportunity, '', '#3b82f6', "renderBidList('opportunity')")}
