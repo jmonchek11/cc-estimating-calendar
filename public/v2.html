@@ -250,14 +250,15 @@
     .mtab.active { color: var(--primary); }
 
     #mobile-fab {
-      display: flex; align-items: center; justify-content: center;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
       position: fixed; right: 16px; bottom: calc(80px + env(safe-area-inset-bottom));
-      width: 54px; height: 54px; border-radius: 50%; border: none; z-index: 55;
+      height: 46px; padding: 0 18px 0 16px; border-radius: 23px; border: none; z-index: 55;
       background: var(--primary); color: #fff; box-shadow: 0 8px 20px rgba(37,99,235,.4), 0 2px 6px rgba(37,99,235,.3);
       cursor: pointer; -webkit-tap-highlight-color: transparent;
+      font-family: inherit; font-size: 13px; font-weight: 700; white-space: nowrap;
     }
-    #mobile-fab svg { width: 24px; height: 24px; }
-    #mobile-fab:active { transform: scale(.94); }
+    #mobile-fab svg { width: 19px; height: 19px; flex-shrink: 0; }
+    #mobile-fab:active { transform: scale(.96); }
 
     /* Forms/dialogs become bottom sheets on mobile — a native-feeling
        pattern instead of a small centered dialog with awkward margins. */
@@ -266,6 +267,36 @@
   }
   @media (min-width: 861px) {
     #mobile-tabbar, #mobile-fab, #mobile-nav-backdrop { display: none !important; }
+  }
+
+  /* Mobile week agenda (see buildCalendarWeekAgenda) — full-width days with
+     real chip text instead of the month grid's cramped/truncated cells. */
+  .cal-week-agenda { display: flex; flex-direction: column; gap: 8px; }
+  .cal-week-day { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .cal-week-day-today { border-color: var(--primary); }
+  .cal-week-day-hdr {
+    display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+    background: var(--sidebar-hover-bg); font-size: 12.5px; font-weight: 700; color: var(--text);
+  }
+  .cal-week-day-today .cal-week-day-hdr { background: rgba(37,99,235,.08); color: var(--primary); }
+  .cal-week-today-pill { background: var(--primary); color: #fff; font-size: 10px; font-weight: 800; padding: 1px 7px; border-radius: 8px; letter-spacing: .02em; }
+  .cal-week-day-body { display: flex; flex-direction: column; gap: 5px; padding: 8px 10px; min-height: 38px; justify-content: center; }
+  .cal-week-day-body .cal-chip { padding: 6px 9px; border-radius: 6px; }
+  .cal-week-day-body .cal-chip-txt { white-space: normal; font-size: 12px; }
+  .cal-week-empty { font-size: 12px; color: var(--text-muted); padding: 2px 0; }
+
+  .dash-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+  @media (max-width: 860px) {
+    /* Both use an inline grid-template-columns (set once, shared by the
+       dashboard and the weekly digest) — !important is the only way to
+       win over an inline style without touching every call site. */
+    .stat-grid { grid-template-columns: repeat(2, 1fr) !important; gap: 8px !important; }
+    .stat-card { padding: 10px 12px; }
+    .stat-value { font-size: 22px; margin: 3px 0 1px; }
+    .stat-label { font-size: 10.5px; }
+    .stat-sub { font-size: 10.5px; }
+    .dash-actions { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 2px; margin-left: -14px; margin-right: -14px; padding-left: 14px; padding-right: 14px; }
+    .dash-actions .v2-btn { flex-shrink: 0; white-space: nowrap; }
   }
 </style>
 </head>
@@ -325,7 +356,8 @@
     <div id="mobile-nav-backdrop" onclick="closeMobileNav()"></div>
     <main id="main"><div style="padding:30px;color:var(--text-muted)">Loading…</div></main>
     <button id="mobile-fab" onclick="actQuickFollowup()" title="Log a follow-up" aria-label="Log a follow-up">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.362 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+      <span>Log Follow-up</span>
     </button>
     <nav id="mobile-tabbar">
       <a class="mtab" data-page="dashboard" href="#dashboard" onclick="navigate('dashboard');return false">
@@ -516,6 +548,18 @@ function routeFromHash() {
   navigate(seg || 'dashboard');
 }
 window.addEventListener('popstate', routeFromHash);
+
+// Rotating the phone (or resizing a desktop window across the mobile
+// breakpoint) should swap the calendar between month-grid and week-agenda
+// live, not just on next navigation.
+let mobileResizeTimer;
+window.addEventListener('resize', () => {
+  clearTimeout(mobileResizeTimer);
+  mobileResizeTimer = setTimeout(() => {
+    if (VIEW.name === 'calendar') renderCalendar();
+    else if (VIEW.name === 'dashboard') renderDashboard();
+  }, 200);
+});
 
 function navigate(page) {
   setHash(page);
@@ -864,7 +908,7 @@ async function actSendDigestNow() {
 // ═══════════════════════════════════════════════════════════════════════════
 const ESTIMATOR_PALETTE = ['#2563eb', '#16a34a', '#dc2626', '#d97706', '#7c3aed', '#0891b2', '#be185d', '#ea580c'];
 const estimatorColor = (id) => id ? ESTIMATOR_PALETTE[Number(id) % ESTIMATOR_PALETTE.length] : '#64748b';
-let CAL_STATE = { year: new Date().getFullYear(), month: new Date().getMonth(), filter: 'all' };
+let CAL_STATE = { year: new Date().getFullYear(), month: new Date().getMonth(), filter: 'all', weekAnchor: null };
 let CAL_DAY_MAP = {};
 
 // mineOnly mirrors the rest of the Dashboard's "My View" toggle — filters to
@@ -926,10 +970,11 @@ async function renderCalendar() {
   catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
 
   const { year, month, filter } = CAL_STATE;
+  const mobile = isMobileViewport();
   main.innerHTML = `
     <div class="page-header"><div><div class="page-title">🗓️ Calendar</div></div></div>
-    ${calendarControlsHtml('renderCalendar')}
-    ${buildCalendarGrid(year, month, items, filter)}
+    ${mobile ? calWeekControlsHtml('renderCalendar') : calendarControlsHtml('renderCalendar')}
+    ${mobile ? buildCalendarWeekAgenda(items, filter) : buildCalendarGrid(year, month, items, filter)}
     <div class="cal-legend">${calendarLegendHtml()}</div>`;
 }
 
@@ -942,16 +987,15 @@ function navCalendar(dir) {
   (VIEW.name === 'calendar' ? renderCalendar : renderDashboard)();
 }
 
-function buildCalendarGrid(year, month, items, filter) {
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const pad = n => String(n).padStart(2, '0');
-
-  CAL_DAY_MAP = {};
+// Shared by both the month grid and the mobile week agenda — populates a
+// date-string → [{item,type}] map with no month restriction (a week can
+// straddle a month boundary), so each view just reads the days it needs.
+function buildCalDayMap(items, filter) {
+  const map = {};
   const add = (dateStr, item, type) => {
     if (!dateStr) return;
     const d = dateStr.substring(0, 10);
-    if (parseInt(d.substring(5, 7)) - 1 !== month || parseInt(d.substring(0, 4)) !== year) return;
-    (CAL_DAY_MAP[d] = CAL_DAY_MAP[d] || []).push({ item, type });
+    (map[d] = map[d] || []).push({ item, type });
   };
   items.forEach(it => {
     if (filter !== 'followups_only') add(it.due_date, it, 'due');
@@ -961,6 +1005,42 @@ function buildCalendarGrid(year, month, items, filter) {
     if (filter !== 'followups_only') (it.walkthroughs || []).forEach(w => add(w.date, { ...it, walkthrough_time: w.time }, 'walkthrough'));
     if (filter !== 'followups_only') add(it.rfi_due_date, it, 'rfi');
   });
+  return map;
+}
+function calChipHtml(item, type) {
+  if (type === 'due') {
+    const c = estimatorColor(item.estimator?.id);
+    // A bid/CO that's already past its active stage (submitted or beyond)
+    // has fulfilled its due date's purpose — strike it through so the
+    // calendar reads as "handled" without removing the chip.
+    const isDone = item.stage === 'submitted' || item.stage === 'submitted_co';
+    // Only due-date chips are draggable — a due date is what dropping on
+    // another day changes; follow-up dates aren't touched by this.
+    return `<div class="cal-chip${isDone ? ' cal-chip-done' : ''}" draggable="true"
+        ondragstart="calDragStart(event,'${item.kind}',${item.id},'${escJs(item.title)}')"
+        style="background:${c}a6;border-left-color:${c};cursor:grab">
+      <span class="cal-chip-txt">${esc(item.title)}${item.due_time ? ' · ' + fmtTimeShort(item.due_time) : ''}</span>
+      ${item.estimator ? `<span class="cal-chip-ini" style="color:#fff">${esc(item.estimator.initials)}</span>` : ''}
+    </div>`;
+  }
+  if (type === 'walkthrough') {
+    return `<div class="cal-chip" style="background:#0891b2a6;border-left-color:#0891b2">
+      <span class="cal-chip-txt">🚶 ${esc(item.title)}${item.walkthrough_time ? ' · ' + fmtTimeShort(item.walkthrough_time) : ''}</span>
+    </div>`;
+  }
+  if (type === 'rfi') {
+    return `<div class="cal-chip" style="background:#7c3aeda6;border-left-color:#7c3aed">
+      <span class="cal-chip-txt">📋 RFI: ${esc(item.title)}${item.rfi_due_time ? ' · ' + fmtTimeShort(item.rfi_due_time) : ''}</span>
+    </div>`;
+  }
+  return `<div class="cal-chip cal-chip-fu"><span class="cal-chip-txt">📞 ${esc(item.title)}</span></div>`;
+}
+function isMobileViewport() { return window.matchMedia('(max-width: 860px)').matches; }
+
+function buildCalendarGrid(year, month, items, filter) {
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const pad = n => String(n).padStart(2, '0');
+  CAL_DAY_MAP = buildCalDayMap(items, filter);
 
   // Office runs Monday–Friday only — weekends are skipped entirely rather
   // than shown empty, so the grid is a true 5-column work week.
@@ -988,34 +1068,7 @@ function buildCalendarGrid(year, month, items, filter) {
     // whichever day that week is busiest (CSS grid rows auto-size to their
     // tallest cell), so nothing gets stuck behind a "+N more" button where
     // it can't be dragged.
-    const chips = dayItems.map(({ item, type }) => {
-      if (type === 'due') {
-        const c = estimatorColor(item.estimator?.id);
-        // A bid/CO that's already past its active stage (submitted or
-        // beyond) has fulfilled its due date's purpose — strike it through
-        // so the calendar reads as "handled" without removing the chip.
-        const isDone = item.stage === 'submitted' || item.stage === 'submitted_co';
-        // Only due-date chips are draggable — a due date is what dropping on
-        // another day changes; follow-up dates aren't touched by this.
-        return `<div class="cal-chip${isDone ? ' cal-chip-done' : ''}" draggable="true"
-            ondragstart="calDragStart(event,'${item.kind}',${item.id},'${escJs(item.title)}')"
-            style="background:${c}a6;border-left-color:${c};cursor:grab">
-          <span class="cal-chip-txt">${esc(item.title)}${item.due_time ? ' · ' + fmtTimeShort(item.due_time) : ''}</span>
-          ${item.estimator ? `<span class="cal-chip-ini" style="color:#fff">${esc(item.estimator.initials)}</span>` : ''}
-        </div>`;
-      }
-      if (type === 'walkthrough') {
-        return `<div class="cal-chip" style="background:#0891b2a6;border-left-color:#0891b2">
-          <span class="cal-chip-txt">🚶 ${esc(item.title)}${item.walkthrough_time ? ' · ' + fmtTimeShort(item.walkthrough_time) : ''}</span>
-        </div>`;
-      }
-      if (type === 'rfi') {
-        return `<div class="cal-chip" style="background:#7c3aeda6;border-left-color:#7c3aed">
-          <span class="cal-chip-txt">📋 RFI: ${esc(item.title)}${item.rfi_due_time ? ' · ' + fmtTimeShort(item.rfi_due_time) : ''}</span>
-        </div>`;
-      }
-      return `<div class="cal-chip cal-chip-fu"><span class="cal-chip-txt">📞 ${esc(item.title)}</span></div>`;
-    }).join('');
+    const chips = dayItems.map(({ item, type }) => calChipHtml(item, type)).join('');
 
     cells += `<div class="cal-day${isToday ? ' cal-day-today' : ''}${holidayName ? ' cal-day-holiday' : ''}${dayItems.length ? ' cal-day-clickable' : ''}"
       ${holidayName ? `title="${esc(holidayName)}"` : ''}
@@ -1029,6 +1082,65 @@ function buildCalendarGrid(year, month, items, filter) {
   const rem = weekdayCount % 5;
   if (rem) for (let i = rem; i < 5; i++) cells += '<div class="cal-day-empty"></div>';
   return `<div class="cal-hdr">${headers}</div><div class="cal-grid">${cells}</div>`;
+}
+
+// ── Mobile week agenda — a 5-column month grid is unreadable on a phone,
+// so mobile gets one week (Mon–Fri) at a time, full-width per day with the
+// day's items listed out in full rather than squeezed into a tiny cell. ──
+function mondayOf(dateStr) {
+  const d = new Date((dateStr || today) + 'T00:00:00');
+  const dow = d.getDay();
+  d.setDate(d.getDate() + (dow === 0 ? -6 : 1 - dow));
+  return d;
+}
+function ymd(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
+function calWeekControlsHtml(reRenderFn) {
+  const monday = mondayOf(CAL_STATE.weekAnchor);
+  const friday = new Date(monday); friday.setDate(monday.getDate() + 4);
+  const sameMonth = monday.getMonth() === friday.getMonth();
+  const label = sameMonth
+    ? `${monday.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${friday.toLocaleDateString('en-US', { day: 'numeric', year: 'numeric' })}`
+    : `${monday.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${friday.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+  const { filter } = CAL_STATE;
+  return `<div class="cal-controls">
+      <button class="v2-btn outline" style="padding:6px 12px;font-size:12px" onclick="navCalendarWeek(-1)">‹ Prev</button>
+      <span class="cal-month-label">${esc(label)}</span>
+      <button class="v2-btn outline" style="padding:6px 12px;font-size:12px" onclick="navCalendarWeek(1)">Next ›</button>
+      <button class="v2-btn outline" style="padding:6px 12px;font-size:12px" onclick="CAL_STATE.weekAnchor=null;${reRenderFn}()">Today</button>
+      <select class="cal-filter-select" onchange="CAL_STATE.filter=this.value;${reRenderFn}()">
+        <option value="all" ${filter === 'all' ? 'selected' : ''}>Due Dates + Follow-ups</option>
+        <option value="due_only" ${filter === 'due_only' ? 'selected' : ''}>Due Dates Only</option>
+        <option value="followups_only" ${filter === 'followups_only' ? 'selected' : ''}>Follow-ups Only</option>
+      </select>
+    </div>`;
+}
+function navCalendarWeek(dir) {
+  const d = mondayOf(CAL_STATE.weekAnchor);
+  d.setDate(d.getDate() + dir * 7);
+  CAL_STATE.weekAnchor = ymd(d);
+  CAL_STATE.year = d.getFullYear(); CAL_STATE.month = d.getMonth();
+  (VIEW.name === 'calendar' ? renderCalendar : renderDashboard)();
+}
+function buildCalendarWeekAgenda(items, filter) {
+  const dayMap = buildCalDayMap(items, filter);
+  CAL_DAY_MAP = dayMap;
+  const monday = mondayOf(CAL_STATE.weekAnchor);
+  let html = '';
+  for (let i = 0; i < 5; i++) {
+    const d = new Date(monday); d.setDate(monday.getDate() + i);
+    const ds = ymd(d);
+    const isToday = ds === today;
+    const dayItems = dayMap[ds] || [];
+    const holidayName = (META.holidays || {})[ds];
+    const dayLabel = d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+    const chips = dayItems.map(({ item, type }) => calChipHtml(item, type)).join('');
+    html += `<div class="cal-week-day${isToday ? ' cal-week-day-today' : ''}"
+        ondragover="event.preventDefault()" ondrop="calDrop(event,'${ds}')">
+      <div class="cal-week-day-hdr">${esc(dayLabel)}${isToday ? '<span class="cal-week-today-pill">Today</span>' : ''}${holidayName ? `<span class="cal-day-holiday-label">${esc(holidayName)}</span>` : ''}</div>
+      <div class="cal-week-day-body">${dayItems.length ? chips : '<div class="cal-week-empty">Nothing on the calendar</div>'}</div>
+    </div>`;
+  }
+  return `<div class="cal-week-agenda">${html}</div>`;
 }
 
 // Drag a due-date chip to a different day to change its due date. Always
@@ -1579,7 +1691,7 @@ async function renderDashboard() {
         <button class="v2-btn ${!DASH_MINE ? 'blue' : 'outline'}" style="padding:7px 14px;font-size:12px" onclick="setDashboardView(false)">All</button>
       </div>` : ''}
     </div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
+    <div class="dash-actions">
       <button class="v2-btn green" style="padding:8px 14px;font-size:12px" onclick="actNewBid()">+ New Bid</button>
       <button class="v2-btn blue" style="padding:8px 14px;font-size:12px" onclick="actNewOpportunity()">+ New Opportunity</button>
       <button class="v2-btn outline" style="padding:8px 14px;font-size:12px" onclick="actNewLegacyJob()">+ Legacy Job</button>
@@ -1595,7 +1707,7 @@ async function renderDashboard() {
       ${stat('Overdue Follow-ups', d.overdueBidCount + d.overdueCoCount, `${d.overdueBidCount} bid · ${d.overdueCoCount} CO`, (d.overdueBidCount+d.overdueCoCount) ? '#dc2626' : '#166534')}
       ${stat('Jobs awaiting Job #', d.jobsPending, DASH_MINE ? 'assigned to you' : 'from accounting', '#0891b2')}
     </div>
-    <div class="dashboard-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
+    <div class="dashboard-grid">
       <div class="card">
         <div class="section-title">📅 Upcoming Due Dates — next 14 days</div>
         ${d.dueSoon.length ? d.dueSoon.map(b => {
@@ -1621,8 +1733,8 @@ async function renderDashboard() {
     </div>
     <div class="card" style="margin-top:18px;padding:16px">
       <div class="section-title" style="margin-bottom:10px">🗓️ Calendar</div>
-      ${calendarControlsHtml('renderDashboard')}
-      ${buildCalendarGrid(CAL_STATE.year, CAL_STATE.month, calItems, CAL_STATE.filter)}
+      ${isMobileViewport() ? calWeekControlsHtml('renderDashboard') : calendarControlsHtml('renderDashboard')}
+      ${isMobileViewport() ? buildCalendarWeekAgenda(calItems, CAL_STATE.filter) : buildCalendarGrid(CAL_STATE.year, CAL_STATE.month, calItems, CAL_STATE.filter)}
       <div class="cal-legend">${calendarLegendHtml()}</div>
     </div>`;
 }
