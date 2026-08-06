@@ -273,10 +273,12 @@ const onedriveButtonHtml = (url) => url
 // quick "set the link" prompt right there) — every state in this list is
 // actionable, so scanning a list makes it obvious at a glance which bids
 // still need one set, and fixing that is one click away instead of a trip
-// into Edit Bid. `bidId` is required for the no-link state.
-const onedriveIconBoxHtml = (url, bidId) => url
+// into Edit Bid. `bidId`/`bidLabel` are required for the no-link state —
+// `bidLabel` (bid # + project name) is threaded through to the prompt so
+// it's never ambiguous which bid is about to get a link attached.
+const onedriveIconBoxHtml = (url, bidId, bidLabel) => url
   ? `<a class="onedrive-icon-box has-link" href="${esc(url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Open in OneDrive">${ONEDRIVE_ICON}</a>`
-  : `<span class="onedrive-icon-box no-link" onclick="event.stopPropagation();actSetBidFolder(${bidId})" title="OneDrive link not set yet — click to add">${ONEDRIVE_ICON}</span>`;
+  : `<span class="onedrive-icon-box no-link" onclick="event.stopPropagation();actSetBidFolder(${bidId},'${escJs(bidLabel || '')}')" title="OneDrive link not set yet — click to add">${ONEDRIVE_ICON}</span>`;
 // Calendar-day difference between two "YYYY-MM-DD" strings, parsed as UTC
 // noon (not midnight) so DST transitions in between can't shift the count
 // by a day — a due date is a calendar date, not a moment in time.
@@ -1251,8 +1253,8 @@ function renderBidListBody(stage) {
             ${b.salesperson ? ` Sales ${ini(b.salesperson)}` : ''}
           </div>
         </div>
-        <div style="display:flex;align-items:center;gap:12px;flex-shrink:0">
-          ${onedriveIconBoxHtml(b.folder_url, b.id)}
+        <div style="display:flex;align-items:center;gap:12px;flex-shrink:0;align-self:center">
+          ${onedriveIconBoxHtml(b.folder_url, b.id, `${b.bid_number || 'No bid #'} — ${b.project}`)}
           <div style="text-align:right;min-width:108px">${right(b)}</div>
         </div>
       </div>`).join('') : '<div style="padding:24px;text-align:center;color:var(--text-muted)">No matches</div>';
@@ -2781,8 +2783,9 @@ async function actClearRFI(bidId) {
 // every project, so DETAIL_CACHE[OPEN_PROJECT] can't be trusted to hold the
 // right one), which is fine since this only ever fires when the link is
 // already known to be empty.
-function actSetBidFolder(bidId) {
-  showForm('📁 OneDrive Folder Link', [
+function actSetBidFolder(bidId, bidLabel) {
+  const title = bidLabel ? `📁 OneDrive Folder Link <span style="font-weight:400;color:var(--text-muted);font-size:13px">— ${esc(bidLabel)}</span>` : '📁 OneDrive Folder Link';
+  showForm(title, [
     { id: 'folder_url', label: 'Bid Folder Link (OneDrive)', type: 'text', required: true, placeholder: 'https://onedrive.live.com/…' },
   ], data => api('PATCH', `/api/v2/admin/bid/${bidId}`, data), 'Save', 'blue');
 }
