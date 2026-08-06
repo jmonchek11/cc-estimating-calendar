@@ -1269,7 +1269,8 @@ function renderBidListBody(stage) {
       <div class="proj-row" onclick="openBidFlyout(${b.project_id},${b.id})">
         <div style="flex:1;min-width:0">
           <div class="proj-name">${esc(b.project)}${b.bid_number ? ` <span style="color:var(--text-muted);font-weight:400;font-size:12px">#${esc(b.bid_number)}</span>` : ''}
-            ${b.drawing_stage ? `<span class="badge" style="background:#ede9fe;color:#5b21b6;font-size:10px">${esc(b.drawing_stage)}</span>` : ''}</div>
+            ${b.drawing_stage ? `<span class="badge" style="background:#ede9fe;color:#5b21b6;font-size:10px">${esc(b.drawing_stage)}</span>` : ''}
+            ${b.size_bucket ? `<span class="badge" style="background:#e0f2fe;color:#075985;font-size:10px">${esc(b.size_bucket)}</span>` : ''}</div>
           <div class="proj-meta">
             ${stage === 'awarded' ? esc(b.awarded_company || '—') : (b.customers.length ? esc(b.customers.join(', ')) : '<span style="color:#dc2626">no customer</span>')}
             ${stage === 'awarded' ? `<span class="proj-meta-sep">·</span> ${b.job_number ? `Job ${esc(b.job_number)}` : '<span style="color:#dc2626">no job #</span>'}
@@ -1583,7 +1584,7 @@ async function renderProjectPage(projectId) {
     <div class="page-header">
       <div>
         <div class="page-title">🏗️ ${esc(d.name)}</div>
-        <div class="page-subtitle">${bidN} bid${bidN!==1?'s':''} · ${jobN} job${jobN!==1?'s':''} · ${coN} change order${coN!==1?'s':''}${d.location ? ' · ' + esc(d.location) : ''}</div>
+        <div class="page-subtitle">${bidN} bid${bidN!==1?'s':''} · ${jobN} job${jobN!==1?'s':''} · ${coN} change order${coN!==1?'s':''}${d.location ? ' · ' + esc(d.location) : ''}${d.size_bucket ? ' · ' + esc(d.size_bucket) : ''}</div>
       </div>
       <button class="v2-btn outline" onclick="navigate('projects')">← All Projects</button>
     </div>
@@ -2359,6 +2360,17 @@ const nameOpts = (roleFilter) => META.team
   .map(t => ({ value: t.name, label: `${t.name} (${t.initials})` }));
 const companyOpts = () => META.companies.map(c => ({ value: c.id, label: c.name }));
 const projectOpts = () => ALL_PROJECTS.map(p => ({ value: p.id, label: p.name }));
+// Rough sqft buckets, captured at intake so LE/Sales can gauge bid/no-bid
+// against schedule at a glance — an exact number usually isn't known yet
+// this early, so a bucket beats a blank or a guessed figure.
+const PROJECT_SIZE_BUCKETS = [
+  { value: 'Under 5,000 SF', label: 'Under 5,000 SF' },
+  { value: '5,000–15,000 SF', label: '5,000–15,000 SF' },
+  { value: '15,000–50,000 SF', label: '15,000–50,000 SF' },
+  { value: '50,000–150,000 SF', label: '50,000–150,000 SF' },
+  { value: '150,000–500,000 SF', label: '150,000–500,000 SF' },
+  { value: '500,000+ SF', label: '500,000+ SF' },
+];
 // certified_payroll/tax_exempt are 3-state (null = TBD, not yet known —
 // distinct from a real "No"). Whoever starts a bid often can't answer this
 // yet, so TBD stays available everywhere EXCEPT Submit Bid, where a real
@@ -2513,6 +2525,7 @@ async function actNewOpportunity() {
     { id: 'source', label: 'Source (where did this come from?)', type: 'text', placeholder: 'iSqFt, BuildingConnected, email invite, referral, phone call…' },
     { id: 'description', label: 'Project Description', type: 'textarea', placeholder: 'Brief description of the scope of work…' },
     { id: 'location', label: 'Location', type: 'text', placeholder: 'City, State or site address…' },
+    { id: 'size_bucket', label: 'Project Size', type: 'select', emptyLabel: 'Unknown', options: PROJECT_SIZE_BUCKETS },
     { id: 'due_date', label: 'Due Date', type: 'date' },
     { id: 'due_time', label: 'Due Time (optional)', type: 'time' },
     { id: 'company_ids', label: 'Customer(s)', type: 'company', multi: true, newKey: 'new_companies', options: companyOpts(), placeholder: 'Type customer name…',
@@ -2684,6 +2697,7 @@ function actEditProject(projectId) {
     { id: 'name', label: 'Project Name', type: 'text', required: true, value: name },
     { id: 'description', label: 'Project Description', type: 'textarea', value: d.description, placeholder: 'Brief description of the scope of work…' },
     { id: 'location', label: 'Location', type: 'text', value: d.location, placeholder: 'City, State or site address…' },
+    { id: 'size_bucket', label: 'Project Size', type: 'select', emptyLabel: 'Unknown', value: d.size_bucket, options: PROJECT_SIZE_BUCKETS },
   ], data => api('PATCH', `/api/v2/admin/project/${projectId}`, data), 'Save Changes');
 }
 

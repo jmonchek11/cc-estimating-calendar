@@ -344,6 +344,7 @@ async function getProjectDetail(projectId) {
     name: project.name,
     description: project.description,
     location: project.location,
+    size_bucket: project.size_bucket,
     bids: bids
       .map(fmtBid)
       .sort((a, b) => stageRank(a.stage) - stageRank(b.stage)),
@@ -621,16 +622,16 @@ async function updateSettingsV2(data) {
 
 // ── Opportunity creation ──────────────────────────────────────────────────────
 // Creates a Project (or attaches to an existing one) + an opportunity Bid.
-async function createOpportunity({ project_id, project_name, notes, description, location, due_date, due_time, owner_id, source, company_ids, new_companies, contact_ids_by_company, new_contacts_by_company, created_by }) {
+async function createOpportunity({ project_id, project_name, notes, description, location, size_bucket, due_date, due_time, owner_id, source, company_ids, new_companies, contact_ids_by_company, new_contacts_by_company, created_by }) {
   const M = getModels();
   let pid = project_id ? Number(project_id) : null;
   let isNewProject = false;
   if (!pid) {
     require_({ project_name }, ['project_name']);
     pid = await nextId('projects');
-    // description/location only apply when creating a brand-new project —
-    // attaching to an existing one leaves its own data alone.
-    await M.Project.create({ _id: pid, name: project_name.trim(), description: description || null, location: location || null, created_by: created_by || null });
+    // description/location/size_bucket only apply when creating a brand-new
+    // project — attaching to an existing one leaves its own data alone.
+    await M.Project.create({ _id: pid, name: project_name.trim(), description: description || null, location: location || null, size_bucket: size_bucket || null, created_by: created_by || null });
     isNewProject = true;
   }
   const bidId = await nextId('bids');
@@ -1251,7 +1252,7 @@ async function reactivateBid(id, data, actorId) {
 // Bid submission fields (estimate $, date sent, approved by) are edited on the
 // bid_submission entity, not the bid — the bid's headline is derived from them.
 const ADMIN_EDITABLE = {
-  project:        ['name', 'description', 'location'],
+  project:        ['name', 'description', 'location', 'size_bucket'],
   company:        ['name', 'city', 'state'],
   // Walk-throughs are NOT here — they go through the dedicated add/update/
   // remove walk-through endpoints, which need find-or-create logic for the
@@ -2110,7 +2111,7 @@ async function getBidList(stage) {
     M.Project.find().lean(), M.Company.find().lean(), M.TeamMember.find().lean(), M.BidCustomer.find({ bid_id: { $in: ids } }).lean(),
     stage === 'awarded' ? M.Job.find({ winning_bid_id: { $in: ids } }).lean() : Promise.resolve([]),
   ]);
-  const pName = {}; projects.forEach(p => pName[p._id] = p.name);
+  const pName = {}; const pSize = {}; projects.forEach(p => { pName[p._id] = p.name; pSize[p._id] = p.size_bucket; });
   const coName = {}; companies.forEach(c => coName[c._id] = c.name);
   const tm = teamMap(members);
   const custByBid = {}; bidCustomers.forEach(bc => (custByBid[bc.bid_id] = custByBid[bc.bid_id] || []).push(coName[bc.company_id]));
@@ -2118,7 +2119,7 @@ async function getBidList(stage) {
   return bids.map(b => {
     const job = jobByBid[b._id];
     return {
-      id: b._id, project_id: b.project_id, project: pName[b.project_id] || '—',
+      id: b._id, project_id: b.project_id, project: pName[b.project_id] || '—', size_bucket: pSize[b.project_id] || null,
       bid_number: b.bid_number, stage: b.stage, drawing_stage: b.drawing_stage,
       estimator: tm[b.estimator_id] || null, salesperson: tm[b.salesperson_id] || null,
       owner: tm[b.owner_id] || null, source: b.source,

@@ -35,6 +35,10 @@ const ProjectSchema = new mongoose.Schema({
   name:       { type: String, required: true },
   description:{ type: String, default: null },   // brief scope-of-work description, captured at opportunity intake
   location:   { type: String, default: null },   // freeform "City, State" or site description — separate from the JIS-sourced street/city/state/zip below
+  // Rough sqft bucket captured at opportunity intake — lets LE/Sales gauge
+  // bid/no-bid against schedule at a glance without an exact number, which
+  // usually isn't known yet this early. One of SIZE_BUCKETS' values, or null.
+  size_bucket: { type: String, default: null },
   source_key: { type: String, default: null },   // stable import key: "job:<#>" or "name:<norm>" — survives re-import
   street:     { type: String, default: null },   // job site address — from the JIS title sheet
   city:       { type: String, default: null },
