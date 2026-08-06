@@ -80,6 +80,12 @@
   .bc-hd-right { text-align: right; flex-shrink: 0; }
   .bc-amount { font-size: 15px; font-weight: 800; }
   .bc-due { font-size: 11.5px; margin-top: 1px; }
+  .onedrive-btn { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; background: #e8f1fb; color: #0078d4; border: 1px solid #c7e0f4; border-radius: 6px; font-size: 11.5px; font-weight: 700; text-decoration: none; white-space: nowrap; }
+  .onedrive-btn:hover { background: #d7e9fa; }
+  .onedrive-icon-box { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 6px; flex-shrink: 0; }
+  .onedrive-icon-box.has-link { background: #e8f1fb; border: 1px solid #c7e0f4; cursor: pointer; }
+  .onedrive-icon-box.has-link:hover { background: #d7e9fa; }
+  .onedrive-icon-box.no-link { background: var(--bg); border: 1px dashed var(--border); opacity: .5; cursor: default; }
   .bc-meta { padding: 0 16px 12px; font-size: 12px; color: var(--text-muted); line-height: 1.6; }
   .bc-divider { height: 1px; background: var(--border); margin: 0 16px; }
   .bc-section { padding: 14px 16px; }
@@ -254,6 +260,19 @@
 <script>
 const fmt$ = n => n == null ? '' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
 const fmtD = d => { if (!d) return ''; const [y,m,dd] = d.split('-'); return `${Number(m)}/${Number(dd)}/${String(y).slice(2)}`; };
+// Generic cloud glyph (not a reproduction of Microsoft's OneDrive artwork),
+// tinted OneDrive blue — reused everywhere a folder_url shows up so the
+// link always reads the same way at a glance.
+const ONEDRIVE_ICON = `<svg viewBox="0 0 24 24" width="14" height="14" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0"><path fill="#0078d4" d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z"/></svg>`;
+// Full "Open in OneDrive" button — bid card, flyout header, job row.
+const onedriveButtonHtml = (url) => url
+  ? `<a class="onedrive-btn" href="${esc(url)}" target="_blank" rel="noopener">${ONEDRIVE_ICON} Open in OneDrive</a>` : '';
+// Compact icon-only indicator for list rows — clickable (and colored) when
+// a link exists, dimmed/outlined and inert when it doesn't, so scanning a
+// list makes it obvious at a glance which bids still need one set.
+const onedriveIconBoxHtml = (url) => url
+  ? `<a class="onedrive-icon-box has-link" href="${esc(url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Open in OneDrive">${ONEDRIVE_ICON}</a>`
+  : `<span class="onedrive-icon-box no-link" title="No OneDrive folder link set">${ONEDRIVE_ICON}</span>`;
 // Calendar-day difference between two "YYYY-MM-DD" strings, parsed as UTC
 // noon (not midnight) so DST transitions in between can't shift the count
 // by a day — a due date is a calendar date, not a moment in time.
@@ -1228,6 +1247,7 @@ function renderBidListBody(stage) {
             ${b.salesperson ? ` Sales ${ini(b.salesperson)}` : ''}
           </div>
         </div>
+        ${onedriveIconBoxHtml(b.folder_url)}
         <div style="text-align:right;flex-shrink:0">${right(b)}</div>
       </div>`).join('') : '<div style="padding:24px;text-align:center;color:var(--text-muted)">No matches</div>';
 }
@@ -1590,7 +1610,7 @@ async function renderFlyout(fresh) {
   panel.querySelector('.fly-head').outerHTML = `
     <div class="fly-head">
       <div style="flex:1;min-width:0"><div class="fly-title">${title}</div><div class="fly-sub">${sub}</div></div>
-      ${folderUrl ? `<a href="${esc(folderUrl)}" target="_blank" rel="noopener" title="Open Folder">📁</a>` : ''}
+      ${folderUrl ? `<a class="onedrive-icon-box has-link" href="${esc(folderUrl)}" target="_blank" rel="noopener" title="Open in OneDrive">${ONEDRIVE_ICON}</a>` : ''}
       <a href="#" onclick="event.preventDefault();renderProjectPage(${FLYOUT.projectId})">Open full project →</a>
       <button class="fly-close" onclick="closeFlyout()">✕</button>
     </div>`;
@@ -1719,7 +1739,6 @@ function bidNode(b) {
   if (!b.customers.length) metaBits.push('<span style="color:#dc2626">no customer</span>');
   if (b.owner) metaBits.push(`Added by ${ini(b.owner)}`);
   if (b.source) metaBits.push(`via ${esc(b.source)}`);
-  if (b.folder_url) metaBits.push(`<a href="${esc(b.folder_url)}" target="_blank" rel="noopener">📁 Open Folder</a>`);
   if (b.awarded_company) metaBits.push(`Won by <strong style="color:#166534">${esc(b.awarded_company.name)}</strong> ${fmtD(b.award_date)}`);
   if (b.estimator) metaBits.push(`Est. ${ini(b.estimator)}`);
   b.sub_estimators.forEach(s => metaBits.push(`${ini(s)}<span style="font-size:10px">${esc(s.scope)}<a href="#" onclick="event.preventDefault();actRemoveSubEstimator(${b.id},${s.id},'${escJs(s.scope)}')" style="color:#dc2626;margin-left:2px">✕</a></span>`));
@@ -1740,6 +1759,7 @@ function bidNode(b) {
           ${b.drawing_stage ? `<span class="badge" style="background:#ede9fe;color:#5b21b6">${esc(b.drawing_stage)}</span>` : ''}
           ${b.certified_payroll ? `<span class="badge" style="background:#fef3c7;color:#92400e" title="Notifies Accounting on award">CERTIFIED PAYROLL</span>` : ''}
           ${b.tax_exempt ? `<span class="badge" style="background:#dbeafe;color:#1e40af" title="Notifies Purchasing on award">TAX EXEMPT</span>` : ''}
+          ${onedriveButtonHtml(b.folder_url)}
         </div>
         ${(b.estimate_amount || b.due_date) ? `<div class="bc-hd-right">
           ${b.estimate_amount ? `<div class="bc-amount">${fmt$(b.estimate_amount)}</div>` : ''}
@@ -1941,13 +1961,13 @@ function jobNode(j, legacy = false) {
           ${j.award_date ? ` ${fmtD(j.award_date)}` : ''}
           ${j.pm ? ` · PM: ${ini(j.pm)} ${esc(j.pm.name)}` : ''}
           · ${j.change_orders.length} change order${j.change_orders.length!==1?'s':''}
-          ${j.folder_url ? ` · <a href="${esc(j.folder_url)}" target="_blank" rel="noopener">📁 Open Folder</a>` : ''}
         </div>
         <div class="v2-actions">
           ${!j.job_number ? `<button class="v2-btn amber" onclick="actSetJobNumber(${j.id})">Set Job #</button>` : ''}
           ${!j.pm ? `<button class="v2-btn outline" onclick="actSetPM(${j.id})">Assign PM</button>` : ''}
           <button class="v2-btn blue" onclick="actAddCO(${j.id})">+ Add Change Order</button>
           ${CURRENT_USER?.is_admin ? `<button class="v2-btn outline" onclick="actEditJob(${j.id})">✏️ Edit</button>` : ''}
+          ${onedriveButtonHtml(j.folder_url)}
         </div>
       </div>
     </div>
