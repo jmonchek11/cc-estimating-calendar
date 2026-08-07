@@ -308,6 +308,7 @@
   .page-title svg { color: var(--primary); }
 
   .dash-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+  .dash-action-mobile { display: none; }
   @media (max-width: 860px) {
     /* Both use an inline grid-template-columns (set once, shared by the
        dashboard and the weekly digest) — !important is the only way to
@@ -319,11 +320,13 @@
     .stat-sub { font-size: 10.5px; }
     .dash-actions { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 2px; margin-left: -14px; margin-right: -14px; padding-left: 14px; padding-right: 14px; }
     .dash-actions .v2-btn { flex-shrink: 0; white-space: nowrap; }
-    /* Import JIS / Legacy Job / direct New Bid / New Change Order are all
-       desk-bound tasks (a JIS file to upload, a bid # you're transcribing
-       from a spreadsheet) — on mobile the one thing worth a tap is starting
-       a new opportunity, so only that stays. */
+    /* On the Dashboard, the 5 separate creation buttons collapse into one
+       "+ Add" dropdown (see #dash-add-menu) instead of 5 buttons crowding
+       a phone-width row; the Projects/Active Bids pages just drop their
+       desk-bound actions (uploading a JIS file, transcribing a bid # off
+       a spreadsheet) since those genuinely aren't a mobile task. */
     .dash-action-desktop { display: none; }
+    .dash-action-mobile { display: inline-flex; }
   }
 </style>
 </head>
@@ -1751,10 +1754,20 @@ async function renderDashboard() {
     </div>
     <div class="dash-actions">
       <button class="v2-btn green dash-action-desktop" style="padding:8px 14px;font-size:12px" onclick="actNewBid()">+ New Bid</button>
-      <button class="v2-btn blue" style="padding:8px 14px;font-size:12px" onclick="actNewOpportunity()">+ New Opportunity</button>
+      <button class="v2-btn blue dash-action-desktop" style="padding:8px 14px;font-size:12px" onclick="actNewOpportunity()">+ New Opportunity</button>
       <button class="v2-btn outline dash-action-desktop" style="padding:8px 14px;font-size:12px" onclick="actNewLegacyJob()">+ Legacy Job</button>
       <button class="v2-btn amber dash-action-desktop" style="padding:8px 14px;font-size:12px" onclick="actImportJIS()">📄 Import Bid (JIS)</button>
       <button class="v2-btn outline dash-action-desktop" style="padding:8px 14px;font-size:12px" onclick="actNewChangeOrder()">+ New Change Order</button>
+      <div class="bc-menu-wrap dash-action-mobile">
+        <button class="v2-btn blue" style="padding:8px 14px;font-size:12px" onclick="toggleBcMenu('dash-add-menu')">+ Add ▾</button>
+        <div class="bc-dropdown" id="dash-add-menu" style="top:38px;bottom:auto;left:0;right:auto">
+          <a href="#" onclick="event.preventDefault();closeAllBcMenus();actNewOpportunity()">+ New Opportunity</a>
+          <a href="#" onclick="event.preventDefault();closeAllBcMenus();actNewBid()">+ New Bid</a>
+          <a href="#" onclick="event.preventDefault();closeAllBcMenus();actNewLegacyJob()">+ Legacy Job</a>
+          <a href="#" onclick="event.preventDefault();closeAllBcMenus();actImportJIS()">📄 Import Bid (JIS)</a>
+          <a href="#" onclick="event.preventDefault();closeAllBcMenus();actNewChangeOrder()">+ New Change Order</a>
+        </div>
+      </div>
     </div>
     <div class="stat-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px">
       ${stat('Opportunities', d.pipeline.opportunity, '', '#3b82f6', "renderBidList('opportunity')")}
@@ -2227,6 +2240,7 @@ function toggleBcMenu(id) {
   document.querySelectorAll('.bc-dropdown.open').forEach(el => { if (el.id !== id) el.classList.remove('open'); });
   document.getElementById(id)?.classList.toggle('open');
 }
+function closeAllBcMenus() { document.querySelectorAll('.bc-dropdown.open').forEach(el => el.classList.remove('open')); }
 document.addEventListener('click', (e) => {
   if (!e.target.closest('.bc-menu-wrap')) document.querySelectorAll('.bc-dropdown.open').forEach(el => el.classList.remove('open'));
 });
