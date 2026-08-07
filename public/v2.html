@@ -1719,6 +1719,28 @@ function renderProjectsBody() {
 }
 
 // ── Dashboard page (v2 data) ──
+// Mobile's "+ Add" button — a bottom sheet instead of a dropdown, since a
+// dropdown positioned inside the horizontally-scrolling action row gets
+// clipped by that row's own overflow:auto (an absolutely-positioned child
+// is still clipped by any scrolling ancestor between it and its
+// containing block, even though .bc-menu-wrap itself is position:relative).
+function actDashAddMenu() {
+  document.getElementById('v2-form-overlay')?.remove();
+  const ov = document.createElement('div');
+  ov.className = 'v2-overlay'; ov.id = 'v2-form-overlay';
+  ov.innerHTML = `
+    <div class="v2-modal" style="max-width:380px">
+      <div class="v2-modal-hd">+ Add<button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">✕</button></div>
+      <div class="v2-modal-bd" style="display:flex;flex-direction:column;gap:8px">
+        <button class="v2-btn blue" style="width:100%;padding:9px 12px;text-align:left" onclick="document.getElementById('v2-form-overlay').remove();actNewOpportunity()">+ New Opportunity</button>
+        <button class="v2-btn green" style="width:100%;padding:9px 12px;text-align:left" onclick="document.getElementById('v2-form-overlay').remove();actNewBid()">+ New Bid</button>
+        <button class="v2-btn outline" style="width:100%;padding:9px 12px;text-align:left" onclick="document.getElementById('v2-form-overlay').remove();actNewLegacyJob()">+ Legacy Job</button>
+        <button class="v2-btn amber" style="width:100%;padding:9px 12px;text-align:left" onclick="document.getElementById('v2-form-overlay').remove();actImportJIS()">📄 Import Bid (JIS)</button>
+        <button class="v2-btn outline" style="width:100%;padding:9px 12px;text-align:left" onclick="document.getElementById('v2-form-overlay').remove();actNewChangeOrder()">+ New Change Order</button>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+}
 let DASH_MINE = null;   // "My View" is the default (except Admin/Oversight, who default to global); toggle switches it
 function setDashboardView(mine) { DASH_MINE = mine; renderDashboard(); }
 let DASH_DATA = null;   // last-rendered dashboard payload, kept around so the Awarded (YTD) card can pop its month breakout without a re-fetch
@@ -1758,16 +1780,7 @@ async function renderDashboard() {
       <button class="v2-btn outline dash-action-desktop" style="padding:8px 14px;font-size:12px" onclick="actNewLegacyJob()">+ Legacy Job</button>
       <button class="v2-btn amber dash-action-desktop" style="padding:8px 14px;font-size:12px" onclick="actImportJIS()">📄 Import Bid (JIS)</button>
       <button class="v2-btn outline dash-action-desktop" style="padding:8px 14px;font-size:12px" onclick="actNewChangeOrder()">+ New Change Order</button>
-      <div class="bc-menu-wrap dash-action-mobile">
-        <button class="v2-btn blue" style="padding:8px 14px;font-size:12px" onclick="toggleBcMenu('dash-add-menu')">+ Add ▾</button>
-        <div class="bc-dropdown" id="dash-add-menu" style="top:38px;bottom:auto;left:0;right:auto">
-          <a href="#" onclick="event.preventDefault();closeAllBcMenus();actNewOpportunity()">+ New Opportunity</a>
-          <a href="#" onclick="event.preventDefault();closeAllBcMenus();actNewBid()">+ New Bid</a>
-          <a href="#" onclick="event.preventDefault();closeAllBcMenus();actNewLegacyJob()">+ Legacy Job</a>
-          <a href="#" onclick="event.preventDefault();closeAllBcMenus();actImportJIS()">📄 Import Bid (JIS)</a>
-          <a href="#" onclick="event.preventDefault();closeAllBcMenus();actNewChangeOrder()">+ New Change Order</a>
-        </div>
-      </div>
+      <button class="v2-btn blue dash-action-mobile" style="padding:8px 14px;font-size:12px" onclick="actDashAddMenu()">+ Add ▾</button>
     </div>
     <div class="stat-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px">
       ${stat('Opportunities', d.pipeline.opportunity, '', '#3b82f6', "renderBidList('opportunity')")}
@@ -2240,7 +2253,6 @@ function toggleBcMenu(id) {
   document.querySelectorAll('.bc-dropdown.open').forEach(el => { if (el.id !== id) el.classList.remove('open'); });
   document.getElementById(id)?.classList.toggle('open');
 }
-function closeAllBcMenus() { document.querySelectorAll('.bc-dropdown.open').forEach(el => el.classList.remove('open')); }
 document.addEventListener('click', (e) => {
   if (!e.target.closest('.bc-menu-wrap')) document.querySelectorAll('.bc-dropdown.open').forEach(el => el.classList.remove('open'));
 });
