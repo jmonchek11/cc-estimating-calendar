@@ -216,17 +216,19 @@
     /* Flat, restrained bar — no cutouts, badges, or overhangs. Same color
        as the sidebar (brand consistency), a whisper of a top-to-bottom
        gradient for depth instead of a heavy shadow, and a 1px lightened
-       hairline at the bottom for definition against the page below. The
-       logo just sits centered inside it at a size that actually fits. */
+       hairline at the bottom for definition against the page below.
+       logo.png is a detailed crest (three tiers of text, not a simple
+       wordmark) — it needs real size to stay legible, so the bar is sized
+       around the logo rather than the logo being shrunk to fit a slim bar. */
     #mobile-topbar {
       display: flex; align-items: center; justify-content: center;
       position: fixed; top: 0; left: 0; right: 0; z-index: 50;
-      height: calc(58px + env(safe-area-inset-top)); padding-top: env(safe-area-inset-top);
+      height: calc(92px + env(safe-area-inset-top)); padding-top: env(safe-area-inset-top);
       background: linear-gradient(180deg, #16213f 0%, var(--sidebar-bg) 100%);
       border-bottom: 1px solid rgba(255,255,255,.08);
     }
     #mobile-topbar-notch { display: flex; align-items: center; justify-content: center; }
-    #mobile-topbar-notch img { height: 30px; width: auto; object-fit: contain; }
+    #mobile-topbar-notch img { height: 68px; width: auto; object-fit: contain; }
     #sidebar {
       position: fixed; top: 0; left: 0; height: 100dvh; width: 84vw; max-width: 320px;
       transform: translateX(-100%); transition: transform .28s cubic-bezier(.32,.72,0,1); z-index: 75;
@@ -245,7 +247,7 @@
 
     #main {
       width: 100%;
-      padding: calc(72px + env(safe-area-inset-top)) 14px calc(86px + env(safe-area-inset-bottom));
+      padding: calc(106px + env(safe-area-inset-top)) 14px calc(86px + env(safe-area-inset-bottom));
     }
 
     #mobile-tabbar {
