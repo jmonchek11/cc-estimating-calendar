@@ -216,21 +216,19 @@
     #mobile-topbar {
       display: flex; align-items: center; justify-content: center;
       position: fixed; top: 0; left: 0; right: 0; z-index: 50;
-      height: calc(50px + env(safe-area-inset-top)); padding-top: env(safe-area-inset-top);
+      height: calc(46px + env(safe-area-inset-top)); padding-top: env(safe-area-inset-top);
       background: var(--sidebar-bg);
       box-shadow: 0 2px 10px rgba(0,0,0,.28);
     }
-    #mobile-topbar-title { color: #fff; font-weight: 800; font-size: 14.5px; letter-spacing: .01em; }
-    #mobile-topbar-badge {
-      position: absolute; left: 50%; bottom: -24px; transform: translateX(-50%);
-      width: 62px; height: 62px; border-radius: 50%; background: #fff;
+    /* An iPhone-style notch — a dark pill embedded in the bar, logo.png's
+       transparent background sitting directly in it (no white badge/circle,
+       no separate text label). */
+    #mobile-topbar-notch {
       display: flex; align-items: center; justify-content: center;
-      box-shadow: 0 4px 10px rgba(0,0,0,.2); border: 3px solid #fff; overflow: hidden;
+      width: 108px; height: 32px; border-radius: 16px; background: #000;
+      margin-top: env(safe-area-inset-top);
     }
-    /* logo.png is wide (same file used on the login screen and sidebar
-       header) — contain + padding keeps the whole mark legible instead of
-       cropping it the way object-fit:cover would inside a circle. */
-    #mobile-topbar-badge img { width: 100%; height: 100%; object-fit: contain; padding: 8px; box-sizing: border-box; }
+    #mobile-topbar-notch img { height: 20px; width: auto; object-fit: contain; }
     #sidebar {
       position: fixed; top: 0; left: 0; height: 100dvh; width: 84vw; max-width: 320px;
       transform: translateX(-100%); transition: transform .28s cubic-bezier(.32,.72,0,1); z-index: 75;
@@ -249,7 +247,7 @@
 
     #main {
       width: 100%;
-      padding: calc(88px + env(safe-area-inset-top)) 14px calc(86px + env(safe-area-inset-bottom));
+      padding: calc(62px + env(safe-area-inset-top)) 14px calc(86px + env(safe-area-inset-bottom));
     }
 
     #mobile-tabbar {
@@ -332,8 +330,7 @@
 <body>
   <div id="app">
     <header id="mobile-topbar">
-      <span id="mobile-topbar-title">Liberty Estimating Hub</span>
-      <span id="mobile-topbar-badge"><img src="logo.png" alt="Liberty Integrated Solutions"></span>
+      <span id="mobile-topbar-notch"><img src="logo.png" alt="Liberty Integrated Solutions"></span>
     </header>
     <nav id="sidebar">
       <div class="sidebar-header" style="display:flex;align-items:center;gap:8px">
