@@ -393,6 +393,7 @@
       <div style="display:flex;align-items:center;gap:10px;padding:6px 16px 12px">
         <a href="#" onclick="openOnlinePanel();return false" title="Who's online" style="display:flex;align-items:center;gap:6px;color:var(--sidebar-text);text-decoration:none;font-size:12px;flex:1;min-width:0"><span style="width:8px;height:8px;border-radius:50%;background:#22c55e;flex-shrink:0;display:inline-block"></span> <span id="online-count-label" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">…</span></a>
         <a href="#" onclick="openIdeasModal();return false" title="Ideas & Issues" style="color:var(--sidebar-text);text-decoration:none;flex-shrink:0;display:flex"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.2 1 2.05V17h6v-.25c0-.86.38-1.55 1-2.05A7 7 0 0 0 12 2z"/></svg></a>
+        <a href="#" onclick="openReleaseNotesModal();return false" title="What's New" style="position:relative;color:var(--sidebar-text);text-decoration:none;flex-shrink:0;display:flex"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l18-5v12L3 14v-3z"/><path d="M11.6 16.8a2 2 0 0 1-3.2 2.4L6 15"/></svg><span id="release-badge-dot" style="display:none;position:absolute;top:-3px;right:-3px;width:8px;height:8px;border-radius:50%;background:#dc2626;border:1.5px solid var(--sidebar-bg)"></span></a>
         <a href="#" onclick="actLogout();return false" title="Sign out" style="color:var(--sidebar-text);text-decoration:none;flex-shrink:0;display:flex"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></a>
       </div>
     </nav>
@@ -588,6 +589,11 @@ async function ensureMeta() {
   if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
   META = data; CURRENT_USER = META.current_user;
   renderAppSwitcher();
+  renderReleaseBadge();
+}
+function renderReleaseBadge() {
+  const dot = document.getElementById('release-badge-dot');
+  if (dot) dot.style.display = (CURRENT_USER?.unseen_release_count > 0) ? 'block' : 'none';
 }
 
 // Tracks the current page so post-action refresh() re-renders the right view
@@ -5373,6 +5379,67 @@ function ideaCardHtml(i, isAdmin) {
           </div>` : ''}
       </div>
     </div>`;
+}
+
+// ── "What's New" — running log of shipped features/fixes, admin-posted ────
+const RELEASE_CATEGORY_META = {
+  feature:     { label: 'New', color: '#166534', bg: '#f0fdf4' },
+  improvement: { label: 'Improved', color: '#1e40af', bg: '#eff6ff' },
+  fix:         { label: 'Fixed', color: '#92400e', bg: '#fffbeb' },
+};
+let RELEASE_NOTES_CACHE = [];
+function releaseNoteCardHtml(n) {
+  const cat = RELEASE_CATEGORY_META[n.category] || RELEASE_CATEGORY_META.feature;
+  return `<div style="padding:12px 0;border-bottom:1px solid var(--border)">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <span class="badge" style="background:${cat.bg};color:${cat.color};font-size:10px">${cat.label}</span>
+      <span style="font-weight:700;font-size:13.5px">${esc(n.title)}</span>
+      <span style="font-size:11px;color:var(--text-muted);margin-left:auto">${n.date ? fmtD(n.date) : ''}</span>
+      ${CURRENT_USER?.is_admin ? `<a href="#" onclick="event.preventDefault();actDeleteReleaseNote(${n.id})" style="font-size:11px;color:#dc2626">remove</a>` : ''}
+    </div>
+    ${n.description ? `<div style="font-size:12.5px;color:var(--text-muted);margin-top:4px">${esc(n.description)}</div>` : ''}
+    ${n.credited_name ? `<div style="font-size:11.5px;color:#0e7490;margin-top:5px">💡 Idea from <strong>${esc(n.credited_name)}</strong></div>` : ''}
+  </div>`;
+}
+async function openReleaseNotesModal() {
+  try { RELEASE_NOTES_CACHE = await api('GET', '/api/v2/release-notes'); } catch { RELEASE_NOTES_CACHE = []; }
+  document.getElementById('v2-form-overlay')?.remove();
+  const ov = document.createElement('div');
+  ov.className = 'v2-overlay'; ov.id = 'v2-form-overlay';
+  const isAdmin = !!CURRENT_USER?.is_admin;
+  ov.innerHTML = `
+    <div class="v2-modal" style="max-width:520px;max-height:85vh;overflow-y:auto">
+      <div class="v2-modal-hd">📣 What's New<button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">✕</button></div>
+      <div class="v2-modal-bd">
+        ${isAdmin ? `<button class="v2-btn blue" style="margin-bottom:12px" onclick="actNewReleaseNote()">+ Post an Update</button>` : ''}
+        ${RELEASE_NOTES_CACHE.length ? RELEASE_NOTES_CACHE.map(releaseNoteCardHtml).join('') : '<div style="font-size:13px;color:var(--text-muted)">Nothing posted yet.</div>'}
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+  // Caught up the moment they open it — not a separate "mark read" step.
+  if (CURRENT_USER) {
+    api('POST', '/api/v2/release-notes/seen').then(() => {
+      if (CURRENT_USER) CURRENT_USER.unseen_release_count = 0;
+      renderReleaseBadge();
+    }).catch(() => {});
+  }
+}
+async function actNewReleaseNote() {
+  let ideas = [];
+  try { ideas = await api('GET', '/api/ideas'); } catch { /* idea credit is optional */ }
+  showForm('📣 Post an Update', [
+    { id: 'title', label: 'Title', type: 'text', required: true, placeholder: 'One line summary — what changed' },
+    { id: 'category', label: 'Type', type: 'select', required: true, value: 'feature',
+      options: [{ value: 'feature', label: '✨ New Feature' }, { value: 'improvement', label: '⬆️ Improvement' }, { value: 'fix', label: '🐛 Fix' }] },
+    { id: 'description', label: 'Description (optional)', type: 'textarea', placeholder: 'A sentence or two on what changed and why' },
+    { id: 'idea_id', label: 'Credit an idea from the tray (optional)', type: 'select', emptyLabel: 'None',
+      options: ideas.map(i => ({ value: i.id, label: `${i.title} — ${i.submitted_by_name || 'unknown'}` })) },
+  ], data => api('POST', '/api/v2/release-notes', data), 'Post', 'blue');
+}
+async function actDeleteReleaseNote(id) {
+  if (!confirm('Remove this What\'s New entry?')) return;
+  try { await api('DELETE', `/api/v2/release-notes/${id}`); openReleaseNotesModal(); }
+  catch (e) { alert('Failed: ' + e.message); }
 }
 
 async function openIdeasModal() {

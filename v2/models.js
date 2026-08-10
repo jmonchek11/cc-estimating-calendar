@@ -329,6 +329,10 @@ const NoteSchema = new mongoose.Schema({
 // page is now the single source of truth; v2's Settings/Team page reads
 // and writes it directly (see v2/routes.js).
 const V1TeamMember = require('../models/TeamMember');
+// Same pattern as V1TeamMember above — ideas/bugs are v1's collection (the
+// Ideas & Issues tray), and a ReleaseNote can optionally credit whoever
+// submitted the idea it shipped, so it needs a direct read of that model.
+const V1Idea = require('../models/Idea');
 
 const SettingsSchema = new mongoose.Schema({
   _id: String,                                                   // 'company'
@@ -397,6 +401,28 @@ const ActivityLogSchema = new mongoose.Schema({
   undone:     { type: Number, default: 0 },
 }, opts);
 
+// "What's New" — a hand-posted running log of shipped features/fixes, shown
+// in-app so the team doesn't have to rely on someone remembering to mention
+// a change out loud. `idea_id`/`credited_name` are optional: when a note is
+// linked to an Ideas & Issues submission, credited_name is a SNAPSHOT of the
+// submitter's name taken at post time (not a live join) — it stays correct
+// even if the idea is later edited, merged, or the submitter's account
+// changes, and doesn't require a cross-database join every time the list
+// renders. Not every note has a submitter to credit (most are things Joe
+// asked for directly in chat, not through the tray).
+const RELEASE_NOTE_CATEGORIES = ['feature', 'improvement', 'fix'];
+const ReleaseNoteSchema = new mongoose.Schema({
+  _id:            Number,
+  title:          { type: String, required: true },
+  description:    { type: String, default: null },
+  category:       { type: String, enum: RELEASE_NOTE_CATEGORIES, default: 'feature' },
+  idea_id:        { type: Number, default: null },   // FK → v1 Idea (optional)
+  credited_name:  { type: String, default: null },   // snapshot, not a live join — see above
+  created_by:     { type: Number, default: null },   // FK → TeamMember, who posted it
+  date:           { type: String, default: null },   // display date (YYYY-MM-DD), defaults to post day
+  created_at:     { type: String, default: ts },
+}, opts);
+
 // ── Export models bound to the v2 connection ──────────────────────────────────
 
 function getModels() {
@@ -414,6 +440,8 @@ function getModels() {
     Reminder:    c.model('Reminder', ReminderSchema, 'reminders'),
     Note:        c.model('Note', NoteSchema, 'notes'),
     TeamMember:  V1TeamMember,
+    Idea:        V1Idea,
+    ReleaseNote: c.model('ReleaseNote', ReleaseNoteSchema, 'release_notes'),
     Settings:    c.model('Settings', SettingsSchema, 'settings'),
     Counter:     c.model('Counter', CounterSchema, 'counters'),
     IgnoredPair: c.model('IgnoredPair', IgnoredPairSchema, 'ignored_pairs'),
@@ -423,4 +451,4 @@ function getModels() {
   };
 }
 
-module.exports = { getConnection, getModels, V2_DB_NAME, BID_STAGES, CO_STAGES, BID_SUBMISSION_TYPES };
+module.exports = { getConnection, getModels, V2_DB_NAME, BID_STAGES, CO_STAGES, BID_SUBMISSION_TYPES, RELEASE_NOTE_CATEGORIES };

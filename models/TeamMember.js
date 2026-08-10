@@ -15,6 +15,13 @@ const teamMemberSchema = new mongoose.Schema({
   must_change_password: { type: Boolean, default: true },
   is_admin: { type: Boolean, default: false },
   last_seen: { type: Date, default: null },
+  // Timestamp of the last time this person opened the What's New panel —
+  // compared against ReleaseNote.created_at to drive the sidebar's unread
+  // red-dot (see getUnseenReleaseCount/markReleasesSeen in v2/db.js). Null
+  // means "never checked" — treated as "everything is unseen" rather than
+  // caught up, so the badge shows for existing users the first time this
+  // feature ships too.
+  last_seen_release_at: { type: String, default: null },
   created_at: { type: String, default: () => new Date().toISOString() },
   // Per-person opt-OUT of notification categories — missing key or `true`
   // both mean "send it" (see wantsNotification in mailer.js), so accounts

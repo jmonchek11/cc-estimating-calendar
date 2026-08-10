@@ -161,7 +161,8 @@ router.get('/api/v2/meta', async (req, res) => {
       const m = await maindb.getMember(req.session.userId);
       if (m) {
         const liberty_apps = await directory.getMyApps({ ms_oid: m.ms_oid, email: m.email });
-        current_user = { id: m.id, name: m.name, is_admin: !!m.is_admin, role: m.role, liberty_apps, notification_prefs: m.notification_prefs };
+        const unseen_release_count = await v2db.getUnseenReleaseCount(m.id).catch(() => 0);
+        current_user = { id: m.id, name: m.name, is_admin: !!m.is_admin, role: m.role, liberty_apps, notification_prefs: m.notification_prefs, unseen_release_count };
       }
     } catch { /* ignore — current_user stays null */ }
     res.json({ ...meta, current_user });
@@ -226,6 +227,16 @@ router.patch('/api/v2/me/notification-prefs', t(req => v2db.updateMyNotification
 
 // ── Settings (v2's own follow-up timer config) ────────────────────────────────
 router.put('/api/v2/settings',        requireAdmin, t(req => v2db.updateSettingsV2(req.body)));
+
+// ── "What's New" release notes ─────────────────────────────────────────────
+// Reading/marking-seen is open to anyone logged in; posting/removing an
+// entry is admin-only (only Joe posts these).
+router.get('/api/v2/release-notes',    t(() => v2db.getReleaseNotes()));
+router.post('/api/v2/release-notes',   requireAdmin, t(req => v2db.createReleaseNote(req.body, req.session.userId),
+  async (req, r) => ({ action: 'release_note.create', summary: `Posted a What's New entry: "${req.body.title}"`, entity_type: 'release_note', entity_id: r.id })));
+router.delete('/api/v2/release-notes/:id', requireAdmin, t(req => v2db.deleteReleaseNote(req.params.id),
+  (req) => ({ action: 'release_note.delete', summary: `Removed What's New entry #${req.params.id}`, entity_type: 'release_note', entity_id: Number(req.params.id) })));
+router.post('/api/v2/release-notes/seen', t(req => v2db.markReleasesSeen(req.session.userId)));
 
 router.post('/api/v2/opportunities',          t(req => v2db.createOpportunity({ ...req.body, created_by: req.session.userId }),
   async (req, r) => ({ action: 'bid.create_opportunity', summary: `Created opportunity ${await v2db.bidLabel(r.bid_id)}`, entity_type: 'bid', entity_id: r.bid_id })));

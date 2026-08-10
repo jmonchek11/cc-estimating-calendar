@@ -9,7 +9,7 @@
  */
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
-const { getModels } = require('./models');
+const { getModels, RELEASE_NOTE_CATEGORIES } = require('./models');
 const events = require('./events');
 const ics = require('./ics');
 
@@ -618,6 +618,63 @@ async function updateMyNotificationPrefs(userId, prefs) {
     if (k in prefs) upd[`notification_prefs.${k}`] = !!prefs[k];
   }
   if (Object.keys(upd).length) await M.TeamMember.updateOne({ _id: Number(userId) }, { $set: upd });
+  return { ok: true };
+}
+
+// ── "What's New" release notes ────────────────────────────────────────────────
+async function getReleaseNotes() {
+  const M = getModels();
+  const notes = await M.ReleaseNote.find().sort({ _id: -1 }).lean();
+  return notes.map(n => ({
+    id: n._id, title: n.title, description: n.description, category: n.category,
+    date: n.date, credited_name: n.credited_name, idea_id: n.idea_id, created_at: n.created_at,
+  }));
+}
+
+// idea_id is optional — when given, credited_name is a SNAPSHOT of the
+// idea's submitter's name taken right now (see ReleaseNoteSchema in
+// v2/models.js for why it's a snapshot, not a live join).
+async function createReleaseNote({ title, description, category, idea_id, date }, actorId) {
+  const M = getModels();
+  require_({ title }, ['title']);
+  let credited_name = null;
+  if (idea_id) {
+    const idea = await M.Idea.findById(Number(idea_id)).lean();
+    if (idea?.submitted_by) {
+      const submitter = await M.TeamMember.findById(idea.submitted_by).lean();
+      credited_name = submitter?.name || null;
+    }
+  }
+  const id = await nextId('release_notes');
+  await M.ReleaseNote.create({
+    _id: id, title: title.trim(), description: description || null,
+    category: RELEASE_NOTE_CATEGORIES.includes(category) ? category : 'feature',
+    idea_id: idea_id ? Number(idea_id) : null, credited_name,
+    created_by: actorId || null, date: date || today(),
+  });
+  return { id };
+}
+
+async function deleteReleaseNote(id) {
+  const M = getModels();
+  await M.ReleaseNote.deleteOne({ _id: Number(id) });
+  return { ok: true };
+}
+
+// Drives the sidebar's unread red-dot — counts notes posted after this
+// person's last check-in. Never having checked (null) counts as "everything
+// is unseen" rather than caught up, so existing users see the badge the
+// first time this feature ships too, same as a brand-new user would.
+async function getUnseenReleaseCount(userId) {
+  const M = getModels();
+  const member = await M.TeamMember.findById(Number(userId)).lean();
+  const since = member?.last_seen_release_at || '1970-01-01 00:00:00';
+  return M.ReleaseNote.countDocuments({ created_at: { $gt: since } });
+}
+
+async function markReleasesSeen(userId) {
+  const M = getModels();
+  await M.TeamMember.updateOne({ _id: Number(userId) }, { $set: { last_seen_release_at: ts() } });
   return { ok: true };
 }
 
@@ -3273,6 +3330,7 @@ module.exports = {
   recomputeBidHeadline, recomputeBidFollowup, nextId, getHolidays, getHolidaysAround, getHolidayNames, getHolidayNamesAround, addWorkingDays, isWeekendOrHoliday,
   createOpportunity, createDirectBid, startBid, submitBid, addSubmission, reactivateBid, addBidCustomers, updateOpportunity, adminUpdate,
   promoteLead, demoteToLead,
+  getReleaseNotes, createReleaseNote, deleteReleaseNote, getUnseenReleaseCount, markReleasesSeen,
   getContacts, getContactDetail, createContact, updateContact, deleteContact, getContactBids, getCompanyBids,
   addBidCustomerContact, removeBidCustomerContact,
   awardSubmission, notAwardSubmission, closeBid, approveToBid, unapproveToBid, logFollowupV2, updateFollowup,
