@@ -1012,7 +1012,7 @@ async function actSendDigestNow() {
 // ═══════════════════════════════════════════════════════════════════════════
 const ESTIMATOR_PALETTE = ['#2563eb', '#16a34a', '#dc2626', '#d97706', '#7c3aed', '#0891b2', '#be185d', '#ea580c'];
 const estimatorColor = (id) => id ? ESTIMATOR_PALETTE[Number(id) % ESTIMATOR_PALETTE.length] : '#64748b';
-let CAL_STATE = { year: new Date().getFullYear(), month: new Date().getMonth(), filter: 'all', weekAnchor: null };
+let CAL_STATE = { year: new Date().getFullYear(), month: new Date().getMonth(), filter: 'all', weekAnchor: null, person: '' };
 let CAL_DAY_MAP = {};
 
 // mineOnly mirrors the rest of the Dashboard's "My View" toggle — filters to
@@ -1055,6 +1055,13 @@ function calendarLegendHtml() {
     `<span class="cal-legend-item"><span class="cal-legend-dot" style="background:#7c3aed"></span>📋 RFI Due</span>`,
   ].join('');
 }
+function calPersonSelectHtml(reRenderFn) {
+  const { person } = CAL_STATE;
+  return `<select class="cal-filter-select" onchange="CAL_STATE.person=this.value;${reRenderFn}()">
+      <option value="">Everyone</option>
+      ${personOpts().map(([v, l]) => `<option value="${v}" ${v === person ? 'selected' : ''}>${esc(l)}</option>`).join('')}
+    </select>`;
+}
 function calendarControlsHtml(reRenderFn) {
   const { year, month, filter } = CAL_STATE;
   const monthName = new Date(year, month, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
@@ -1068,6 +1075,7 @@ function calendarControlsHtml(reRenderFn) {
         <option value="due_only" ${filter === 'due_only' ? 'selected' : ''}>Due Dates Only</option>
         <option value="followups_only" ${filter === 'followups_only' ? 'selected' : ''}>Follow-ups Only</option>
       </select>
+      ${calPersonSelectHtml(reRenderFn)}
     </div>`;
 }
 
@@ -1078,6 +1086,7 @@ async function renderCalendar() {
   let items;
   try { await ensureMeta(); items = await fetchCalendarItems(); }
   catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
+  items = applyPersonMine(items, CAL_STATE);
 
   const { year, month, filter } = CAL_STATE;
   const mobile = isMobileViewport();
@@ -1222,6 +1231,7 @@ function calWeekControlsHtml(reRenderFn) {
         <option value="due_only" ${filter === 'due_only' ? 'selected' : ''}>Due Dates Only</option>
         <option value="followups_only" ${filter === 'followups_only' ? 'selected' : ''}>Follow-ups Only</option>
       </select>
+      ${calPersonSelectHtml(reRenderFn)}
     </div>`;
 }
 function navCalendarWeek(dir) {
@@ -1867,7 +1877,7 @@ async function renderDashboard() {
     <div class="card" style="margin-top:18px;padding:16px">
       <div class="section-title" style="margin-bottom:10px">🗓️ Calendar</div>
       ${isMobileViewport() ? calWeekControlsHtml('renderDashboard') : calendarControlsHtml('renderDashboard')}
-      ${isMobileViewport() ? buildCalendarWeekAgenda(calItems, CAL_STATE.filter) : buildCalendarGrid(CAL_STATE.year, CAL_STATE.month, calItems, CAL_STATE.filter)}
+      ${isMobileViewport() ? buildCalendarWeekAgenda(applyPersonMine(calItems, CAL_STATE), CAL_STATE.filter) : buildCalendarGrid(CAL_STATE.year, CAL_STATE.month, applyPersonMine(calItems, CAL_STATE), CAL_STATE.filter)}
       <div class="cal-legend">${calendarLegendHtml()}</div>
     </div>`;
 }
