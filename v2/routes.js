@@ -125,6 +125,13 @@ router.get('/api/v2/calendar-feed/:token/calendar.ics', async (req, res) => {
     res.type('text/calendar; charset=utf-8').send(feed);
   } catch (e) { res.status(500).type('text/plain').send('Error generating calendar feed.'); }
 });
+// Authenticated (normal /api/v2/* session gate) — the Calendar tab's
+// "who's out" banner. Returns {} whenever Graph isn't configured/reachable
+// (see v2/graph.js), so this never breaks the calendar page itself.
+router.get('/api/v2/estimator-availability', async (req, res) => {
+  try { res.json(await v2db.getEstimatorAvailability(req.query.start, req.query.end)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 router.post('/api/v2/admin/send-digest', requireAdmin, async (req, res) => {
   try {

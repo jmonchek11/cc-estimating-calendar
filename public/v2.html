@@ -301,6 +301,15 @@
   .cal-week-day-body .cal-chip { padding: 6px 9px; border-radius: 6px; }
   .cal-week-day-body .cal-chip-txt { white-space: normal; font-size: 12px; }
   .cal-week-empty { font-size: 12px; color: var(--text-muted); padding: 2px 0; }
+  /* Estimator out-of-office banner (Calendar tab only — see
+     getEstimatorAvailability in v2/db.js) — sits above the day's own
+     content in both the month grid cell and the week-agenda day. */
+  .cal-ooo-banner {
+    font-size: 10.5px; font-weight: 700; color: #92400e; background: #fef3c7;
+    border-radius: 4px; padding: 2px 5px; margin-bottom: 4px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .cal-week-day .cal-ooo-banner { margin: 0; border-radius: 0; padding: 4px 10px; white-space: normal; }
 
   /* Vector page-title icons (see PAGE_ICONS/pageIcon) replace the old emoji
      prefixes — style.css sets .page-title's font; this adds the icon row. */
@@ -1079,21 +1088,39 @@ function calendarControlsHtml(reRenderFn) {
     </div>`;
 }
 
+// Visible date range for whichever view is showing — used to scope the
+// "who's out" HR-calendar lookup to only the days actually on screen.
+function calVisibleRange(mobile) {
+  if (mobile) {
+    const monday = mondayOf(CAL_STATE.weekAnchor);
+    const friday = new Date(monday); friday.setDate(monday.getDate() + 4);
+    return { start: ymd(monday), end: ymd(friday) };
+  }
+  const { year, month } = CAL_STATE;
+  const last = new Date(year, month + 1, 0).getDate();
+  return { start: `${year}-${String(month + 1).padStart(2, '0')}-01`, end: `${year}-${String(month + 1).padStart(2, '0')}-${String(last).padStart(2, '0')}` };
+}
 async function renderCalendar() {
   setActiveNav('calendar');
   const main = document.getElementById('main');
   main.innerHTML = '<div style="padding:30px;color:var(--text-muted)">Loading…</div>';
-  let items;
-  try { await ensureMeta(); items = await fetchCalendarItems(); }
-  catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
+  const mobile = isMobileViewport();
+  const range = calVisibleRange(mobile);
+  let items, availability;
+  try {
+    await ensureMeta();
+    [items, availability] = await Promise.all([
+      fetchCalendarItems(),
+      api('GET', `/api/v2/estimator-availability?start=${range.start}&end=${range.end}`).catch(() => ({})),
+    ]);
+  } catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
   items = applyPersonMine(items, CAL_STATE);
 
   const { year, month, filter } = CAL_STATE;
-  const mobile = isMobileViewport();
   main.innerHTML = `
     <div class="page-header"><div><div class="page-title">${pageIcon('calendar')} Calendar</div></div></div>
     ${mobile ? calWeekControlsHtml('renderCalendar') : calendarControlsHtml('renderCalendar')}
-    ${mobile ? buildCalendarWeekAgenda(items, filter) : buildCalendarGrid(year, month, items, filter)}
+    ${mobile ? buildCalendarWeekAgenda(items, filter, availability) : buildCalendarGrid(year, month, items, filter, availability)}
     <div class="cal-legend">${calendarLegendHtml()}</div>`;
 }
 
@@ -1156,7 +1183,15 @@ function calChipHtml(item, type) {
 }
 function isMobileViewport() { return window.matchMedia('(max-width: 860px)').matches; }
 
-function buildCalendarGrid(year, month, items, filter) {
+// Cross-referenced against the shared HR calendar (see getEstimatorAvailability
+// in v2/db.js) — availability is keyed by 'YYYY-MM-DD', {}  whenever Graph
+// isn't configured, so this renders nothing rather than an empty banner.
+function outOfOfficeBannerHtml(dateStr, availability) {
+  const people = (availability || {})[dateStr];
+  if (!people || !people.length) return '';
+  return `<div class="cal-ooo-banner" title="Out of office: ${esc(people.map(p => p.name).join(', '))}">🌴 ${esc(people.map(p => p.initials).join(', '))} out</div>`;
+}
+function buildCalendarGrid(year, month, items, filter, availability) {
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const pad = n => String(n).padStart(2, '0');
   CAL_DAY_MAP = buildCalDayMap(items, filter);
@@ -1193,6 +1228,7 @@ function buildCalendarGrid(year, month, items, filter) {
       ${holidayName ? `title="${esc(holidayName)}"` : ''}
       ${dayItems.length ? `onclick="openCalDayModal('${ds}')"` : ''}
       ondragover="event.preventDefault()" ondrop="calDrop(event,'${ds}')">
+      ${outOfOfficeBannerHtml(ds, availability)}
       <div class="cal-day-num${isToday ? ' cal-day-num-today' : ''}">${d}</div>
       ${holidayName ? `<div class="cal-day-holiday-label">${esc(holidayName)}</div>` : ''}
       <div class="cal-day-chips">${chips}</div>
@@ -1241,7 +1277,7 @@ function navCalendarWeek(dir) {
   CAL_STATE.year = d.getFullYear(); CAL_STATE.month = d.getMonth();
   (VIEW.name === 'calendar' ? renderCalendar : renderDashboard)();
 }
-function buildCalendarWeekAgenda(items, filter) {
+function buildCalendarWeekAgenda(items, filter, availability) {
   const dayMap = buildCalDayMap(items, filter);
   CAL_DAY_MAP = dayMap;
   const monday = mondayOf(CAL_STATE.weekAnchor);
@@ -1257,6 +1293,7 @@ function buildCalendarWeekAgenda(items, filter) {
     html += `<div class="cal-week-day${isToday ? ' cal-week-day-today' : ''}"
         ondragover="event.preventDefault()" ondrop="calDrop(event,'${ds}')">
       <div class="cal-week-day-hdr">${esc(dayLabel)}${isToday ? '<span class="cal-week-today-pill">Today</span>' : ''}${holidayName ? `<span class="cal-day-holiday-label">${esc(holidayName)}</span>` : ''}</div>
+      ${outOfOfficeBannerHtml(ds, availability)}
       <div class="cal-week-day-body">${dayItems.length ? chips : '<div class="cal-week-empty">Nothing on the calendar</div>'}</div>
     </div>`;
   }

@@ -3092,6 +3092,53 @@ async function getTeamMemberIdByCalendarToken(token) {
   const doc = await M.CalendarToken.findById(token).lean();
   return doc ? doc.team_member_id : null;
 }
+// Estimator out-of-office days, for the Calendar tab's "who's out" banner
+// — cross-references the shared HR calendar (hr@libertyintegrated.com,
+// via v2/graph.js) against the team roster. Each all-day HR event is
+// matched to a team member by their first name appearing as a whole word
+// in the event subject (e.g. "Joe - PTO" matches Joe Monchek) — good
+// enough for a single-person-per-event convention without needing a
+// stricter/fragile full-name match. Returns {} (no banner anywhere)
+// whenever Graph isn't configured or the read fails — this is a
+// convenience overlay, never something that should break the calendar.
+async function getEstimatorAvailability(startDate, endDate) {
+  const graph = require('./graph');
+  if (!graph.isConfigured()) return {};
+  const M = getModels();
+  const [events, members] = await Promise.all([
+    graph.getHrCalendarEvents(startDate, endDate),
+    M.TeamMember.find({ active: 1 }).lean(),
+  ]);
+  const namedMembers = members
+    .map(m => ({ id: m._id, name: m.name, initials: m.initials, first: (m.name || '').trim().split(/\s+/)[0] }))
+    .filter(m => m.first);
+
+  const byDate = {};
+  for (const ev of events) {
+    const matched = namedMembers.filter(m => {
+      const escaped = m.first.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return new RegExp(`\\b${escaped}\\b`, 'i').test(ev.subject);
+    });
+    if (!matched.length) continue;
+    // end is exclusive per Graph/iCalendar convention for all-day events —
+    // walk [start, end) so a single-day absence (end = start+1) still
+    // resolves to exactly the one day it's actually for.
+    let d = new Date(ev.start + 'T00:00:00Z');
+    const endD = new Date((ev.end || ev.start) + 'T00:00:00Z');
+    if (endD <= d) endD.setUTCDate(d.getUTCDate() + 1);
+    while (d < endD) {
+      const ds = d.toISOString().slice(0, 10);
+      (byDate[ds] = byDate[ds] || []).push(...matched.map(m => ({ id: m.id, name: m.name, initials: m.initials })));
+      d.setUTCDate(d.getUTCDate() + 1);
+    }
+  }
+  Object.keys(byDate).forEach(ds => {
+    const seen = new Set();
+    byDate[ds] = byDate[ds].filter(m => !seen.has(m.id) && seen.add(m.id));
+  });
+  return byDate;
+}
+
 async function buildIcsFeed(teamMemberId) {
   const M = getModels();
   const id = Number(teamMemberId);
@@ -3186,5 +3233,5 @@ module.exports = {
   mergeContacts, deleteCompany, deleteChangeOrder,
   getVendors, VENDOR_CATEGORIES,
   getReports,
-  getOrCreateCalendarToken, resetCalendarToken, getTeamMemberIdByCalendarToken, buildIcsFeed,
+  getOrCreateCalendarToken, resetCalendarToken, getTeamMemberIdByCalendarToken, buildIcsFeed, getEstimatorAvailability,
 };
