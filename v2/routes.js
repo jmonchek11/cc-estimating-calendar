@@ -99,6 +99,33 @@ router.get('/api/v2/team',            async (req, res) => { try { res.json(await
 // ── Settings (v2's own follow-up timer config) ────────────────────────────────
 router.get('/api/v2/settings',        async (req, res) => { try { res.json(await v2db.getSettings()); } catch (e) { res.status(500).json({ error: e.message }); } });
 
+// ── Personal calendar subscription feed (webcal) ──────────────────────────────
+// mailer.js hardcodes this same URL (no env-driven APP_URL exists yet) —
+// keep the two in sync if the domain ever changes.
+const APP_URL = 'https://lis-estimating-calendar.onrender.com';
+function calendarFeedUrls(token) {
+  const path = `/api/v2/calendar-feed/${token}/calendar.ics`;
+  return { token, ics_url: `${APP_URL}${path}`, webcal_url: `webcal://${APP_URL.replace(/^https?:\/\//, '')}${path}` };
+}
+router.get('/api/v2/my-calendar-feed', async (req, res) => {
+  try { res.json(calendarFeedUrls(await v2db.getOrCreateCalendarToken(req.session.userId))); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+router.post('/api/v2/my-calendar-feed/reset', async (req, res) => {
+  try { res.json(calendarFeedUrls(await v2db.resetCalendarToken(req.session.userId))); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+// PUBLIC route (see PUBLIC_API in server.js) — a calendar app polls this
+// directly with no session/cookie, so the token in the URL IS the auth.
+router.get('/api/v2/calendar-feed/:token/calendar.ics', async (req, res) => {
+  try {
+    const teamMemberId = await v2db.getTeamMemberIdByCalendarToken(req.params.token);
+    if (!teamMemberId) return res.status(404).type('text/plain').send('Calendar feed not found.');
+    const feed = await v2db.buildIcsFeed(teamMemberId);
+    res.type('text/calendar; charset=utf-8').send(feed);
+  } catch (e) { res.status(500).type('text/plain').send('Error generating calendar feed.'); }
+});
+
 router.post('/api/v2/admin/send-digest', requireAdmin, async (req, res) => {
   try {
     const mailer = require('../mailer');

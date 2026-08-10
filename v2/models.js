@@ -324,6 +324,15 @@ const CounterSchema = new mongoose.Schema({
   seq: { type: Number, default: 0 },
 }, opts);
 
+// One personal webcal subscription URL per team member — the token itself
+// IS the lookup key (doubles as the unguessable auth for the public feed
+// route, since a calendar app just polls the URL with no session/cookie).
+const CalendarTokenSchema = new mongoose.Schema({
+  _id: String,
+  team_member_id: { type: Number, required: true, index: true },
+  created_at: { type: String, default: ts },
+}, opts);
+
 // "Not a duplicate" decisions — a pair (a<b) of project or company ids that
 // Data Health should never re-cluster as a near-duplicate.
 const IgnoredPairSchema = new mongoose.Schema({
@@ -389,6 +398,7 @@ function getModels() {
     IgnoredPair: c.model('IgnoredPair', IgnoredPairSchema, 'ignored_pairs'),
     CleanupOverride: c.model('CleanupOverride', CleanupOverrideSchema, 'cleanup_overrides'),
     ActivityLog: c.model('ActivityLog', ActivityLogSchema, 'activity_log'),
+    CalendarToken: c.model('CalendarToken', CalendarTokenSchema, 'calendar_tokens'),
   };
 }
 

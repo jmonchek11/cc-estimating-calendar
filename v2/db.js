@@ -8,8 +8,10 @@
  * swap to aggregations if/when production volume needs it.
  */
 const bcrypt = require('bcrypt');
+const crypto = require('crypto');
 const { getModels } = require('./models');
 const events = require('./events');
+const ics = require('./ics');
 
 const BID_ACTIVE_STAGES = ['opportunity', 'active_bid', 'submitted'];
 const CO_ACTIVE_STAGES  = ['active_co', 'submitted_co'];
@@ -3003,6 +3005,83 @@ async function applyCleanupOverrides() {
   return applied;
 }
 
+// ── Personal calendar subscription feed (webcal) ──────────────────────────────
+// One token per team member, doubling as the public feed URL's auth (a
+// calendar app polls this with no session/cookie, so the token itself has
+// to be the unguessable secret). Feed contents mirror exactly what the
+// in-app calendar's "My View" shows: due dates, follow-ups, walkthroughs,
+// RFI due dates for bids/COs where this person is estimator, salesperson,
+// or a sub-estimator — reuses getBidList/getCoList rather than re-deriving
+// the same "mine" filter against raw Mongo queries.
+async function getOrCreateCalendarToken(teamMemberId) {
+  const M = getModels();
+  const id = Number(teamMemberId);
+  const existing = await M.CalendarToken.findOne({ team_member_id: id }).lean();
+  if (existing) return existing._id;
+  const token = crypto.randomBytes(24).toString('hex');
+  await M.CalendarToken.create({ _id: token, team_member_id: id });
+  return token;
+}
+async function resetCalendarToken(teamMemberId) {
+  const M = getModels();
+  const id = Number(teamMemberId);
+  await M.CalendarToken.deleteMany({ team_member_id: id });
+  const token = crypto.randomBytes(24).toString('hex');
+  await M.CalendarToken.create({ _id: token, team_member_id: id });
+  return token;
+}
+async function getTeamMemberIdByCalendarToken(token) {
+  const M = getModels();
+  const doc = await M.CalendarToken.findById(token).lean();
+  return doc ? doc.team_member_id : null;
+}
+async function buildIcsFeed(teamMemberId) {
+  const M = getModels();
+  const id = Number(teamMemberId);
+  const [member, opp, active, sub, activeCo, subCo] = await Promise.all([
+    M.TeamMember.findById(id).lean(),
+    getBidList('opportunity'), getBidList('active_bid'), getBidList('submitted'),
+    getCoList('active_co'), getCoList('submitted_co'),
+  ]);
+  const mine = r => r.estimator?.id === id || r.salesperson?.id === id || (r.sub_estimators || []).some(se => se.id === id);
+  const bids = [...opp, ...active, ...sub].filter(mine);
+  const cos = [...activeCo, ...subCo].filter(mine);
+
+  const vevents = [];
+  const HOST = 'lis-estimating-calendar.onrender.com';
+  for (const b of bids) {
+    const label = `${b.project}${b.bid_number ? ` (#${b.bid_number})` : ''}`;
+    if (b.due_date) vevents.push(ics.buildVEvent({
+      uid: `bid-${b.id}-due@${HOST}`, summary: `Due: ${label}`,
+      description: b.customers?.length ? `Customer(s): ${b.customers.join(', ')}` : undefined,
+      dateStr: b.due_date, timeStr: b.due_time,
+    }));
+    if (b.next_followup_date) vevents.push(ics.buildVEvent({
+      uid: `bid-${b.id}-followup@${HOST}`, summary: `Follow-up: ${label}`, dateStr: b.next_followup_date,
+    }));
+    for (const w of b.walkthroughs || []) {
+      if (!w.date) continue;
+      vevents.push(ics.buildVEvent({
+        uid: `bid-${b.id}-walkthrough-${w.id}@${HOST}`, summary: `🚶 Walkthrough: ${label}`,
+        dateStr: w.date, timeStr: w.time,
+      }));
+    }
+    if (b.rfi_due_date) vevents.push(ics.buildVEvent({
+      uid: `bid-${b.id}-rfi@${HOST}`, summary: `RFI Due: ${label}`, dateStr: b.rfi_due_date, timeStr: b.rfi_due_time,
+    }));
+  }
+  for (const c of cos) {
+    const label = `${c.co_number} — ${c.name}`;
+    if (c.due_date) vevents.push(ics.buildVEvent({
+      uid: `co-${c.id}-due@${HOST}`, summary: `CO Due: ${label}`, dateStr: c.due_date,
+    }));
+    if (c.next_followup_date) vevents.push(ics.buildVEvent({
+      uid: `co-${c.id}-followup@${HOST}`, summary: `CO Follow-up: ${label}`, dateStr: c.next_followup_date,
+    }));
+  }
+  return ics.buildCalendar(vevents, `${member?.name || 'My'} — LIS Estimating`);
+}
+
 module.exports = {
   getProjects, getJobsPicker, getProjectDetail, getMeta, getDashboard, getBidList, getCoList, getSearchResults, getDataHealth, mergeProjects, mergeCompanies, mergeJobs,
   dismissDuplicates, deleteEmptyProject, applyCleanupOverrides, removeOverride,
@@ -3025,4 +3104,5 @@ module.exports = {
   mergeContacts, deleteCompany, deleteChangeOrder,
   getVendors, VENDOR_CATEGORIES,
   getReports,
+  getOrCreateCalendarToken, resetCalendarToken, getTeamMemberIdByCalendarToken, buildIcsFeed,
 };
