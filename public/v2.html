@@ -2817,6 +2817,11 @@ const TYPE_OF_WORK_OPTIONS = [
   'Ground-Up Construction', 'Core & Shell', 'Fit-Out/Tenant Improvement', 'Renovation/Remodel',
   'Gut Renovation', 'Adaptive Reuse', 'Build-to-Suit', 'Spec Build', 'Phased-Occupied Renovation', 'Design-Build',
 ].map(v => ({ value: v, label: v }));
+// Who a customer company IS on a job (Owner, GC, Mechanical Contractor…) —
+// distinct from vendor category, which is what a vendor sells.
+const COMPANY_TYPE_OPTIONS = ['Owner', 'General Contractor', 'Mechanical Contractor', 'Other'].map(v => ({ value: v, label: v }));
+const COMPANY_TYPE_COLOR = { 'Owner': '#166534', 'General Contractor': '#1e40af', 'Mechanical Contractor': '#92400e', 'Other': '#64748b' };
+const companyTypeBadge = (type) => type ? `<span class="badge" style="background:${COMPANY_TYPE_COLOR[type] || '#64748b'}1a;color:${COMPANY_TYPE_COLOR[type] || '#64748b'};font-size:10px">${esc(type)}</span>` : '';
 // certified_payroll/tax_exempt are 3-state (null = TBD, not yet known —
 // distinct from a real "No"). Whoever starts a bid often can't answer this
 // yet, so TBD stays available everywhere EXCEPT Submit Bid, where a real
@@ -4422,7 +4427,7 @@ function renderContactsBody() {
         <tr style="border-bottom:1px solid #f1f5f9">
           <td style="padding:8px 16px"><a href="#" onclick="event.preventDefault();openContactProfile(${c.id})" style="font-weight:600;color:inherit;text-decoration:none">${esc(c.full_name)}</a></td>
           <td style="padding:8px 16px">${c.title ? esc(c.title) : '<span style="color:var(--text-muted)">—</span>'}</td>
-          <td style="padding:8px 16px">${c.company ? `<a href="#" onclick="event.preventDefault();openCompanyProfile(${c.company.id})" style="color:#2563eb;text-decoration:none">${esc(c.company.name)}</a>` : '<span style="color:var(--text-muted)">—</span>'}</td>
+          <td style="padding:8px 16px">${c.company ? `<a href="#" onclick="event.preventDefault();openCompanyProfile(${c.company.id})" style="color:#2563eb;text-decoration:none">${esc(c.company.name)}</a> ${companyTypeBadge(c.company.type)}` : '<span style="color:var(--text-muted)">—</span>'}</td>
           <td style="padding:8px 16px">${c.phone ? esc(c.phone) : '<span style="color:var(--text-muted)">—</span>'}</td>
           <td style="padding:8px 16px">${c.email ? `<a href="mailto:${esc(c.email)}" style="color:#2563eb">${esc(c.email)}</a>` : '<span style="color:var(--text-muted)">—</span>'}</td>
         </tr>`).join('')}</tbody>
@@ -4696,6 +4701,7 @@ function notAwardedTableHtml(rows) {
 function actNewCompany() {
   showForm('+ New Company', [
     { id: 'name', label: 'Company Name', type: 'text', required: true },
+    { id: 'type', label: 'Type', type: 'select', emptyLabel: 'Unspecified', options: COMPANY_TYPE_OPTIONS },
     { id: 'street', label: 'Street', type: 'text' },
     { id: 'city', label: 'City', type: 'text' },
     { id: 'state', label: 'State', type: 'text', placeholder: 'PA' },
@@ -4833,7 +4839,20 @@ async function openCompanyProfile(companyId) {
     </div>
     <div style="font-weight:700;font-size:13px;margin:12px 0 4px">Bid History</div>
     <div class="card" style="padding:0;max-height:260px;overflow-y:auto">${bidHistoryRowsHtml(hist.bids)}</div>`;
-  openProfileModal(`🏢 ${esc(co?.name || 'Company')}`, body);
+  const titleExtra = `${companyTypeBadge(co?.type)}${CURRENT_USER?.is_admin ? ` <a href="#" onclick="event.preventDefault();actEditCompanyType(${companyId})" style="font-size:11px;color:#2563eb;font-weight:400;margin-left:6px">edit type</a>` : ''}`;
+  openProfileModal(`🏢 ${esc(co?.name || 'Company')} ${titleExtra}`, body);
+}
+function actEditCompanyType(companyId) {
+  const co = META.companies.find(c => c.id === companyId);
+  showForm('✏️ Edit Company Type', [
+    { id: 'type', label: 'Type', type: 'select', emptyLabel: 'Unspecified', value: co?.type, options: COMPANY_TYPE_OPTIONS },
+  ], async data => {
+    const r = await api('PATCH', `/api/v2/admin/company/${companyId}`, data);
+    META = await api('GET', '/api/v2/meta'); CURRENT_USER = META.current_user;
+    closeProfileModal();
+    openCompanyProfile(companyId);
+    return r;
+  }, 'Save');
 }
 
 // Per-customer contacts inside the bid flyout — pick from contacts already at

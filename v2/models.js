@@ -213,6 +213,10 @@ const ChangeOrderSchema = new mongoose.Schema({
 const CompanySchema = new mongoose.Schema({
   _id:        Number,
   name:       { type: String, required: true },                  // single source for customer names
+  // Who this company IS on a job (Owner, GC, Mechanical Contractor, etc.) —
+  // see COMPANY_TYPE_OPTIONS in v2/db.js for the fixed list. Optional/null
+  // for companies never classified (most vendors, older records).
+  type:       { type: String, default: null },
   street:     { type: String, default: null },
   city:       { type: String, default: null },
   state:      { type: String, default: null },

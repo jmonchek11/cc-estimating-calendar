@@ -16,6 +16,10 @@ const ics = require('./ics');
 const BID_ACTIVE_STAGES = ['lead', 'opportunity', 'active_bid', 'submitted'];
 const CO_ACTIVE_STAGES  = ['active_co', 'submitted_co'];
 
+// Company "type" — who they ARE on a job, distinct from vendor category
+// (which is what THEY sell). Fixed list per the estimating team's request.
+const COMPANY_TYPE_OPTIONS = ['Owner', 'General Contractor', 'Mechanical Contractor', 'Other'];
+
 // Vendor directory categories (2026-07) — fixed list so the Vendors page can
 // offer a consistent filter dropdown; `brands` (on Contact) stays free-text
 // since manufacturer lines vary too much to enumerate.
@@ -560,7 +564,7 @@ async function getMeta() {
     M.TeamMember.find({ active: 1 }).sort({ name: 1 }).lean(),
   ]);
   return {
-    companies: companies.map(c => ({ id: c._id, name: c.name })),
+    companies: companies.map(c => ({ id: c._id, name: c.name, type: c.type })),
     team: team.map(t => ({ id: t._id, name: t.name, initials: t.initials, role: t.role })),
     holidays: getHolidayNamesAround(new Date().getUTCFullYear()),
     vendorCategories: VENDOR_CATEGORIES,
@@ -865,7 +869,7 @@ async function fmtContact(c, companyById) {
 async function getContacts({ search, company_id, no_company } = {}) {
   const M = getModels();
   const [contacts, companies] = await Promise.all([M.Contact.find({ active: 1 }).lean(), M.Company.find().lean()]);
-  const companyById = {}; companies.forEach(c => companyById[c._id] = { id: c._id, name: c.name });
+  const companyById = {}; companies.forEach(c => companyById[c._id] = { id: c._id, name: c.name, type: c.type });
   let out = await Promise.all(contacts.map(c => fmtContact(c, companyById)));
   if (company_id) out = out.filter(c => c.company_id === Number(company_id));
   if (no_company === 'true' || no_company === true) out = out.filter(c => !c.company_id);
@@ -1122,7 +1126,7 @@ async function createCompanyV2(data) {
   require_(data, ['name']);
   const id = await nextId('companies');
   await M.Company.create({
-    _id: id, name: data.name.trim(),
+    _id: id, name: data.name.trim(), type: data.type || null,
     street: data.street || null, city: data.city || null, state: data.state || null, zip: data.zip || null,
     phone: data.phone || null, domain: data.domain || null,
   });
@@ -1301,7 +1305,7 @@ async function reactivateBid(id, data, actorId) {
 // bid_submission entity, not the bid — the bid's headline is derived from them.
 const ADMIN_EDITABLE = {
   project:        ['name', 'description', 'location', 'size_bucket', 'type_of_work'],
-  company:        ['name', 'city', 'state'],
+  company:        ['name', 'city', 'state', 'type'],
   // Walk-throughs are NOT here — they go through the dedicated add/update/
   // remove walk-through endpoints, which need find-or-create logic for the
   // site company/contact (and array-entry targeting) this generic whitelist
