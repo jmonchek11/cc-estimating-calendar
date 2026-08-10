@@ -1029,7 +1029,13 @@ async function fetchCalendarItems(mineOnly) {
     ...[...activeCo, ...subCo].map(c => ({ kind: 'co', id: c.id, project_id: c.project_id, title: `${c.co_number} — ${c.name}`, label: c.project, due_date: c.due_date, next_followup_date: c.next_followup_date, estimator: c.estimator, salesperson: c.salesperson, customer: null, stage: c.stage })),
   ];
   if (mineOnly && CURRENT_USER) {
-    items = items.filter(it => it.estimator?.id === CURRENT_USER.id || it.salesperson?.id === CURRENT_USER.id || (it.sub_estimators || []).some(se => se.id === CURRENT_USER.id));
+    // Being assigned to a walk-through counts as "mine" too, even for
+    // someone who isn't otherwise on the bid (estimator/salesperson/sub-
+    // estimator) — without this, a walk-through-only assignee's own My
+    // View never shows the thing they were just personally invited to.
+    items = items.filter(it => it.estimator?.id === CURRENT_USER.id || it.salesperson?.id === CURRENT_USER.id
+      || (it.sub_estimators || []).some(se => se.id === CURRENT_USER.id)
+      || (it.walkthroughs || []).some(w => (w.assignees || []).some(a => a.id === CURRENT_USER.id)));
   }
   return items;
 }
