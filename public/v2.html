@@ -2686,9 +2686,18 @@ function showForm(title, fields, onSubmit, submitLabel = 'Save', submitClass = '
   const fieldHtml = fields.map(f => {
     const req = f.required ? ' <span class="req">*</span>' : '';
     if (f.type === 'select') {
+      // A required select with no default value still needs a blank
+      // placeholder — otherwise the browser silently pre-selects the first
+      // real option and "required" never actually blocks anything. Only
+      // skip the placeholder when a default value IS set (e.g. Opportunity
+      // Owner defaulting to the current user) — that's a real, intentional
+      // pre-selection, not an unselected state to force past.
+      const hasDefault = f.value !== undefined && f.value !== null && f.value !== '';
+      const optionsHaveBlank = f.options.some(o => o.value === '');
+      const showPlaceholder = (!f.required || !hasDefault) && !optionsHaveBlank;
       return `<div class="v2-field"><label>${f.label}${req}</label>
         <select id="vf-${f.id}">
-          ${f.required ? '' : `<option value="">${esc(f.emptyLabel || '—')}</option>`}
+          ${showPlaceholder ? `<option value="">${esc(f.emptyLabel || '— Select —')}</option>` : ''}
           ${f.options.map(o => `<option value="${o.value}" ${o.value == f.value ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
         </select></div>`;
     }
