@@ -1660,7 +1660,8 @@ function renderBidListBody(stage) {
         <div style="flex:1;min-width:0">
           <div class="proj-name">${esc(b.project)}${b.bid_number ? ` <span style="color:var(--text-muted);font-weight:400;font-size:12px">#${esc(b.bid_number)}</span>` : ''}
             ${b.drawing_stage ? `<span class="badge" style="background:#ede9fe;color:#5b21b6;font-size:10px">${esc(b.drawing_stage)}</span>` : ''}
-            ${b.size_bucket ? `<span class="badge" style="background:#e0f2fe;color:#075985;font-size:10px">${esc(b.size_bucket)}</span>` : ''}</div>
+            ${b.size_bucket ? `<span class="badge" style="background:#e0f2fe;color:#075985;font-size:10px">${esc(b.size_bucket)}</span>` : ''}
+            ${b.type_of_work ? `<span class="badge" style="background:#f0fdf4;color:#166534;font-size:10px">${esc(b.type_of_work)}</span>` : ''}</div>
           <div class="proj-meta">
             ${stage === 'awarded' ? esc(b.awarded_company || '—') : (b.customers.length ? esc(b.customers.join(', ')) : '<span style="color:#dc2626">no customer</span>')}
             ${stage === 'awarded' ? `<span class="proj-meta-sep">·</span> ${b.job_number ? `Job ${esc(b.job_number)}` : '<span style="color:#dc2626">no job #</span>'}
@@ -1997,7 +1998,7 @@ async function renderProjectPage(projectId) {
     <div class="page-header">
       <div>
         <div class="page-title">${pageIcon('projects')} ${esc(d.name)}</div>
-        <div class="page-subtitle">${bidN} bid${bidN!==1?'s':''} · ${jobN} job${jobN!==1?'s':''} · ${coN} change order${coN!==1?'s':''}${d.location ? ' · ' + esc(d.location) : ''}${d.size_bucket ? ' · ' + esc(d.size_bucket) : ''}</div>
+        <div class="page-subtitle">${bidN} bid${bidN!==1?'s':''} · ${jobN} job${jobN!==1?'s':''} · ${coN} change order${coN!==1?'s':''}${d.location ? ' · ' + esc(d.location) : ''}${d.size_bucket ? ' · ' + esc(d.size_bucket) : ''}${d.type_of_work ? ' · ' + esc(d.type_of_work) : ''}</div>
       </div>
       <button class="v2-btn outline" onclick="navigate('projects')">← All Projects</button>
     </div>
@@ -2809,6 +2810,13 @@ const PROJECT_SIZE_BUCKETS = [
   { value: '150,000–500,000 SF', label: '150,000–500,000 SF' },
   { value: '500,000+ SF', label: '500,000+ SF' },
 ];
+// Fixed dropdowns for the New Opportunity intake form, per the estimating
+// team's request — Source used to be freeform text; Type of Work is new.
+const OPPORTUNITY_SOURCE_OPTIONS = ['CM Platform', 'Portal', 'Email', 'Phone Call', 'Interaction'].map(v => ({ value: v, label: v }));
+const TYPE_OF_WORK_OPTIONS = [
+  'Ground-Up Construction', 'Core & Shell', 'Fit-Out/Tenant Improvement', 'Renovation/Remodel',
+  'Gut Renovation', 'Adaptive Reuse', 'Build-to-Suit', 'Spec Build', 'Phased-Occupied Renovation', 'Design-Build',
+].map(v => ({ value: v, label: v }));
 // certified_payroll/tax_exempt are 3-state (null = TBD, not yet known —
 // distinct from a real "No"). Whoever starts a bid often can't answer this
 // yet, so TBD stays available everywhere EXCEPT Submit Bid, where a real
@@ -2959,29 +2967,35 @@ async function actNewOpportunity() {
   } catch { /* per-customer contact lists just come up empty if this fails */ }
 
   showForm('💡 New Opportunity', [
-    { id: 'project_id', label: 'Project', type: 'project', multi: false, required: true,
+    { id: 'project_id', label: 'Project Title', type: 'project', multi: false, required: true,
       newKey: 'project_name', options: projectOpts(), placeholder: 'Type project name…' },
-    { id: 'owner_id', label: 'Opportunity Owner', type: 'select', required: true, options: teamOpts(), value: CURRENT_USER?.id },
-    { id: 'source', label: 'Source (where did this come from?)', type: 'text', placeholder: 'iSqFt, BuildingConnected, email invite, referral, phone call…' },
-    { id: 'description', label: 'Project Description', type: 'textarea', placeholder: 'Brief description of the scope of work…' },
-    { id: 'location', label: 'Location', type: 'text', placeholder: 'City, State or site address…' },
-    { id: 'size_bucket', label: 'Project Size', type: 'select', emptyLabel: 'Unknown', options: PROJECT_SIZE_BUCKETS },
-    { id: 'due_date', label: 'Due Date', type: 'date' },
+    { id: 'owner_id', label: 'Who Added the Opportunity', type: 'select', required: true, options: teamOpts(), value: CURRENT_USER?.id },
+    { id: 'source', label: 'Source', type: 'select', required: true, options: OPPORTUNITY_SOURCE_OPTIONS },
+    { id: 'due_date', label: 'Due Date', type: 'date', required: true },
     { id: 'due_time', label: 'Due Time (optional)', type: 'time' },
-    { id: 'company_ids', label: 'Customer(s)', type: 'company', multi: true, newKey: 'new_companies', options: companyOpts(), placeholder: 'Type customer name…',
+    { id: 'location', label: 'Job Location', type: 'text', required: true, placeholder: 'City, State or site address…' },
+    { id: 'type_of_work', label: 'Type of Work', type: 'select', required: true, options: TYPE_OF_WORK_OPTIONS },
+    { id: 'size_bucket', label: 'Project Size', type: 'select', required: true, options: PROJECT_SIZE_BUCKETS },
+    { id: 'description', label: 'Project Description', type: 'textarea', required: true, placeholder: 'Brief description of the scope of work…' },
+    { id: 'company_ids', label: 'Customer(s) — GC, owner, etc. (add as many as apply)', type: 'company', multi: true, required: true, newKey: 'new_companies', options: companyOpts(), placeholder: 'Type customer name…',
       onChange: () => renderOppContactPickers(contactsByCompany) },
     { id: 'opp_contacts_section', type: 'custom' },
-    { id: 'notes', label: 'Notes (internal discussion)', type: 'textarea', placeholder: 'Why are we considering this?' },
+    { id: 'notes', label: 'Additional Notes — why are we considering this?', type: 'textarea', required: true, placeholder: 'Why are we considering this?' },
+    { id: 'rfi_due_date', label: 'RFI Due Date (not required)', type: 'date' },
+    { id: 'rfi_due_time', label: 'RFI Due Time (optional)', type: 'time' },
   ], data => {
     const contact_ids_by_company = {};
     const new_contacts_by_company = {};
+    let pocCount = 0;
     (COMBO_STATE['company_ids'] || []).filter(s => s.id).forEach(s => {
       const picks = COMBO_STATE['opp_contact_' + s.id] || [];
       const existingIds = picks.filter(p => p.id).map(p => p.id);
       const newNames = picks.filter(p => !p.id).map(p => p.name);
       if (existingIds.length) contact_ids_by_company[s.id] = existingIds;
       if (newNames.length) new_contacts_by_company[s.id] = newNames;
+      pocCount += existingIds.length + newNames.length;
     });
+    if (!pocCount) return Promise.reject(new Error('Required: POC (add at least one point of contact for a customer)'));
     return api('POST', '/api/v2/opportunities', { ...data, contact_ids_by_company, new_contacts_by_company });
   }, 'Create Opportunity');
 
@@ -3167,6 +3181,7 @@ function actEditProject(projectId) {
     { id: 'description', label: 'Project Description', type: 'textarea', value: d.description, placeholder: 'Brief description of the scope of work…' },
     { id: 'location', label: 'Location', type: 'text', value: d.location, placeholder: 'City, State or site address…' },
     { id: 'size_bucket', label: 'Project Size', type: 'select', emptyLabel: 'Unknown', value: d.size_bucket, options: PROJECT_SIZE_BUCKETS },
+    { id: 'type_of_work', label: 'Type of Work', type: 'select', emptyLabel: 'Unknown', value: d.type_of_work, options: TYPE_OF_WORK_OPTIONS },
   ], data => api('PATCH', `/api/v2/admin/project/${projectId}`, data), 'Save Changes');
 }
 

@@ -351,6 +351,7 @@ async function getProjectDetail(projectId) {
     description: project.description,
     location: project.location,
     size_bucket: project.size_bucket,
+    type_of_work: project.type_of_work,
     bids: bids
       .map(fmtBid)
       .sort((a, b) => stageRank(a.stage) - stageRank(b.stage)),
@@ -632,7 +633,7 @@ async function updateSettingsV2(data) {
 // stage (real substance — a contact, plans, worth reviewing daily). Same
 // creation path for both since the fields captured are identical; only the
 // starting stage differs.
-async function createOpportunity({ project_id, project_name, notes, description, location, size_bucket, due_date, due_time, owner_id, source, company_ids, new_companies, contact_ids_by_company, new_contacts_by_company, created_by, stage }) {
+async function createOpportunity({ project_id, project_name, notes, description, location, size_bucket, type_of_work, due_date, due_time, rfi_due_date, rfi_due_time, owner_id, source, company_ids, new_companies, contact_ids_by_company, new_contacts_by_company, created_by, stage }) {
   const M = getModels();
   const startStage = stage === 'lead' ? 'lead' : 'opportunity';
   let pid = project_id ? Number(project_id) : null;
@@ -640,14 +641,14 @@ async function createOpportunity({ project_id, project_name, notes, description,
   if (!pid) {
     require_({ project_name }, ['project_name']);
     pid = await nextId('projects');
-    // description/location/size_bucket only apply when creating a brand-new
-    // project — attaching to an existing one leaves its own data alone.
-    await M.Project.create({ _id: pid, name: project_name.trim(), description: description || null, location: location || null, size_bucket: size_bucket || null, created_by: created_by || null });
+    // description/location/size_bucket/type_of_work only apply when creating
+    // a brand-new project — attaching to an existing one leaves its own data alone.
+    await M.Project.create({ _id: pid, name: project_name.trim(), description: description || null, location: location || null, size_bucket: size_bucket || null, type_of_work: type_of_work || null, created_by: created_by || null });
     isNewProject = true;
   }
   const bidId = await nextId('bids');
   const ownerId = owner_id ? Number(owner_id) : (created_by ? Number(created_by) : null);
-  await M.Bid.create({ _id: bidId, project_id: pid, stage: startStage, notes: notes || null, due_date: due_date || null, due_time: due_time || null, owner_id: ownerId, source: source || null });
+  await M.Bid.create({ _id: bidId, project_id: pid, stage: startStage, notes: notes || null, due_date: due_date || null, due_time: due_time || null, rfi_due_date: rfi_due_date || null, rfi_due_time: rfi_due_time || null, owner_id: ownerId, source: source || null });
 
   const companyIds = await resolveCompanyIds(company_ids, new_companies);
   for (const companyId of companyIds) await ensureBidCustomer(bidId, companyId);
@@ -1299,7 +1300,7 @@ async function reactivateBid(id, data, actorId) {
 // Bid submission fields (estimate $, date sent, approved by) are edited on the
 // bid_submission entity, not the bid — the bid's headline is derived from them.
 const ADMIN_EDITABLE = {
-  project:        ['name', 'description', 'location', 'size_bucket'],
+  project:        ['name', 'description', 'location', 'size_bucket', 'type_of_work'],
   company:        ['name', 'city', 'state'],
   // Walk-throughs are NOT here — they go through the dedicated add/update/
   // remove walk-through endpoints, which need find-or-create logic for the
@@ -2209,7 +2210,7 @@ async function getBidList(stage) {
     M.Project.find().lean(), M.Company.find().lean(), M.TeamMember.find().lean(), M.BidCustomer.find({ bid_id: { $in: ids } }).lean(),
     stage === 'awarded' ? M.Job.find({ winning_bid_id: { $in: ids } }).lean() : Promise.resolve([]),
   ]);
-  const pName = {}; const pSize = {}; projects.forEach(p => { pName[p._id] = p.name; pSize[p._id] = p.size_bucket; });
+  const pName = {}; const pSize = {}; const pType = {}; projects.forEach(p => { pName[p._id] = p.name; pSize[p._id] = p.size_bucket; pType[p._id] = p.type_of_work; });
   const coName = {}; companies.forEach(c => coName[c._id] = c.name);
   const tm = teamMap(members);
   const custByBid = {}; bidCustomers.forEach(bc => (custByBid[bc.bid_id] = custByBid[bc.bid_id] || []).push(coName[bc.company_id]));
@@ -2218,6 +2219,7 @@ async function getBidList(stage) {
     const job = jobByBid[b._id];
     return {
       id: b._id, project_id: b.project_id, project: pName[b.project_id] || '—', size_bucket: pSize[b.project_id] || null,
+      type_of_work: pType[b.project_id] || null,
       bid_number: b.bid_number, stage: b.stage, drawing_stage: b.drawing_stage,
       estimator: tm[b.estimator_id] || null, salesperson: tm[b.salesperson_id] || null,
       owner: tm[b.owner_id] || null, source: b.source,

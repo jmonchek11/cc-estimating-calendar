@@ -39,6 +39,9 @@ const ProjectSchema = new mongoose.Schema({
   // bid/no-bid against schedule at a glance without an exact number, which
   // usually isn't known yet this early. One of SIZE_BUCKETS' values, or null.
   size_bucket: { type: String, default: null },
+  // One of TYPE_OF_WORK_OPTIONS (see v2/db.js) — captured at opportunity
+  // intake alongside size_bucket, same "gauge it at a glance" purpose.
+  type_of_work: { type: String, default: null },
   source_key: { type: String, default: null },   // stable import key: "job:<#>" or "name:<norm>" — survives re-import
   street:     { type: String, default: null },   // job site address — from the JIS title sheet
   city:       { type: String, default: null },
