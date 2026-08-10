@@ -3106,9 +3106,12 @@ async function getEstimatorAvailability(startDate, endDate) {
   const hrCalendar = require('./hrCalendarFeed');
   if (!hrCalendar.isConfigured()) return {};
   const M = getModels();
+  // Only estimators belong on this banner (plus Carrie Yaffe, who has
+  // estimating oversight but role:'oversight' rather than 'estimator') —
+  // sales/other oversight staff being out isn't relevant to bid coverage.
   const [events, members] = await Promise.all([
     hrCalendar.getHrCalendarEvents(startDate, endDate),
-    M.TeamMember.find({ active: 1 }).lean(),
+    M.TeamMember.find({ active: 1, $or: [{ role: 'estimator' }, { email: 'cyaffe@libertyintegrated.com' }] }).lean(),
   ]);
   const namedMembers = members
     .map(m => ({ id: m._id, name: m.name, initials: m.initials, first: (m.name || '').trim().split(/\s+/)[0] }))
