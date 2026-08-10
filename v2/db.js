@@ -3104,6 +3104,24 @@ async function buildIcsFeed(teamMemberId) {
   const bids = [...opp, ...active, ...sub].filter(mine);
   const cos = [...activeCo, ...subCo].filter(mine);
 
+  // getBidList's shaping doesn't carry each walk-through's site
+  // contact/company (list views only ever showed the date chip) — pull the
+  // raw walkthroughs straight off the Bid docs so the feed can resolve and
+  // include the site contact's name/phone in each walk-through's event.
+  const rawWalkthroughsByBid = {};
+  if (bids.length) {
+    const rawBids = await M.Bid.find({ _id: { $in: bids.map(b => b.id) } }, { walkthroughs: 1 }).lean();
+    rawBids.forEach(rb => { rawWalkthroughsByBid[rb._id] = rb.walkthroughs || []; });
+  }
+  const wtContactIds = Object.values(rawWalkthroughsByBid).flat().map(w => w.contact_id).filter(Boolean);
+  const wtCompanyIds = Object.values(rawWalkthroughsByBid).flat().map(w => w.company_id).filter(Boolean);
+  const [wtContacts, wtCompanies] = await Promise.all([
+    wtContactIds.length ? M.Contact.find({ _id: { $in: wtContactIds } }).lean() : [],
+    wtCompanyIds.length ? M.Company.find({ _id: { $in: wtCompanyIds } }).lean() : [],
+  ]);
+  const wtContactById = {}; wtContacts.forEach(c => { wtContactById[c._id] = c; });
+  const wtCompanyById = {}; wtCompanies.forEach(c => { wtCompanyById[c._id] = c; });
+
   const vevents = [];
   const HOST = 'lis-estimating-calendar.onrender.com';
   for (const b of bids) {
@@ -3118,8 +3136,15 @@ async function buildIcsFeed(teamMemberId) {
     }));
     for (const w of b.walkthroughs || []) {
       if (!w.date) continue;
+      const rawW = (rawWalkthroughsByBid[b.id] || []).find(x => x._id === w.id);
+      const contact = rawW?.contact_id ? wtContactById[rawW.contact_id] : null;
+      const company = rawW?.company_id ? wtCompanyById[rawW.company_id] : null;
+      const contactName = contact ? [contact.first_name, contact.last_name].filter(Boolean).join(' ') : null;
+      const descParts = [];
+      if (contactName) descParts.push(`Site contact: ${contactName}${company ? ` (${company.name})` : ''}${contact.phone ? ' — ' + contact.phone : ''}`);
       vevents.push(ics.buildVEvent({
         uid: `bid-${b.id}-walkthrough-${w.id}@${HOST}`, summary: `🚶 Walkthrough: ${label}`,
+        description: descParts.length ? descParts.join('\n') : undefined,
         dateStr: w.date, timeStr: w.time,
       }));
     }

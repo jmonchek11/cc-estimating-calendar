@@ -399,6 +399,11 @@ function emailWalkthroughAssigned(bid, walkthroughDate, walkthroughTime, recipie
   const whenStr = fmtDate(walkthroughDate) + (walkthroughTime ? ` at ${fmtTime(walkthroughTime)}` : '');
   const attendUrl = `${APP_URL}/api/v2/walkthrough-rsvp/${rsvpToken}/attending`;
   const notAttendUrl = `${APP_URL}/api/v2/walkthrough-rsvp/${rsvpToken}/not_attending`;
+  const calLink = outlookCalendarLink({
+    subject: `Jobsite Walk-through: ${label}`,
+    dateStr: walkthroughDate, timeStr: walkthroughTime,
+    body: [bid.bid_number ? `Bid #${bid.bid_number}` : null, bid.customer ? `Customer: ${bid.customer}` : null, contact?.name ? `Site contact: ${contact.name}${contact.phone ? ' (' + contact.phone + ')' : ''}` : null].filter(Boolean).join('\n'),
+  });
   return {
     subject: `🚶 You're assigned to a walk-through — ${label}`,
     html: base(`
@@ -408,6 +413,7 @@ function emailWalkthroughAssigned(bid, walkthroughDate, walkthroughTime, recipie
       ${walkthroughContactLine(contact)}
       <p style="margin:18px 0 6px;font-weight:600">Will you be there?</p>
       ${buttonRow({ href: attendUrl, label: '✅ Will Attend' }, { href: notAttendUrl, label: '❌ Will Not Attend' })}
+      ${calLink ? buttonRow({ href: calLink, label: '📅 Add Walk-through to Outlook' }) : ''}
       ${folderButtonHtml(bid)}
     `),
   };

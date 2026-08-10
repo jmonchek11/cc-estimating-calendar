@@ -2536,19 +2536,29 @@ function comboRenderMenu(fid) {
   menu.style.top = (rect.bottom + 3) + 'px';
   menu.style.display = 'block';
 }
+// Hides the menu after a pick instead of re-rendering it — comboRenderMenu
+// on an empty query shows every remaining option (that's the "type to
+// filter, empty = show all" behavior the box wants while you're actively
+// searching), which after a pick just left a full option list sitting open
+// with nothing typed, hard to dismiss short of clicking elsewhere. It still
+// reappears normally the next time the input gets a keystroke or refocuses
+// from empty — see the 'input'/'focus' listeners wired in initCombos.
 function comboPick(fid, val) {
   const f = COMBO_FIELDS[fid], opt = f.options.find(o => o.value == val); if (!opt) return;
   if (!f.multi) COMBO_STATE[fid] = [];
   COMBO_STATE[fid].push({ id: opt.value, name: opt.label });
   const input = document.getElementById('vf-' + fid); input.value = '';
-  comboRenderChips(fid); comboRenderMenu(fid); input.focus();
+  const menu = document.getElementById('cc-' + fid + '-menu'); if (menu) menu.style.display = 'none';
+  comboRenderChips(fid); input.focus();
   f.onChange?.();
 }
 function comboAddNew(fid) {
   const f = COMBO_FIELDS[fid], input = document.getElementById('vf-' + fid), name = input.value.trim(); if (!name) return;
   if (!f.multi) COMBO_STATE[fid] = [];
   COMBO_STATE[fid].push({ id: null, name });
-  input.value = ''; comboRenderChips(fid); comboRenderMenu(fid); input.focus();
+  input.value = '';
+  const menu = document.getElementById('cc-' + fid + '-menu'); if (menu) menu.style.display = 'none';
+  comboRenderChips(fid); input.focus();
   f.onChange?.();
 }
 function initCombos(ov, fields) {
@@ -2872,7 +2882,7 @@ function renderOppContactPickers(contactsByCompany) {
 async function actNewOpportunity() {
   let contactsByCompany = {};
   try {
-    const contacts = await api('GET', '/api/v2/contacts');
+    const contacts = (await api('GET', '/api/v2/contacts')).sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''));
     contacts.forEach(c => { if (c.company_id) (contactsByCompany[c.company_id] = contactsByCompany[c.company_id] || []).push(c); });
   } catch { /* per-customer contact lists just come up empty if this fails */ }
 
@@ -3150,7 +3160,7 @@ function renderWalkthroughContactPicker(contactsByCompany, preselectContactId) {
 // just another line in a long form. A bid can have several walk-throughs
 // (different companies/contacts/dates/times), so this is add/edit/remove on
 // one entry at a time rather than a single set-once field.
-function walkthroughFormFields(existing, contactsByCompany) {
+function walkthroughFormFields(existing, contactsByCompany, defaultAssigneeIds) {
   return [
     { id: 'walkthrough_date', label: 'Date', type: 'date', value: existing?.date },
     { id: 'walkthrough_time', label: 'Time', type: 'time', value: existing?.time },
@@ -3160,9 +3170,13 @@ function walkthroughFormFields(existing, contactsByCompany) {
     { id: 'walkthrough_contact_section', type: 'custom' },
     // Each assignee gets their own "you're assigned" email with Will
     // Attend/Will Not Attend buttons the moment they're added here — see
-    // notifyWalkthroughAssignees() in v2/notify.js.
+    // notifyWalkthroughAssignees() in v2/notify.js. New walk-throughs start
+    // with whoever's already on the bid pre-checked (estimator/salesperson/
+    // owner/sub-estimators) — they're the likely attendees, so this saves
+    // re-picking the same people every time; editing an existing entry
+    // shows its actual saved assignees instead.
     { id: 'walkthrough_assignee_ids', label: 'Assign Team Members (each gets an email to RSVP)', type: 'multicheck',
-      options: teamOpts(), value: (existing?.assignees || []).map(a => a.id) },
+      options: teamOpts(), value: existing ? (existing.assignees || []).map(a => a.id) : (defaultAssigneeIds || []) },
   ];
 }
 function walkthroughSubmitData(data) {
@@ -3180,11 +3194,14 @@ function walkthroughSubmitData(data) {
 async function actAddWalkthrough(bidId) {
   let contactsByCompany = {};
   try {
-    const contacts = await api('GET', '/api/v2/contacts');
+    const contacts = (await api('GET', '/api/v2/contacts')).sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''));
     contacts.forEach(c => { if (c.company_id) (contactsByCompany[c.company_id] = contactsByCompany[c.company_id] || []).push(c); });
   } catch { /* per-company contact lists just come up empty if this fails */ }
 
-  showForm('🚶 Add Walk-through', walkthroughFormFields(null, contactsByCompany),
+  const b = DETAIL_CACHE[OPEN_PROJECT]?.bids.find(x => x.id === bidId) || {};
+  const defaultAssigneeIds = [...new Set([b.owner?.id, b.estimator?.id, b.salesperson?.id, ...(b.sub_estimators || []).map(s => s.id)].filter(Boolean))];
+
+  showForm('🚶 Add Walk-through', walkthroughFormFields(null, contactsByCompany, defaultAssigneeIds),
     data => api('POST', `/api/v2/bids/${bidId}/walkthroughs`, walkthroughSubmitData(data)),
     'Add Walk-through', 'blue');
   renderWalkthroughContactPicker(contactsByCompany);
@@ -3196,7 +3213,7 @@ async function actEditWalkthrough(bidId, walkthroughId) {
   const preselectContactId = w.contact?.id ?? null;
   let contactsByCompany = {};
   try {
-    const contacts = await api('GET', '/api/v2/contacts');
+    const contacts = (await api('GET', '/api/v2/contacts')).sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''));
     contacts.forEach(c => { if (c.company_id) (contactsByCompany[c.company_id] = contactsByCompany[c.company_id] || []).push(c); });
   } catch { /* per-company contact lists just come up empty if this fails */ }
 
