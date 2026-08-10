@@ -229,6 +229,12 @@ router.put('/api/v2/settings',        requireAdmin, t(req => v2db.updateSettings
 
 router.post('/api/v2/opportunities',          t(req => v2db.createOpportunity({ ...req.body, created_by: req.session.userId }),
   async (req, r) => ({ action: 'bid.create_opportunity', summary: `Created opportunity ${await v2db.bidLabel(r.bid_id)}`, entity_type: 'bid', entity_id: r.bid_id })));
+router.post('/api/v2/leads',                  t(req => v2db.createOpportunity({ ...req.body, created_by: req.session.userId, stage: 'lead' }),
+  async (req, r) => ({ action: 'bid.create_lead', summary: `Created lead ${await v2db.bidLabel(r.bid_id)}`, entity_type: 'bid', entity_id: r.bid_id })));
+router.post('/api/v2/bids/:id/promote-to-opportunity', t(async req => v2db.promoteLead(req.params.id, req.session.userId),
+  async (req) => ({ action: 'bid.promote_lead', summary: `Promoted lead to opportunity ${await v2db.bidLabel(req.params.id)}`, entity_type: 'bid', entity_id: Number(req.params.id) })));
+router.post('/api/v2/bids/:id/demote-to-lead', t(async req => v2db.demoteToLead(req.params.id, req.session.userId),
+  async (req) => ({ action: 'bid.demote_lead', summary: `Moved opportunity ${await v2db.bidLabel(req.params.id)} back to Lead`, entity_type: 'bid', entity_id: Number(req.params.id) })));
 router.post('/api/v2/bids',                   t(req => v2db.createDirectBid({ ...req.body, created_by: req.session.userId }),
   async (req, r) => ({ action: 'bid.create', summary: `Created bid ${await v2db.bidLabel(r.bid_id)}`, entity_type: 'bid', entity_id: r.bid_id })));
 router.post('/api/v2/bids/:id/start',         t(async req => {

@@ -49,7 +49,7 @@ const ProjectSchema = new mongoose.Schema({
   updated_at: { type: String, default: ts },
 }, opts);
 
-const BID_STAGES = ['opportunity', 'active_bid', 'submitted', 'awarded', 'not_awarded', 'closed'];
+const BID_STAGES = ['lead', 'opportunity', 'active_bid', 'submitted', 'awarded', 'not_awarded', 'closed'];
 
 const BidSchema = new mongoose.Schema({
   _id:            Number,

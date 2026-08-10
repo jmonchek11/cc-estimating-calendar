@@ -13,7 +13,7 @@ const { getModels } = require('./models');
 const events = require('./events');
 const ics = require('./ics');
 
-const BID_ACTIVE_STAGES = ['opportunity', 'active_bid', 'submitted'];
+const BID_ACTIVE_STAGES = ['lead', 'opportunity', 'active_bid', 'submitted'];
 const CO_ACTIVE_STAGES  = ['active_co', 'submitted_co'];
 
 // Vendor directory categories (2026-07) — fixed list so the Vendors page can
@@ -626,10 +626,15 @@ async function updateSettingsV2(data) {
   return getSettings();
 }
 
-// ── Opportunity creation ──────────────────────────────────────────────────────
-// Creates a Project (or attaches to an existing one) + an opportunity Bid.
-async function createOpportunity({ project_id, project_name, notes, description, location, size_bucket, due_date, due_time, owner_id, source, company_ids, new_companies, contact_ids_by_company, new_contacts_by_company, created_by }) {
+// ── Opportunity / Lead creation ───────────────────────────────────────────────
+// Creates a Project (or attaches to an existing one) + a Bid in either the
+// 'lead' stage (early interest — nothing concrete yet) or 'opportunity'
+// stage (real substance — a contact, plans, worth reviewing daily). Same
+// creation path for both since the fields captured are identical; only the
+// starting stage differs.
+async function createOpportunity({ project_id, project_name, notes, description, location, size_bucket, due_date, due_time, owner_id, source, company_ids, new_companies, contact_ids_by_company, new_contacts_by_company, created_by, stage }) {
   const M = getModels();
+  const startStage = stage === 'lead' ? 'lead' : 'opportunity';
   let pid = project_id ? Number(project_id) : null;
   let isNewProject = false;
   if (!pid) {
@@ -642,7 +647,7 @@ async function createOpportunity({ project_id, project_name, notes, description,
   }
   const bidId = await nextId('bids');
   const ownerId = owner_id ? Number(owner_id) : (created_by ? Number(created_by) : null);
-  await M.Bid.create({ _id: bidId, project_id: pid, stage: 'opportunity', notes: notes || null, due_date: due_date || null, due_time: due_time || null, owner_id: ownerId, source: source || null });
+  await M.Bid.create({ _id: bidId, project_id: pid, stage: startStage, notes: notes || null, due_date: due_date || null, due_time: due_time || null, owner_id: ownerId, source: source || null });
 
   const companyIds = await resolveCompanyIds(company_ids, new_companies);
   for (const companyId of companyIds) await ensureBidCustomer(bidId, companyId);
@@ -683,9 +688,43 @@ async function createOpportunity({ project_id, project_name, notes, description,
   }
   await events.safeEmit('bid.created', {
     project_id: pid, bid_id: bidId, actor_id: actorId,
-    payload: { project_name: proj.name, stage: 'opportunity', estimator_id: null, salesperson_id: null, due_date: due_date || null },
+    payload: { project_name: proj.name, stage: startStage, estimator_id: null, salesperson_id: null, due_date: due_date || null },
   });
   return { project_id: pid, bid_id: bidId };
+}
+
+// ── lead → opportunity ("Promote to Opportunity") ─────────────────────────────
+// A lead becomes a real opportunity once there's something concrete to
+// review daily (a contact, plans, actual funding) — see DATA_MODEL_SPEC.md.
+async function promoteLead(id, actorId) {
+  const M = getModels();
+  const bid = await loadBid(id);
+  if (bid.stage !== 'lead') throw new Error(`Cannot promote from stage '${bid.stage}' — only leads can be promoted to an opportunity`);
+  await M.Bid.updateOne({ _id: bid._id }, { $set: { stage: 'opportunity', updated_at: ts() } });
+  const proj = await M.Project.findById(bid.project_id).lean();
+  await events.safeEmit('bid.stage_changed', {
+    project_id: bid.project_id, bid_id: bid._id, actor_id: actorId || null,
+    payload: { from: 'lead', to: 'opportunity', project_name: proj?.name || null },
+  });
+  return { bid_id: bid._id, stage: 'opportunity' };
+}
+
+// ── opportunity → lead ("Move to Lead") ────────────────────────────────────────
+// The reverse — for an opportunity that turns out to have been premature
+// (customer says it's on hold, no funding yet, etc). Blocked once it's been
+// approved into the Queue, since that represents real forward momentum.
+async function demoteToLead(id, actorId) {
+  const M = getModels();
+  const bid = await loadBid(id);
+  if (bid.stage !== 'opportunity') throw new Error(`Cannot move to Lead from stage '${bid.stage}'`);
+  if (bid.approved_to_bid) throw new Error('Cannot move to Lead — this opportunity has already been approved to bid. Unapprove it first.');
+  await M.Bid.updateOne({ _id: bid._id }, { $set: { stage: 'lead', updated_at: ts() } });
+  const proj = await M.Project.findById(bid.project_id).lean();
+  await events.safeEmit('bid.stage_changed', {
+    project_id: bid.project_id, bid_id: bid._id, actor_id: actorId || null,
+    payload: { from: 'opportunity', to: 'lead', project_name: proj?.name || null },
+  });
+  return { bid_id: bid._id, stage: 'lead' };
 }
 
 // ── opportunity → active_bid ("Start Bid") ────────────────────────────────────
@@ -993,7 +1032,7 @@ async function addBidCustomers(id, data, actorId) {
 async function updateOpportunity(id, data) {
   const M = getModels();
   const bid = await loadBid(id);
-  if (bid.stage !== 'opportunity') throw new Error("This is only for opportunities — once a bid has started, edit it from the bid's own Edit button.");
+  if (!['opportunity', 'lead'].includes(bid.stage)) throw new Error("This is only for leads/opportunities — once a bid has started, edit it from the bid's own Edit button.");
   const upd = { updated_at: ts() };
   if ('due_date' in data) upd.due_date = data.due_date || null;
   if ('due_time' in data) upd.due_time = data.due_time || null;
@@ -1435,11 +1474,11 @@ async function notAwardSubmission(submissionId, data, actorId) {
   return { submission_id: sub._id, bid_id: bid._id };
 }
 
-// ── opportunity / active_bid → closed ─────────────────────────────────────────
+// ── lead / opportunity / active_bid → closed ──────────────────────────────────
 async function closeBid(id, data, actorId) {
   const M = getModels();
   const bid = await loadBid(id);
-  if (!['opportunity', 'active_bid'].includes(bid.stage)) throw new Error(`Cannot close from stage '${bid.stage}'`);
+  if (!['lead', 'opportunity', 'active_bid'].includes(bid.stage)) throw new Error(`Cannot close from stage '${bid.stage}'`);
   require_(data, ['closed_date', 'closed_approved_by', 'close_reason']);
   const fromStage = bid.stage;
   await M.Bid.updateOne({ _id: bid._id }, { $set: {
@@ -3227,6 +3266,7 @@ module.exports = {
   dismissDuplicates, deleteEmptyProject, applyCleanupOverrides, removeOverride,
   recomputeBidHeadline, recomputeBidFollowup, nextId, getHolidays, getHolidaysAround, getHolidayNames, getHolidayNamesAround, addWorkingDays, isWeekendOrHoliday,
   createOpportunity, createDirectBid, startBid, submitBid, addSubmission, reactivateBid, addBidCustomers, updateOpportunity, adminUpdate,
+  promoteLead, demoteToLead,
   getContacts, getContactDetail, createContact, updateContact, deleteContact, getContactBids, getCompanyBids,
   addBidCustomerContact, removeBidCustomerContact,
   awardSubmission, notAwardSubmission, closeBid, approveToBid, unapproveToBid, logFollowupV2, updateFollowup,

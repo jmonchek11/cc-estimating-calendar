@@ -367,6 +367,7 @@
       <a class="nav-item" data-page="digest" href="#digest" onclick="navigate('digest');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="14"/><line x1="12" y1="20" x2="12" y2="8"/><line x1="18" y1="20" x2="18" y2="4"/></svg></span> Weekly Digest</a>
       <a class="nav-item" data-page="calendar" href="#calendar" onclick="navigate('calendar');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span> Calendar</a>
       <div class="nav-section-label">OPPORTUNITIES</div>
+      <a class="nav-item" data-page="leads" href="#leads" onclick="navigate('leads');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21V10"/><path d="M12 10C12 10 4 10 4 3c8 0 8 7 8 7z"/><path d="M12 10C12 10 20 10 20 3c-8 0-8 7-8 7z"/></svg></span> Active Leads</a>
       <a class="nav-item" data-page="opportunities" href="#opportunities" onclick="navigate('opportunities');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="0.8" fill="currentColor" stroke="none"/></svg></span> Daily Bid / No Bid</a>
       <a class="nav-item" data-page="closed-opportunities" href="#closed-opportunities" onclick="navigate('closed-opportunities');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg></span> Closed Opportunities</a>
       <a class="nav-item" data-page="queue" href="#queue" onclick="navigate('queue');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span> Queue</a>
@@ -435,6 +436,7 @@ const PAGE_ICONS = {
   digest: '<line x1="6" y1="20" x2="6" y2="14"/><line x1="12" y1="20" x2="12" y2="8"/><line x1="18" y1="20" x2="18" y2="4"/>',
   calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>',
   opportunities: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="0.8" fill="currentColor" stroke="none"/>',
+  leads: '<path d="M12 21V10"/><path d="M12 10C12 10 4 10 4 3c8 0 8 7 8 7z"/><path d="M12 10C12 10 20 10 20 3c-8 0-8 7-8 7z"/>',
   closed: '<circle cx="12" cy="12" r="9"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/>',
   queue: '<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
   bids: '<polygon points="13 2 3 14 11 14 10 22 21 10 13 10 13 2"/>',
@@ -511,12 +513,12 @@ const esc = s => (s ?? '').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<':
 const escJs = s => esc(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 const today = new Date().toISOString().split('T')[0];
 const STAGE = {
-  opportunity:'Opportunity', active_bid:'Active Bid', submitted:'Submitted', awarded:'Awarded',
+  lead:'Lead', opportunity:'Opportunity', active_bid:'Active Bid', submitted:'Submitted', awarded:'Awarded',
   not_awarded:'Not Awarded', closed:'Closed',
   active_co:'Active CO', submitted_co:'Submitted CO', approved:'Approved', not_approved:'Not Approved', voided:'Voided',
 };
 const STAGE_COLOR = {
-  opportunity:'#64748b', active_bid:'#92400e', submitted:'#2563eb', awarded:'#166534',
+  lead:'#7c3aed', opportunity:'#64748b', active_bid:'#92400e', submitted:'#2563eb', awarded:'#166534',
   not_awarded:'#dc2626', closed:'#64748b',
   active_co:'#92400e', submitted_co:'#2563eb', approved:'#166534', not_approved:'#dc2626', voided:'#64748b',
 };
@@ -639,6 +641,7 @@ function navigate(page) {
   if (page === 'dashboard') { VIEW = { name: 'dashboard' }; return renderDashboard(); }
   if (page === 'health') { VIEW = { name: 'health' }; return showHealth(); }
   if (page === 'history') { VIEW = { name: 'history' }; return renderHistory(); }
+  if (page === 'leads') { VIEW = { name: 'bidlist', arg: 'lead' }; return renderBidList('lead'); }
   if (page === 'opportunities') { VIEW = { name: 'bidlist', arg: 'opportunity' }; return renderBidList('opportunity'); }
   if (page === 'closed-opportunities') { VIEW = { name: 'bidlist', arg: 'closed' }; return renderBidList('closed'); }
   if (page === 'queue') { VIEW = { name: 'bidlist', arg: 'queue' }; return renderBidList('queue'); }
@@ -1472,6 +1475,7 @@ async function renderDigest() {
 }
 
 const BID_LIST_META = {
+  lead:        { page: 'leads',                title: `${pageIcon('leads')} Active Leads`, sub: 'early interest — not yet a real opportunity' },
   opportunity: { page: 'opportunities',        title: `${pageIcon('opportunities')} Daily Bid / No Bid`, sub: 'considering — not yet bidding' },
   closed:      { page: 'closed-opportunities', title: `${pageIcon('closed')} Closed Opportunities`, sub: 'declined or called off' },
   queue:       { page: 'queue',                title: `${pageIcon('queue')} Queue`, sub: 'approved — awaiting bid setup' },
@@ -1583,6 +1587,9 @@ async function renderBidList(stage) {
       </div>` : stage === 'opportunity' ? `
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="v2-btn blue" style="padding:8px 14px;font-size:12px" onclick="actNewOpportunity()">+ New Opportunity</button>
+      </div>` : stage === 'lead' ? `
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="v2-btn blue" style="padding:8px 14px;font-size:12px" onclick="actNewLead()">+ New Lead</button>
       </div>` : '';
 
   main.innerHTML = `
@@ -1627,7 +1634,14 @@ function renderBidListBody(stage) {
       return `${b.due_date ? `<div style="font-size:12px;font-weight:700;color:${b.due_date < today ? '#dc2626' : 'var(--text-muted)'};margin-bottom:6px">Due ${fmtD(b.due_date)}${b.due_time ? ' · ' + fmtTimeShort(b.due_time) : ''}</div>` : ''}
         <div style="display:flex;gap:6px;justify-content:flex-end" onclick="event.stopPropagation()">
           <button class="v2-btn green" style="padding:4px 10px;font-size:11px" onclick="actApproveToBid(${b.id})">✓ Approve to Bid</button>
+          <button class="v2-btn outline" style="padding:4px 10px;font-size:11px" onclick="actDemoteToLead(${b.id})">↩ Move to Lead</button>
           <button class="v2-btn gray" style="padding:4px 10px;font-size:11px" onclick="actCloseBid(${b.id})">✗ No Bid</button>
+        </div>`;
+    }
+    if (stage === 'lead') {
+      return `<div style="display:flex;gap:6px;justify-content:flex-end" onclick="event.stopPropagation()">
+          <button class="v2-btn green" style="padding:4px 10px;font-size:11px" onclick="actPromoteLead(${b.id})">✓ Promote to Opportunity</button>
+          <button class="v2-btn gray" style="padding:4px 10px;font-size:11px" onclick="actCloseBid(${b.id})">✗ Dismiss</button>
         </div>`;
     }
     if (stage === 'queue') {
@@ -2366,12 +2380,17 @@ function bidActions(b) {
   const menu = [];
   if (!b.superseded) {
     const canEditBid = CURRENT_USER?.is_admin || CURRENT_USER?.id === b.estimator?.id || CURRENT_USER?.id === b.salesperson?.id;
-    if (b.stage === 'opportunity') {
+    if (b.stage === 'lead') {
+      primary = `<button class="v2-btn green" onclick="actPromoteLead(${b.id})">✓ Promote to Opportunity</button>`;
+      menu.push({ label: '📅 Due Date / Assign', fn: `actEditOpportunityDetails(${b.id})` });
+      menu.push({ label: 'Dismiss lead', fn: `actCloseBid(${b.id})`, danger: true });
+    } else if (b.stage === 'opportunity') {
       if (b.approved_to_bid) {
         primary = `<button class="v2-btn blue" onclick="actStartBid(${b.id})">→ Start Bid</button>`;
         menu.push({ label: '↩ Back to Opportunities', fn: `actUnapproveToBid(${b.id})` });
       } else {
         primary = `<button class="v2-btn green" onclick="actApproveToBid(${b.id})">✓ Approve to Bid</button>`;
+        menu.push({ label: '↩ Move to Lead', fn: `actDemoteToLead(${b.id})` });
       }
       menu.push({ label: '📝 Log Follow-up', fn: `actLogFollowup('bid',${b.id})` });
       menu.push({ label: '📅 Due Date / Assign', fn: `actEditOpportunityDetails(${b.id})` });
@@ -2967,6 +2986,32 @@ async function actNewOpportunity() {
   }, 'Create Opportunity');
 
   renderOppContactPickers(contactsByCompany);
+}
+
+// A lead is deliberately lighter-weight than an opportunity — "we heard
+// about this but there's no real contact/funding yet" — so it skips the
+// due date and customer/contact pickers an opportunity has (those get
+// filled in once it's promoted and there's actually something to track).
+async function actNewLead() {
+  showForm('🌱 New Lead', [
+    { id: 'project_id', label: 'Project', type: 'project', multi: false, required: true,
+      newKey: 'project_name', options: projectOpts(), placeholder: 'Type project name…' },
+    { id: 'owner_id', label: 'Lead Owner', type: 'select', required: true, options: teamOpts(), value: CURRENT_USER?.id },
+    { id: 'source', label: 'Source (where did this come from?)', type: 'text', placeholder: 'iSqFt, BuildingConnected, email invite, referral, phone call…' },
+    { id: 'description', label: 'Description', type: 'textarea', placeholder: 'Brief description of what we heard…' },
+    { id: 'location', label: 'Location', type: 'text', placeholder: 'City, State or site address…' },
+    { id: 'notes', label: 'Notes (internal discussion)', type: 'textarea', placeholder: 'Why are we tracking this? What do we still need to know?' },
+  ], data => api('POST', '/api/v2/leads', data), 'Create Lead');
+}
+async function actPromoteLead(bidId) {
+  if (!confirm('Promote this lead to a real opportunity? It will move to the Daily Bid / No Bid list for daily review.')) return;
+  try { await api('POST', `/api/v2/bids/${bidId}/promote-to-opportunity`); await refresh(); }
+  catch (e) { alert('Failed: ' + e.message); }
+}
+async function actDemoteToLead(bidId) {
+  if (!confirm('Move this back to Active Leads? Use this if it turns out there\'s no real substance yet (no funding, no contact).')) return;
+  try { await api('POST', `/api/v2/bids/${bidId}/demote-to-lead`); await refresh(); }
+  catch (e) { alert('Failed: ' + e.message); }
 }
 
 function actNewLegacyJob() {
@@ -5155,6 +5200,7 @@ async function openOnlinePanel() {
 // back to "General / Not page-specific".
 const IDEA_PAGE_NAMES = {
   dashboard: 'Dashboard', digest: 'Weekly Digest', calendar: 'Calendar',
+  leads: 'Active Leads',
   opportunities: 'Daily Bid / No Bid', 'closed-opportunities': 'Closed Opportunities',
   'active-bids': 'Active Bids', 'submitted-bids': 'Submitted Bids', 'awarded-bids': 'Awarded Bids',
   'active-cos': 'Active Change Orders', 'submitted-cos': 'Submitted Change Orders',
