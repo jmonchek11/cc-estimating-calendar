@@ -204,6 +204,26 @@ async function notifyApprovedToBid(bidId, actorName) {
   } catch (e) { console.error('[v2 notify] approved-to-bid email failed:', e.message); }
 }
 
+// Separate from notifyApprovedToBid above (that one pings the fixed setup
+// contact from Settings, if configured) — this pings the opportunity's own
+// owner, a real TeamMember, to go forward the bid invite/RFQ email to
+// PC/estimating so setup can actually begin. No-ops if the opportunity has
+// no owner set, or the owner opted out of 'assigned'-category mail (the
+// closest existing category — there's no dedicated "queue" pref).
+async function notifyOwnerToForwardInvite(bidId, actorName) {
+  try {
+    const M = getModels();
+    const bid = await M.Bid.findById(Number(bidId)).lean();
+    if (!bid?.owner_id) return;
+    const recipient = await emailForV2Member(bid.owner_id);
+    if (!recipient?.email || !mailer.wantsNotification(recipient, 'assigned')) return;
+    const shape = await bidEmailShape(bidId);
+    if (!shape) return;
+    const { subject, html } = mailer.emailForwardBidInvite(shape, recipient.name, actorName || 'Someone');
+    await mailer.sendMail({ to: recipient.email, subject, html });
+  } catch (e) { console.error('[v2 notify] owner-forward-invite email failed:', e.message); }
+}
+
 // change_order doesn't have a project/customer join worth the trip for a
 // reminder ping — reuses the same bidTable-shaped object, just thinner.
 async function coEmailShape(coId) {
@@ -271,4 +291,4 @@ async function notifyFollowup(parentType, parentId, followupData, actorId) {
   } catch (e) { console.error('[v2 notify] followup email failed:', e.message); }
 }
 
-module.exports = { bidEmailShape, coEmailShape, emailShapeForReminder, notifyAwarded, notifyRoleAward, notifyApprovedToBid, notifyAssigned, notifyWalkthroughSet, notifyWalkthroughAssignees, notifyFollowup, bidRecipients, walkthroughContactInfo, emailForV2Member };
+module.exports = { bidEmailShape, coEmailShape, emailShapeForReminder, notifyAwarded, notifyRoleAward, notifyApprovedToBid, notifyOwnerToForwardInvite, notifyAssigned, notifyWalkthroughSet, notifyWalkthroughAssignees, notifyFollowup, bidRecipients, walkthroughContactInfo, emailForV2Member };

@@ -341,6 +341,26 @@ function emailApprovedToBid(bid, actorName) {
   };
 }
 
+// Fires once, right when the opportunity owner's bid is approved into the
+// Queue — a nudge to go find and forward the actual bid invite/RFQ email
+// (or any other paperwork the customer sent) to PC/estimating, since that
+// often only lives in the owner's own inbox and setup can't start without it.
+function emailForwardBidInvite(bid, recipientName, actorName) {
+  const hasDeepLink = bid.project_id && bid.bid_id;
+  const link = hasDeepLink ? `${APP_URL}/#project/${bid.project_id}/bid/${bid.bid_id}` : APP_URL;
+  const label = bid.project_name || bid.bid_number || 'Unnamed';
+  return {
+    subject: `📋 Forward the bid invite — ${label}`,
+    html: base(`
+      ${iconHeading(`${APP_URL}/icon-active-bids.png`, 'Approved to Bid')}
+      <p>Hi <strong>${recipientName}</strong>, <strong>${actorName}</strong> just approved your opportunity to move forward — it's in the Queue and ready for bid setup.</p>
+      <p>If you haven't already, please forward the bid invite/RFQ email (or any other paperwork the customer sent) to the PC/estimating email so setup can begin.</p>
+      ${bidTable(bid)}
+      ${actionButtons(bid, { href: link, label: hasDeepLink ? 'Open Bid' : 'Open App' })}
+    `),
+  };
+}
+
 function emailReminder(bid, reminder, recipientName) {
   return {
     subject: `⏰ Reminder — ${bid.project_name || bid.bid_number || 'Unnamed'}`,
@@ -609,4 +629,4 @@ function emailIdeaStatusChanged(idea, newStatus) {
   };
 }
 
-module.exports = { sendMail, emailAssigned, emailFollowup, emailAwarded, emailRoleAwardNotice, emailApprovedToBid, emailReminder, emailWalkthroughSet, emailWalkthroughAssigned, emailWalkthroughReminder, emailDigest, emailIdeaSubmitted, emailIdeaStatusChanged, wantsNotification, NOTIFICATION_CATEGORIES };
+module.exports = { sendMail, emailAssigned, emailFollowup, emailAwarded, emailRoleAwardNotice, emailApprovedToBid, emailForwardBidInvite, emailReminder, emailWalkthroughSet, emailWalkthroughAssigned, emailWalkthroughReminder, emailDigest, emailIdeaSubmitted, emailIdeaStatusChanged, wantsNotification, NOTIFICATION_CATEGORIES };

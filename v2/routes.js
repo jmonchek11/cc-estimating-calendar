@@ -284,6 +284,7 @@ router.post('/api/v2/bids/:id/approve-to-bid', t(async req => {
     const actor = await actorOf(req);
     const r = await v2db.approveToBid(req.params.id, actor);
     notify.notifyApprovedToBid(Number(req.params.id), actor?.name);
+    notify.notifyOwnerToForwardInvite(Number(req.params.id), actor?.name);
     return r;
   }));
 router.post('/api/v2/bids/:id/unapprove-to-bid', t(async req => v2db.unapproveToBid(req.params.id, await actorOf(req))));
