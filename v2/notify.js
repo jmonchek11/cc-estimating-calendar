@@ -122,6 +122,32 @@ async function notifyWalkthroughSet(bidId, walkthroughId, actorId) {
   } catch (e) { console.error('[v2 notify] walkthrough-set email failed:', e.message); }
 }
 
+// One email per newly-assigned attendee (not the whole bid team — that's
+// notifyWalkthroughSet's job). `newAssigneeMemberIds` comes from
+// buildAssigneesList()'s diff in v2/db.js, so re-saving people who were
+// already assigned never re-sends them a duplicate "you're assigned" email.
+async function notifyWalkthroughAssignees(bidId, walkthroughId, newAssigneeMemberIds, actorId) {
+  if (!newAssigneeMemberIds?.length) return;
+  try {
+    const M = getModels();
+    const bid = await M.Bid.findById(Number(bidId)).lean();
+    const walkthrough = bid?.walkthroughs?.find(w => w._id === Number(walkthroughId));
+    if (!walkthrough?.date) return;
+    const shape = await bidEmailShape(bidId);
+    if (!shape) return;
+    const actor = actorId ? await maindb.getMember(actorId) : null;
+    const contact = await walkthroughContactInfo(walkthrough);
+    for (const memberId of newAssigneeMemberIds) {
+      const assignee = walkthrough.assignees.find(a => a.member_id === memberId);
+      if (!assignee) continue;
+      const recipient = await emailForV2Member(memberId);
+      if (!recipient?.email || !mailer.wantsNotification(recipient, 'walkthrough')) continue;
+      const { subject, html } = mailer.emailWalkthroughAssigned(shape, walkthrough.date, walkthrough.time, recipient.name, actor?.name || 'A team member', contact, assignee.rsvp_token);
+      await mailer.sendMail({ to: recipient.email, subject, html });
+    }
+  } catch (e) { console.error('[v2 notify] walkthrough-assigned email failed:', e.message); }
+}
+
 async function notifyAwarded(bidId, actorName) {
   try {
     const shape = await bidEmailShape(bidId);
@@ -245,4 +271,4 @@ async function notifyFollowup(parentType, parentId, followupData, actorId) {
   } catch (e) { console.error('[v2 notify] followup email failed:', e.message); }
 }
 
-module.exports = { bidEmailShape, coEmailShape, emailShapeForReminder, notifyAwarded, notifyRoleAward, notifyApprovedToBid, notifyAssigned, notifyWalkthroughSet, notifyFollowup, bidRecipients, walkthroughContactInfo, emailForV2Member };
+module.exports = { bidEmailShape, coEmailShape, emailShapeForReminder, notifyAwarded, notifyRoleAward, notifyApprovedToBid, notifyAssigned, notifyWalkthroughSet, notifyWalkthroughAssignees, notifyFollowup, bidRecipients, walkthroughContactInfo, emailForV2Member };

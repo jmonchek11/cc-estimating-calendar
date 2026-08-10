@@ -386,6 +386,33 @@ function emailWalkthroughSet(bid, walkthroughDate, walkthroughTime, recipientNam
   };
 }
 
+// Fires once per person, right when they're added as an assigned attendee
+// on a walk-through — separate from emailWalkthroughSet (which goes to the
+// whole bid team on schedule/reschedule) since this is a personal "you're
+// on this one" ping with an RSVP action attached. The two buttons are
+// plain GET links (no login, no JS) so they work by just being clicked
+// from the email — the token in the URL is itself the auth, scoped to
+// this one person's answer on this one walk-through (see
+// setWalkthroughRsvp() in v2/db.js).
+function emailWalkthroughAssigned(bid, walkthroughDate, walkthroughTime, recipientName, actorName, contact, rsvpToken) {
+  const label = bid.project_name || bid.bid_number || 'Unnamed';
+  const whenStr = fmtDate(walkthroughDate) + (walkthroughTime ? ` at ${fmtTime(walkthroughTime)}` : '');
+  const attendUrl = `${APP_URL}/api/v2/walkthrough-rsvp/${rsvpToken}/attending`;
+  const notAttendUrl = `${APP_URL}/api/v2/walkthrough-rsvp/${rsvpToken}/not_attending`;
+  return {
+    subject: `🚶 You're assigned to a walk-through — ${label}`,
+    html: base(`
+      ${iconHeading(`${APP_URL}/icon-walkthrough.png`, "You're Assigned to a Walk-through")}
+      <p>Hi <strong>${recipientName}</strong>, <strong>${actorName}</strong> assigned you to attend a jobsite walk-through — <strong>${whenStr}</strong>.</p>
+      ${bidTable(bid)}
+      ${walkthroughContactLine(contact)}
+      <p style="margin:18px 0 6px;font-weight:600">Will you be there?</p>
+      ${buttonRow({ href: attendUrl, label: '✅ Will Attend' }, { href: notAttendUrl, label: '❌ Will Not Attend' })}
+      ${folderButtonHtml(bid)}
+    `),
+  };
+}
+
 // Fires ~24 hours before, via the hourly cron in server.js.
 function emailWalkthroughReminder(bid, walkthroughDate, walkthroughTime, recipientName, contact) {
   const hasDeepLink = bid.project_id && bid.bid_id;
@@ -576,4 +603,4 @@ function emailIdeaStatusChanged(idea, newStatus) {
   };
 }
 
-module.exports = { sendMail, emailAssigned, emailFollowup, emailAwarded, emailRoleAwardNotice, emailApprovedToBid, emailReminder, emailWalkthroughSet, emailWalkthroughReminder, emailDigest, emailIdeaSubmitted, emailIdeaStatusChanged, wantsNotification, NOTIFICATION_CATEGORIES };
+module.exports = { sendMail, emailAssigned, emailFollowup, emailAwarded, emailRoleAwardNotice, emailApprovedToBid, emailReminder, emailWalkthroughSet, emailWalkthroughAssigned, emailWalkthroughReminder, emailDigest, emailIdeaSubmitted, emailIdeaStatusChanged, wantsNotification, NOTIFICATION_CATEGORIES };

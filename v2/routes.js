@@ -298,6 +298,7 @@ router.post('/api/v2/bids/:id/walkthroughs',   t(async req => {
     await requireBidAssignedOrAdmin(req);
     const r = await v2db.addWalkthrough(req.params.id, req.body, req.session.userId);
     if (req.body.date) notify.notifyWalkthroughSet(Number(req.params.id), r.walkthrough_id, req.session.userId);
+    notify.notifyWalkthroughAssignees(Number(req.params.id), r.walkthrough_id, r.new_assignee_ids, req.session.userId);
     return r;
   },
   async (req) => ({ action: 'bid.add_walkthrough', summary: `Added a walk-through for bid ${await v2db.bidLabel(req.params.id)}`, entity_type: 'bid', entity_id: Number(req.params.id) })));
@@ -308,6 +309,7 @@ router.patch('/api/v2/bids/:id/walkthroughs/:wid', t(async req => {
     const dateChanged = (req.body.date || null) !== (oldW?.date || null);
     const timeChanged = (req.body.time || null) !== (oldW?.time || null);
     if ((dateChanged || timeChanged) && req.body.date) notify.notifyWalkthroughSet(Number(req.params.id), Number(req.params.wid), req.session.userId);
+    notify.notifyWalkthroughAssignees(Number(req.params.id), Number(req.params.wid), r.new_assignee_ids, req.session.userId);
     return r;
   },
   async (req) => ({ action: 'bid.update_walkthrough', summary: `Updated a walk-through for bid ${await v2db.bidLabel(req.params.id)}`, entity_type: 'bid', entity_id: Number(req.params.id) })));
@@ -316,6 +318,29 @@ router.delete('/api/v2/bids/:id/walkthroughs/:wid', t(async req => {
     return v2db.removeWalkthrough(req.params.id, req.params.wid);
   },
   async (req) => ({ action: 'bid.remove_walkthrough', summary: `Removed a walk-through from bid ${await v2db.bidLabel(req.params.id)}`, entity_type: 'bid', entity_id: Number(req.params.id) })));
+// PUBLIC route (see PUBLIC_API in server.js) — clicked straight from the
+// assignment email, no login. The token is scoped to exactly one person's
+// answer on exactly one walk-through, so no session is needed to trust it.
+// A plain GET (not POST) on purpose: it has to work as a bare emailed link
+// with no JS/form involved.
+router.get('/api/v2/walkthrough-rsvp/:token/:status', async (req, res) => {
+  try {
+    const result = await v2db.setWalkthroughRsvp(req.params.token, req.params.status);
+    if (!result) return res.status(404).type('text/html').send(rsvpPage('Link not found', 'This RSVP link is no longer valid.'));
+    const escHtml = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const whenStr = result.date ? `${escHtml(result.date)}${result.time ? ' at ' + escHtml(result.time) : ''}` : 'the walk-through';
+    const label = result.status === 'attending' ? "You're marked as attending" : "You're marked as not attending";
+    res.type('text/html').send(rsvpPage(label, `${escHtml(result.member_name) || 'You'} — ${escHtml(result.project_name || result.bid_number) || 'walk-through'} on ${whenStr}. You can click the other link in the email any time to change your answer.`));
+  } catch (e) { res.status(400).type('text/html').send(rsvpPage('Something went wrong', e.message)); }
+});
+function rsvpPage(title, message) {
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${title} — LIS Estimating</title>
+    <style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f1f5f9;color:#1e293b;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:20px}
+    .card{background:#fff;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,.08);padding:32px;max-width:420px;text-align:center}
+    h1{font-size:18px;margin:0 0 10px}p{font-size:14px;color:#64748b;line-height:1.5;margin:0}</style></head>
+    <body><div class="card"><h1>${title}</h1><p>${message}</p></div></body></html>`;
+}
 router.patch('/api/v2/bids/:id/opportunity',  t(async req => {
     const oldBid = await v2db.loadBid(req.params.id).catch(() => null);
     const r = await v2db.updateOpportunity(req.params.id, req.body);

@@ -271,6 +271,9 @@ async function getProjectDetail(projectId) {
       id: w._id, date: w.date, time: w.time,
       company: companyById[w.company_id] || null,
       contact: contactById[w.contact_id] || null,
+      // rsvp_token deliberately excluded — it's the auth for that person's
+      // public RSVP link, so it never goes to the frontend as plain data.
+      assignees: (w.assignees || []).map(a => ({ ...(tm[a.member_id] || { id: a.member_id }), rsvp: a.rsvp })),
     })).sort((x, y) => (x.date || '9999').localeCompare(y.date || '9999') || (x.time || '99:99').localeCompare(y.time || '99:99')),
     estimate_amount: b.estimate_amount,
     jurisdiction: b.jurisdiction,
@@ -1633,17 +1636,36 @@ async function resolveWalkthroughCompanyContact(data) {
   return { companyId, contactId };
 }
 
+// Diffs the wanted member-id list against whatever assignees already exist
+// on the walkthrough — anyone still wanted keeps their existing entry
+// (token, rsvp status, responded_at all preserved, since re-saving the
+// same person shouldn't reset an RSVP they already gave); anyone new gets
+// a fresh token and starts at 'pending'; anyone dropped just disappears.
+function buildAssigneesList(existingAssignees, memberIds) {
+  const existingMap = new Map((existingAssignees || []).map(a => [a.member_id, a]));
+  const wantedIds = [...new Set((memberIds || []).map(Number))];
+  const assignees = [];
+  const newlyAdded = [];
+  for (const id of wantedIds) {
+    if (existingMap.has(id)) { assignees.push(existingMap.get(id)); continue; }
+    assignees.push({ member_id: id, rsvp: 'pending', rsvp_token: crypto.randomBytes(20).toString('hex'), responded_at: null });
+    newlyAdded.push(id);
+  }
+  return { assignees, newlyAdded };
+}
+
 async function addWalkthrough(id, data, actorId) {
   const M = getModels();
   const bid = await loadBid(id);
   const { companyId, contactId } = await resolveWalkthroughCompanyContact(data);
   const wid = await nextId('walkthroughs');
+  const { assignees, newlyAdded } = buildAssigneesList([], data.assignee_ids);
   const entry = {
     _id: wid, date: data.date || null, time: data.time || null,
-    company_id: companyId, contact_id: contactId, reminder_sent: false,
+    company_id: companyId, contact_id: contactId, reminder_sent: false, assignees,
   };
   await M.Bid.updateOne({ _id: bid._id }, { $push: { walkthroughs: entry }, $set: { updated_at: ts() } });
-  return { bid_id: bid._id, walkthrough_id: wid };
+  return { bid_id: bid._id, walkthrough_id: wid, new_assignee_ids: newlyAdded };
 }
 
 async function updateWalkthrough(bidId, walkthroughId, data, actorId) {
@@ -1658,15 +1680,47 @@ async function updateWalkthrough(bidId, walkthroughId, data, actorId) {
   // otherwise the old date's "already sent" flag would silently suppress
   // the reminder for the new date/time.
   const reminderSent = (newDate !== existing.date || newTime !== existing.time) ? false : existing.reminder_sent;
+  // assignee_ids not sent at all (vs. an explicit []) means "leave as-is" —
+  // callers that don't touch assignment shouldn't silently wipe it.
+  const memberIds = data.assignee_ids !== undefined ? data.assignee_ids : (existing.assignees || []).map(a => a.member_id);
+  const { assignees, newlyAdded } = buildAssigneesList(existing.assignees, memberIds);
   await M.Bid.updateOne(
     { _id: bid._id, 'walkthroughs._id': wid },
     { $set: {
       'walkthroughs.$.date': newDate, 'walkthroughs.$.time': newTime,
       'walkthroughs.$.company_id': companyId, 'walkthroughs.$.contact_id': contactId,
-      'walkthroughs.$.reminder_sent': reminderSent, updated_at: ts(),
+      'walkthroughs.$.reminder_sent': reminderSent, 'walkthroughs.$.assignees': assignees, updated_at: ts(),
     }}
   );
-  return { bid_id: bid._id, walkthrough_id: wid };
+  return { bid_id: bid._id, walkthrough_id: wid, new_assignee_ids: newlyAdded };
+}
+
+// Public RSVP click — token identifies exactly one (walkthrough, person)
+// pair, so this never needs a session. Returns enough info to render a
+// friendly confirmation page, or null if the token doesn't match anything
+// (already-used links stay valid — re-clicking just re-confirms/changes
+// the same answer, which is friendlier than a dead link).
+async function setWalkthroughRsvp(token, status) {
+  if (!['attending', 'not_attending'].includes(status)) throw new Error('Invalid RSVP status');
+  const M = getModels();
+  const bid = await M.Bid.findOne({ 'walkthroughs.assignees.rsvp_token': token }).lean();
+  if (!bid) return null;
+  const walkthrough = bid.walkthroughs.find(w => (w.assignees || []).some(a => a.rsvp_token === token));
+  const assignee = walkthrough.assignees.find(a => a.rsvp_token === token);
+  await M.Bid.updateOne(
+    { _id: bid._id },
+    { $set: { 'walkthroughs.$[w].assignees.$[a].rsvp': status, 'walkthroughs.$[w].assignees.$[a].responded_at': ts() } },
+    { arrayFilters: [{ 'w._id': walkthrough._id }, { 'a.rsvp_token': token }] }
+  );
+  const [project, member] = await Promise.all([
+    M.Project.findById(bid.project_id).lean(),
+    M.TeamMember.findById(assignee.member_id).lean(),
+  ]);
+  return {
+    project_name: project?.name || null, bid_number: bid.bid_number,
+    date: walkthrough.date, time: walkthrough.time,
+    member_name: member?.name || null, status,
+  };
 }
 
 async function removeWalkthrough(bidId, walkthroughId) {
@@ -2135,7 +2189,10 @@ async function getBidList(stage) {
       certified_payroll: b.certified_payroll == null ? null : !!b.certified_payroll,
       tax_exempt: b.tax_exempt == null ? null : !!b.tax_exempt,
       approved_to_bid: !!b.approved_to_bid, approved_to_bid_at: b.approved_to_bid_at,
-      walkthroughs: (b.walkthroughs || []).map(w => ({ id: w._id, date: w.date, time: w.time })),
+      walkthroughs: (b.walkthroughs || []).map(w => ({
+        id: w._id, date: w.date, time: w.time,
+        assignees: (w.assignees || []).map(a => ({ ...(tm[a.member_id] || { id: a.member_id }), rsvp: a.rsvp })),
+      })),
       estimate_amount: b.estimate_amount, date_submitted: b.date_submitted, next_followup_date: b.next_followup_date,
       award_date: b.award_date, awarded_company: b.awarded_company_id ? coName[b.awarded_company_id] : null,
       job_number: job ? job.job_number : null, pm: job?.pm_id ? tm[job.pm_id] : null,
@@ -3094,7 +3151,7 @@ module.exports = {
   createChangeOrder, submitCO, approveCO, notApproveCO, voidCO, reopenCO, reviseCO,
   _norm, resolveCompanyByName, ensureBidCustomer, teamMap,
   addReminder, dismissReminder, deleteReminder, getRemindersFor, getDueReminders, markReminderEmailed,
-  addWalkthrough, updateWalkthrough, removeWalkthrough, getBidsNeedingWalkthroughReminder, markWalkthroughReminderSent,
+  addWalkthrough, updateWalkthrough, removeWalkthrough, getBidsNeedingWalkthroughReminder, markWalkthroughReminderSent, setWalkthroughRsvp,
   addNote, deleteNote, getNotesFor,
   getDigest,
   getTeamV2, createTeamMemberV2, updateTeamMemberV2, updateMyNotificationPrefs, updateSettingsV2, getSettings,

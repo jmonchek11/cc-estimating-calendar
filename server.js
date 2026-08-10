@@ -38,7 +38,7 @@ app.get('/legacy', (req, res) => res.sendFile(path.join(__dirname, 'public', 'in
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Auth middleware — protects /api/ routes except public ones
-const PUBLIC_API = ['/api/auth/', '/api/team', '/api/tv/', '/api/v2/calendar-feed/'];
+const PUBLIC_API = ['/api/auth/', '/api/team', '/api/tv/', '/api/v2/calendar-feed/', '/api/v2/walkthrough-rsvp/'];
 app.use((req, res, next) => {
   if (!req.path.startsWith('/api/')) return next();
   if (PUBLIC_API.some(p => req.path.startsWith(p))) return next();

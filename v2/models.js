@@ -107,6 +107,20 @@ const BidSchema = new mongoose.Schema({
       company_id:     { type: Number, default: null },    // FK -> Company — site contact's company, found-or-created same as any other company field
       contact_id:     { type: Number, default: null },    // FK -> Contact
       reminder_sent:  { type: Boolean, default: false },
+      // Internal team members assigned to attend, each with their own
+      // one-click RSVP (a rsvp_token per person, not per walkthrough, so
+      // the "Will Attend" link in one person's email can only ever answer
+      // for them — see notifyWalkthroughAssignees()/setWalkthroughRsvp()).
+      assignees: {
+        type: [{
+          _id: false,
+          member_id:   { type: Number, required: true },   // FK -> TeamMember
+          rsvp:        { type: String, enum: ['pending', 'attending', 'not_attending'], default: 'pending' },
+          rsvp_token:  { type: String, required: true },
+          responded_at: { type: String, default: null },
+        }],
+        default: [],
+      },
     }],
     default: [],
   },
