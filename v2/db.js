@@ -3116,7 +3116,14 @@ async function getEstimatorAvailability(startDate, endDate) {
 
   const byDate = {};
   for (const ev of events) {
-    const matched = namedMembers.filter(m => {
+    // Full name first ("Kevin Clark - Out" → Kevin Clark only) — matters
+    // whenever two team members share a first name (e.g. Kevin Clark and
+    // Kevin Landis), where a bare first-name match would wrongly flag both
+    // off the same event. Only fall back to first-name-only (for titles
+    // that never had a last name, like "Ray - Vacation") when no full-name
+    // match was found at all.
+    const fullMatches = namedMembers.filter(m => m.name && ev.summary.toLowerCase().includes(m.name.toLowerCase()));
+    const matched = fullMatches.length ? fullMatches : namedMembers.filter(m => {
       const escaped = m.first.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       return new RegExp(`\\b${escaped}\\b`, 'i').test(ev.summary);
     });
