@@ -3093,20 +3093,21 @@ async function getTeamMemberIdByCalendarToken(token) {
   return doc ? doc.team_member_id : null;
 }
 // Estimator out-of-office days, for the Calendar tab's "who's out" banner
-// — cross-references the shared HR calendar (hr@libertyintegrated.com,
-// via v2/graph.js) against the team roster. Each all-day HR event is
-// matched to a team member by their first name appearing as a whole word
-// in the event subject (e.g. "Joe - PTO" matches Joe Monchek) — good
-// enough for a single-person-per-event convention without needing a
-// stricter/fragile full-name match. Returns {} (no banner anywhere)
-// whenever Graph isn't configured or the read fails — this is a
-// convenience overlay, never something that should break the calendar.
+// — cross-references the HR team's published shared calendar (a plain
+// .ics link, see v2/hrCalendarFeed.js) against the team roster. Each
+// all-day HR event is matched to a team member by their first name
+// appearing as a whole word in the event summary (e.g. "Joe - PTO"
+// matches Joe Monchek) — good enough for a single-person-per-event
+// convention without needing a stricter/fragile full-name match. Returns
+// {} (no banner anywhere) whenever the feed isn't configured or the read
+// fails — this is a convenience overlay, never something that should
+// break the calendar.
 async function getEstimatorAvailability(startDate, endDate) {
-  const graph = require('./graph');
-  if (!graph.isConfigured()) return {};
+  const hrCalendar = require('./hrCalendarFeed');
+  if (!hrCalendar.isConfigured()) return {};
   const M = getModels();
   const [events, members] = await Promise.all([
-    graph.getHrCalendarEvents(startDate, endDate),
+    hrCalendar.getHrCalendarEvents(startDate, endDate),
     M.TeamMember.find({ active: 1 }).lean(),
   ]);
   const namedMembers = members
@@ -3117,7 +3118,7 @@ async function getEstimatorAvailability(startDate, endDate) {
   for (const ev of events) {
     const matched = namedMembers.filter(m => {
       const escaped = m.first.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      return new RegExp(`\\b${escaped}\\b`, 'i').test(ev.subject);
+      return new RegExp(`\\b${escaped}\\b`, 'i').test(ev.summary);
     });
     if (!matched.length) continue;
     // end is exclusive per Graph/iCalendar convention for all-day events —

@@ -1184,8 +1184,8 @@ function calChipHtml(item, type) {
 function isMobileViewport() { return window.matchMedia('(max-width: 860px)').matches; }
 
 // Cross-referenced against the shared HR calendar (see getEstimatorAvailability
-// in v2/db.js) — availability is keyed by 'YYYY-MM-DD', {}  whenever Graph
-// isn't configured, so this renders nothing rather than an empty banner.
+// in v2/db.js) — availability is keyed by 'YYYY-MM-DD', {} whenever the HR
+// feed isn't configured, so this renders nothing rather than an empty banner.
 function outOfOfficeBannerHtml(dateStr, availability) {
   const people = (availability || {})[dateStr];
   if (!people || !people.length) return '';

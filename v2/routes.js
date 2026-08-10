@@ -126,8 +126,9 @@ router.get('/api/v2/calendar-feed/:token/calendar.ics', async (req, res) => {
   } catch (e) { res.status(500).type('text/plain').send('Error generating calendar feed.'); }
 });
 // Authenticated (normal /api/v2/* session gate) — the Calendar tab's
-// "who's out" banner. Returns {} whenever Graph isn't configured/reachable
-// (see v2/graph.js), so this never breaks the calendar page itself.
+// "who's out" banner. Returns {} whenever the HR calendar feed isn't
+// configured/reachable (see v2/hrCalendarFeed.js), so this never breaks
+// the calendar page itself.
 router.get('/api/v2/estimator-availability', async (req, res) => {
   try { res.json(await v2db.getEstimatorAvailability(req.query.start, req.query.end)); }
   catch (e) { res.status(500).json({ error: e.message }); }
