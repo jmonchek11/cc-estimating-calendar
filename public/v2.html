@@ -2105,16 +2105,26 @@ async function renderProjectPage(projectId) {
   catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
 
   const bidN = d.bids.length, jobN = d.jobs.length, coN = d.jobs.reduce((s, j) => s + j.change_orders.length, 0);
+  const jobAddress = fmtJobAddress(d);
   main.innerHTML = `
     <div class="page-header">
       <div>
         <div class="page-title">${pageIcon('projects')} ${esc(d.name)}</div>
         <div class="page-subtitle">${bidN} bid${bidN!==1?'s':''} · ${jobN} job${jobN!==1?'s':''} · ${coN} change order${coN!==1?'s':''}${d.location ? ' · ' + esc(d.location) : ''}${d.size_bucket ? ' · ' + esc(d.size_bucket) : ''}${d.type_of_work ? ' · ' + esc(d.type_of_work) : ''}</div>
+        ${jobAddress ? `<div style="font-size:12.5px;color:var(--text-muted);margin-top:2px">📍 ${esc(jobAddress)}</div>` : ''}
       </div>
       <button class="v2-btn outline" onclick="navigate('projects')">← All Projects</button>
     </div>
     ${d.description ? `<div class="card" style="padding:12px 16px;margin-bottom:14px;font-size:13px;color:var(--text-muted)">${esc(d.description)}</div>` : ''}
     ${renderHierarchy(d)}`;
+}
+// Structured job-site address (street/city/state/zip, usually from a JIS
+// import — see v2/jis.js) — distinct from `location` (freeform, captured
+// at opportunity intake, often before a JIS exists). Renders whichever
+// pieces are actually present rather than requiring the full set.
+function fmtJobAddress(d) {
+  const cityStateZip = [d.city, [d.state, d.zip].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+  return [d.street, cityStateZip].filter(Boolean).join(', ') || null;
 }
 
 // Re-render the current page (+ open flyout) after any action.
@@ -3307,6 +3317,10 @@ function actEditProject(projectId) {
     { id: 'location', label: 'Location', type: 'text', value: d.location, placeholder: 'City, State or site address…' },
     { id: 'size_bucket', label: 'Project Size', type: 'select', emptyLabel: 'Unknown', value: d.size_bucket, options: PROJECT_SIZE_BUCKETS },
     { id: 'type_of_work', label: 'Type of Work', type: 'select', emptyLabel: 'Unknown', value: d.type_of_work, options: TYPE_OF_WORK_OPTIONS },
+    { id: 'street', label: 'Job Address — Street', type: 'text', value: d.street, placeholder: 'usually filled in by a JIS import' },
+    { id: 'city', label: 'City', type: 'text', value: d.city },
+    { id: 'state', label: 'State', type: 'text', value: d.state, placeholder: 'PA' },
+    { id: 'zip', label: 'ZIP', type: 'text', value: d.zip },
   ], data => api('PATCH', `/api/v2/admin/project/${projectId}`, data), 'Save Changes');
 }
 

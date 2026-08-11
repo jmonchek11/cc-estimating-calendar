@@ -356,6 +356,10 @@ async function getProjectDetail(projectId) {
     location: project.location,
     size_bucket: project.size_bucket,
     type_of_work: project.type_of_work,
+    // Structured job-site address — from the JIS title sheet (see
+    // v2/jis.js), distinct from `location` (freeform, captured at
+    // opportunity intake before a JIS exists). Both can be present.
+    street: project.street, city: project.city, state: project.state, zip: project.zip,
     bids: bids
       .map(fmtBid)
       .sort((a, b) => stageRank(a.stage) - stageRank(b.stage)),
@@ -1361,7 +1365,7 @@ async function reactivateBid(id, data, actorId) {
 // Bid submission fields (estimate $, date sent, approved by) are edited on the
 // bid_submission entity, not the bid — the bid's headline is derived from them.
 const ADMIN_EDITABLE = {
-  project:        ['name', 'description', 'location', 'size_bucket', 'type_of_work'],
+  project:        ['name', 'description', 'location', 'size_bucket', 'type_of_work', 'street', 'city', 'state', 'zip'],
   company:        ['name', 'city', 'state', 'type'],
   // Walk-throughs are NOT here — they go through the dedicated add/update/
   // remove walk-through endpoints, which need find-or-create logic for the

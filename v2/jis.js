@@ -191,7 +191,14 @@ async function applyJISImport(payload) {
     const bid = await M.Bid.findById(Number(existing_bid_id)).lean();
     if (!bid) throw new Error('Bid not found');
     bidId = bid._id; projectId = bid.project_id;
-    if (drawings) await M.Bid.updateOne({ _id: bidId }, { $set: { drawings, updated_at: ts() } });
+    const enrichUpd = {};
+    if (drawings) enrichUpd.drawings = drawings;
+    // Fill-if-empty, not overwrite — a due date already set through the
+    // normal workflow (Start Bid, Edit Bid, calendar drag) reflects real
+    // human input and takes priority over the JIS's, but a bid that's never
+    // had one set yet should pick it up here instead of staying blank.
+    if (due_date && !bid.due_date) enrichUpd.due_date = due_date;
+    if (Object.keys(enrichUpd).length) await M.Bid.updateOne({ _id: bidId }, { $set: { ...enrichUpd, updated_at: ts() } });
   } else {
     if (!bid_number) throw new Error('Bid # is required to create a new bid');
     if (!estimator_id || !salesperson_id) throw new Error('Estimator and salesperson are required to create a new bid');
