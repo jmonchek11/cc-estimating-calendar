@@ -310,7 +310,7 @@ router.delete('/api/v2/admin/change-order/:id', requireAdmin, t(req => v2db.dele
 router.delete('/api/v2/admin/override/:id',    requireAdmin, t(req => v2db.removeOverride(req.params.id)));
 router.post('/api/v2/bids/:id/approve-to-bid', t(async req => {
     const actor = await actorOf(req);
-    const r = await v2db.approveToBid(req.params.id, actor);
+    const r = await v2db.approveToBid(req.params.id, actor, { estimator_id: req.body?.estimator_id, pm_id: req.body?.pm_id });
     notify.notifyApprovedToBid(Number(req.params.id), actor?.name);
     notify.notifyOwnerToForwardInvite(Number(req.params.id), actor?.name);
     return r;

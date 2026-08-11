@@ -62,6 +62,11 @@ const BidSchema = new mongoose.Schema({
 
   estimator_id:   { type: Number, default: null },               // FK → TeamMember
   salesperson_id: { type: Number, default: null },               // FK → TeamMember
+  // Early PM assignment — captured at "Approve to Bid" so it's known before
+  // award/job creation rather than only then, closing the gap where jobs
+  // routinely land with no PM assigned. Job.pm_id (set at award) defaults
+  // to this if the award form doesn't override it — see awardSubmission.
+  pm_id:          { type: Number, default: null },               // FK → TeamMember
   sub_estimators: { type: [{ estimator_id: Number, scope: String }], default: [] },
 
   date_received:  { type: String, default: null },

@@ -251,6 +251,10 @@ async function getProjectDetail(projectId) {
     drawing_stage: b.drawing_stage,
     estimator: tm[b.estimator_id] || null,
     salesperson: tm[b.salesperson_id] || null,
+    // Early PM assignment (set at Approve to Bid) — the Job's own pm_id
+    // (set/changeable at award) takes over as authoritative once a Job
+    // exists; jobNode() shows that one instead once the bid is awarded.
+    pm: tm[b.pm_id] || null,
     owner: tm[b.owner_id] || null,
     source: b.source,
     sub_estimators: (b.sub_estimators || []).map(s => ({ ...(tm[s.estimator_id] || {}), scope: s.scope })),
@@ -1113,6 +1117,7 @@ async function updateOpportunity(id, data) {
   if ('source' in data) upd.source = data.source || null;
   if ('estimator_id' in data) upd.estimator_id = data.estimator_id ? Number(data.estimator_id) : null;
   if ('salesperson_id' in data) upd.salesperson_id = data.salesperson_id ? Number(data.salesperson_id) : null;
+  if ('pm_id' in data) upd.pm_id = data.pm_id ? Number(data.pm_id) : null;
   await M.Bid.updateOne({ _id: bid._id }, { $set: upd });
   return { bid_id: bid._id };
 }
@@ -1378,7 +1383,7 @@ const ADMIN_EDITABLE = {
   // remove walk-through endpoints, which need find-or-create logic for the
   // site company/contact (and array-entry targeting) this generic whitelist
   // path can't do.
-  bid:            ['bid_number', 'estimator_id', 'salesperson_id', 'date_received', 'due_date', 'due_time', 'start_date',
+  bid:            ['bid_number', 'estimator_id', 'salesperson_id', 'pm_id', 'date_received', 'due_date', 'due_time', 'start_date',
                    'drawing_stage', 'notes', 'jurisdiction', 'superseded', 'owner_id', 'source', 'rfi_due_date', 'rfi_due_time', 'folder_url',
                    'certified_payroll', 'tax_exempt', 'prevailing_wage'],
   job:            ['job_number', 'pm_id', 'awarded_company_id', 'award_date'],
@@ -1456,7 +1461,9 @@ async function awardSubmission(submissionId, data, actorId) {
   await recomputeBidHeadline(bid._id);   // headline now reflects the winning submission
   await recomputeBidFollowup(bid._id);   // siblings stay pending; bid f/u rolls up from them
   const jobId = await nextId('jobs');
-  const pmId = data.pm_id ? Number(data.pm_id) : null;
+  // Fall back to whoever was assigned as PM back at Approve to Bid, if the
+  // award form doesn't explicitly override it.
+  const pmId = data.pm_id ? Number(data.pm_id) : (bid.pm_id || null);
   await M.Job.create({
     _id: jobId, project_id: bid.project_id, winning_bid_id: bid._id,
     job_number: null,                                  // accounting assigns later
@@ -1568,12 +1575,20 @@ async function closeBid(id, data, actorId) {
 }
 
 // ── Sales/LE approval to move forward, ahead of full bid setup ───────────────
-async function approveToBid(id, actor) {
+// assignment: optional { estimator_id, pm_id } — captured at approval time
+// (prompted before moving to Queue) so both are known well before award,
+// rather than only PM at award and estimator whenever Start Bid happens.
+// Leaving either blank is fine — the assignment stays editable afterward
+// (updateOpportunity) since it's often not known yet at this point either.
+async function approveToBid(id, actor, assignment) {
   const M = getModels();
   const bid = await loadBid(id);
   if (bid.stage !== 'opportunity') throw new Error(`Cannot approve to bid from stage '${bid.stage}'`);
   if (bid.approved_to_bid) throw new Error('Already approved to bid');
-  await M.Bid.updateOne({ _id: bid._id }, { $set: { approved_to_bid: true, approved_to_bid_at: today(), updated_at: ts() } });
+  const upd = { approved_to_bid: true, approved_to_bid_at: today(), updated_at: ts() };
+  if (assignment?.estimator_id) upd.estimator_id = Number(assignment.estimator_id);
+  if (assignment?.pm_id) upd.pm_id = Number(assignment.pm_id);
+  await M.Bid.updateOne({ _id: bid._id }, { $set: upd });
   const proj = await M.Project.findById(bid.project_id).lean();
   await logActivity({
     actor_id: actor?.id, actor_name: actor?.name, action: 'bid.approved_to_bid', entity_type: 'bid', entity_id: bid._id,
@@ -2308,7 +2323,10 @@ async function getBidList(stage) {
       })),
       estimate_amount: b.estimate_amount, date_submitted: b.date_submitted, next_followup_date: b.next_followup_date,
       award_date: b.award_date, awarded_company: b.awarded_company_id ? coName[b.awarded_company_id] : null,
-      job_number: job ? job.job_number : null, pm: job?.pm_id ? tm[job.pm_id] : null,
+      // Before award there's no Job yet, so fall back to the bid's own early
+      // pm_id (set at Approve to Bid) — once a Job exists, its own pm_id
+      // (which may have been changed at award) is authoritative.
+      job_number: job ? job.job_number : null, pm: job?.pm_id ? tm[job.pm_id] : (b.pm_id ? tm[b.pm_id] : null),
       closed_date: b.closed_date, closed_approved_by: b.closed_approved_by, close_reason: b.close_reason,
     };
   });
