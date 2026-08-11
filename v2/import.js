@@ -36,7 +36,7 @@ const TEAM = [
   { _id: 2, name: 'Connor Winters', initials: 'CW', role: 'estimator' },
   { _id: 3, name: 'Pat McCreesh', initials: 'PM', role: 'estimator' },
   { _id: 4, name: 'Doug Pierno', initials: 'DP', role: 'estimator' },
-  { _id: 5, name: 'Scott Yaffee', initials: 'SY', role: 'estimator' },
+  { _id: 5, name: 'Scott Yaffe', initials: 'SY', role: 'estimator' },
   { _id: 6, name: 'Jonathon Chukinas', initials: 'JC', role: 'estimator' },
   { _id: 7, name: 'Brian Fischer', initials: 'BF', role: 'sales' },
   { _id: 8, name: "Jim O'Driscoll", initials: 'JO', role: 'sales' },

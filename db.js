@@ -1525,7 +1525,7 @@ const TEAM_NAMES = [
   ['Connor Winters',    'estimator',   'CW'],
   ['Pat McCreesh',      'estimator',   'PM'],
   ['Doug Pierno',       'estimator',   'DP'],
-  ['Scott Yaffee',      'estimator',   'SY'],
+  ['Scott Yaffe',       'estimator',   'SY'],
   ['Jonathan Chukinas', 'estimator',   'JC'],
   ['Joe Monchek',       'salesperson', 'JM'],
 ];
