@@ -729,7 +729,13 @@ async function createOpportunity({ project_id, project_name, notes, description,
     }
   }
   // Contacts typed in fresh via the picker's "add new" option — create the
-  // Contact record first, then attach it same as an existing pick.
+  // Contact record first, then attach it same as an existing pick. Only a
+  // name comes from that picker (no email/phone/position field there), so
+  // every one created this way is collected into newContacts and handed
+  // back to the caller — the frontend follows up with a prompt to fill in
+  // the rest right after the opportunity is created, since otherwise that
+  // info tends to just never get added.
+  const newContacts = [];
   if (new_contacts_by_company) {
     for (const [companyIdStr, names] of Object.entries(new_contacts_by_company)) {
       const companyId = Number(companyIdStr);
@@ -743,6 +749,7 @@ async function createOpportunity({ project_id, project_name, notes, description,
         const contactId = await nextId('contacts');
         await M.Contact.create({ _id: contactId, company_id: companyId, first_name: first || null, last_name: rest.join(' ') || null, active: 1 });
         await M.BidCustomer.updateOne({ _id: bc._id }, { $addToSet: { contact_ids: contactId } });
+        newContacts.push({ id: contactId, name, company_id: companyId });
       }
     }
   }
@@ -756,7 +763,7 @@ async function createOpportunity({ project_id, project_name, notes, description,
     project_id: pid, bid_id: bidId, actor_id: actorId,
     payload: { project_name: proj.name, stage: startStage, estimator_id: null, salesperson_id: null, due_date: due_date || null },
   });
-  return { project_id: pid, bid_id: bidId };
+  return { project_id: pid, bid_id: bidId, new_contacts: newContacts };
 }
 
 // ── lead → opportunity ("Promote to Opportunity") ─────────────────────────────

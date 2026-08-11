@@ -3154,10 +3154,55 @@ async function actNewOpportunity() {
       pocCount += existingIds.length + newNames.length;
     });
     if (!pocCount) return Promise.reject(new Error('Required: POC (add at least one point of contact for a customer)'));
-    return api('POST', '/api/v2/opportunities', { ...data, contact_ids_by_company, new_contacts_by_company });
+    return api('POST', '/api/v2/opportunities', { ...data, contact_ids_by_company, new_contacts_by_company }).then(result => {
+      // Brand-new contacts typed into the POC picker only ever get a name —
+      // no email/phone/position field there — so without this follow-up
+      // that info tends to just never get added. Opens as its own overlay
+      // (replacing the one showForm is about to tear down anyway) rather
+      // than blocking the opportunity from being created.
+      if (result.new_contacts?.length) openNewContactFollowup(result.new_contacts);
+      return result;
+    });
   }, 'Create Opportunity');
 
   renderOppContactPickers(contactsByCompany);
+}
+function openNewContactFollowup(contacts) {
+  document.getElementById('v2-form-overlay')?.remove();
+  const ov = document.createElement('div');
+  ov.className = 'v2-overlay'; ov.id = 'v2-form-overlay';
+  ov.innerHTML = `
+    <div class="v2-modal" style="max-width:440px">
+      <div class="v2-modal-hd">👤 Add Contact Details<button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">✕</button></div>
+      <div class="v2-modal-bd">
+        <p style="font-size:12.5px;color:var(--text-muted);margin:0 0 10px">You just added ${contacts.length === 1 ? 'a new contact' : `${contacts.length} new contacts`} with just a name — fill in what you have, or skip and add it later from Contacts.</p>
+        ${contacts.map((c, i) => `
+          <div style="border-bottom:1px solid var(--border);padding-bottom:10px;margin-bottom:10px">
+            <div style="font-weight:700;font-size:13px;margin-bottom:6px">${esc(c.name)}</div>
+            <div class="v2-field"><label>Email</label><input id="ncf-email-${i}" type="text" placeholder="name@company.com"></div>
+            <div class="v2-field"><label>Phone</label><input id="ncf-phone-${i}" type="tel" placeholder="215-555-0100" oninput="formatPhoneField(this)"></div>
+            <div class="v2-field"><label>Position</label><input id="ncf-title-${i}" type="text" placeholder="e.g. Project Manager, Purchasing…"></div>
+          </div>`).join('')}
+      </div>
+      <div class="v2-modal-err" id="ncf-err" style="display:none"></div>
+      <div class="v2-modal-ft">
+        <button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">Skip</button>
+        <button class="v2-btn green" id="ncf-save-btn">Save</button>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+  document.getElementById('ncf-save-btn').onclick = async () => {
+    try {
+      await Promise.all(contacts.map((c, i) => {
+        const email = document.getElementById(`ncf-email-${i}`)?.value.trim();
+        const phone = document.getElementById(`ncf-phone-${i}`)?.value.trim();
+        const title = document.getElementById(`ncf-title-${i}`)?.value.trim();
+        if (!email && !phone && !title) return null; // nothing entered for this one — nothing to save
+        return api('PATCH', `/api/v2/contacts/${c.id}`, { email: email || undefined, phone: phone || undefined, title: title || undefined });
+      }));
+      ov.remove();
+    } catch (e) { const el = document.getElementById('ncf-err'); el.textContent = e.message; el.style.display = 'block'; }
+  };
 }
 
 // A lead is deliberately lighter-weight than an opportunity — "we heard
