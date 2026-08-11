@@ -3110,7 +3110,7 @@ async function actNewOpportunity() {
     { id: 'due_time', label: 'Due Time (optional)', type: 'time' },
     { id: 'location', label: 'Job Location', type: 'text', required: true, placeholder: 'City, State or site address…' },
     { id: 'type_of_work', label: 'Type of Work', type: 'select', required: true, options: TYPE_OF_WORK_OPTIONS },
-    { id: 'size_bucket', label: 'Project Size', type: 'select', required: true, options: PROJECT_SIZE_BUCKETS },
+    { id: 'size_bucket', label: 'Project Size', type: 'select', emptyLabel: 'Unknown / not yet known', options: PROJECT_SIZE_BUCKETS },
     { id: 'description', label: 'Project Description', type: 'textarea', required: true, placeholder: 'Brief description of the scope of work…' },
     { id: 'company_ids', label: 'Customer(s) — GC, owner, etc. (add as many as apply)', type: 'company', multi: true, required: true, newKey: 'new_companies', options: companyOpts(), placeholder: 'Type customer name…',
       onChange: () => renderOppContactPickers(contactsByCompany) },
