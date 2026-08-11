@@ -274,8 +274,14 @@ router.post('/api/v2/bids/:id/submit',        t(req => v2db.submitBid(req.params
 // edit that specific one — see requireAdminOrAssigned above.
 router.patch('/api/v2/admin/:entity/:id',     requireAdminOrAssigned, t(async req => {
     const oldBid = req.params.entity === 'bid' ? await v2db.loadBid(req.params.id).catch(() => null) : null;
+    const oldCO = req.params.entity === 'change_order' ? await v2db.loadCO(req.params.id).catch(() => null) : null;
     const r = await v2db.adminUpdate(req.params.entity, req.params.id, req.body);
-    if (req.params.entity === 'bid') notifyAssignmentDiff(Number(req.params.id), oldBid, req.body, req.session.userId);
+    if (req.params.entity === 'bid') {
+      notifyAssignmentDiff(Number(req.params.id), oldBid, req.body, req.session.userId);
+      if ('due_date' in req.body) notify.notifyDueDateChanged('bid', req.params.id, oldBid?.due_date || null, req.body.due_date || null, req.session.userId);
+    } else if (req.params.entity === 'change_order' && 'due_date' in req.body) {
+      notify.notifyDueDateChanged('co', req.params.id, oldCO?.due_date || null, req.body.due_date || null, req.session.userId);
+    }
     return r;
   },
   async (req) => {
@@ -505,7 +511,15 @@ router.post('/api/v2/change-orders/:id/reopen',       t(req => v2db.reopenCO(req
   async (req) => ({ action: 'co.reopen', summary: `Reopened CO ${await v2db.coLabel(req.params.id)}`, entity_type: 'change_order', entity_id: Number(req.params.id) })));
 router.post('/api/v2/change-orders/:id/revise',       t(req => v2db.reviseCO(req.params.id, req.body),
   async (req, r) => ({ action: 'co.revise', summary: `Revised CO ${await v2db.coLabel(req.params.id)} → new CO ${await v2db.coLabel(r.co_id)}`, entity_type: 'change_order', entity_id: r.co_id })));
-router.patch('/api/v2/bids/:id/due-date',             t(async req => v2db.updateBidDueDate(req.params.id, req.body.due_date, await actorOf(req))));
-router.patch('/api/v2/change-orders/:id/due-date',    t(async req => v2db.updateCoDueDate(req.params.id, req.body.due_date, await actorOf(req))));
+router.patch('/api/v2/bids/:id/due-date',             t(async req => {
+    const r = await v2db.updateBidDueDate(req.params.id, req.body.due_date, await actorOf(req));
+    notify.notifyDueDateChanged('bid', req.params.id, r.due_date_before, r.due_date, req.session.userId);
+    return r;
+  }));
+router.patch('/api/v2/change-orders/:id/due-date',    t(async req => {
+    const r = await v2db.updateCoDueDate(req.params.id, req.body.due_date, await actorOf(req));
+    notify.notifyDueDateChanged('co', req.params.id, r.due_date_before, r.due_date, req.session.userId);
+    return r;
+  }));
 
 module.exports = router;

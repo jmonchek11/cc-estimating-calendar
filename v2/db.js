@@ -1125,7 +1125,7 @@ async function updateBidDueDate(id, due_date, actor) {
   await logActivity({ actor_id: actor?.id, actor_name: actor?.name, action: 'bid.due_date_change',
     summary: `Changed due date on bid #${bid._id}${bid.bid_number ? ' (' + bid.bid_number + ')' : ''} from ${before || 'none'} to ${due_date || 'none'}`,
     entity_type: 'bid', entity_id: bid._id, undo: { bid_id: bid._id, due_date_before: before } });
-  return { bid_id: bid._id, due_date: due_date || null };
+  return { bid_id: bid._id, due_date: due_date || null, due_date_before: before };
 }
 async function updateCoDueDate(id, due_date, actor) {
   const M = getModels();
@@ -1135,7 +1135,7 @@ async function updateCoDueDate(id, due_date, actor) {
   await logActivity({ actor_id: actor?.id, actor_name: actor?.name, action: 'co.due_date_change',
     summary: `Changed due date on CO #${co._id} (${co.co_number}) from ${before || 'none'} to ${due_date || 'none'}`,
     entity_type: 'change_order', entity_id: co._id, undo: { co_id: co._id, due_date_before: before } });
-  return { co_id: co._id, due_date: due_date || null };
+  return { co_id: co._id, due_date: due_date || null, due_date_before: before };
 }
 
 // Sub-estimators — breaking a large bid into systems (Fire Alarm, Lighting

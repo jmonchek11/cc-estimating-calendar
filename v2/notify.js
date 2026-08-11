@@ -291,4 +291,42 @@ async function notifyFollowup(parentType, parentId, followupData, actorId) {
   } catch (e) { console.error('[v2 notify] followup email failed:', e.message); }
 }
 
-module.exports = { bidEmailShape, coEmailShape, emailShapeForReminder, notifyAwarded, notifyRoleAward, notifyApprovedToBid, notifyOwnerToForwardInvite, notifyAssigned, notifyWalkthroughSet, notifyWalkthroughAssignees, notifyFollowup, bidRecipients, walkthroughContactInfo, emailForV2Member };
+// A bid/CO's due date changed (calendar drag, or edited directly) — notify
+// whoever's actually on it. Only fires for Active Bids/Active Change Orders
+// (per the team's ask — an opportunity's due date is still being nailed
+// down and changes routinely, not worth an email every time), and only
+// when the date actually changed. Gated on the 'reminder' category (the
+// closest existing pref — there's no dedicated "due date" one) and skips
+// whoever made the change themselves.
+async function notifyDueDateChanged(kind, id, oldDate, newDate, actorId) {
+  if (oldDate === newDate) return;
+  try {
+    const M = getModels();
+    let shape = null, recipients = [];
+    const actorIdNum = actorId ? Number(actorId) : null;
+    if (kind === 'bid') {
+      const bid = await M.Bid.findById(Number(id)).lean();
+      if (!bid || !['active_bid', 'submitted'].includes(bid.stage)) return;
+      shape = await bidEmailShape(bid._id);
+      recipients = await bidRecipients(bid, 'reminder');
+    } else {
+      const co = await M.ChangeOrder.findById(Number(id)).lean();
+      if (!co || !['active_co', 'submitted_co'].includes(co.stage)) return;
+      shape = await coEmailShape(co._id);
+      const job = await M.Job.findById(co.job_id).lean();
+      const ids = [...new Set([co.estimator_id, job?.pm_id].filter(Boolean))];
+      const members = (await Promise.all(ids.map(emailForV2Member))).filter(Boolean);
+      recipients = members.filter(m => mailer.wantsNotification(m, 'reminder'));
+    }
+    if (!shape || !recipients.length) return;
+    const actor = actorIdNum ? await maindb.getMember(actorIdNum) : null;
+    const actorName = actor?.name || 'Someone';
+    for (const r of recipients) {
+      if (actorIdNum && r.id === actorIdNum) continue;
+      const { subject, html } = mailer.emailDueDateChanged(shape, oldDate, newDate, r.name, actorName, kind);
+      await mailer.sendMail({ to: r.email, subject, html });
+    }
+  } catch (e) { console.error('[v2 notify] due-date-changed email failed:', e.message); }
+}
+
+module.exports = { bidEmailShape, coEmailShape, emailShapeForReminder, notifyAwarded, notifyRoleAward, notifyApprovedToBid, notifyOwnerToForwardInvite, notifyAssigned, notifyWalkthroughSet, notifyWalkthroughAssignees, notifyFollowup, notifyDueDateChanged, bidRecipients, walkthroughContactInfo, emailForV2Member };

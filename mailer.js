@@ -274,6 +274,23 @@ function emailAssigned(bid, recipientName, actorName, role, scope) {
   };
 }
 
+function emailDueDateChanged(bid, oldDate, newDate, recipientName, actorName, kind) {
+  const label = bid.project_name || bid.bid_number || 'Unnamed';
+  const noun = kind === 'co' ? 'change order' : 'bid';
+  const change = !oldDate ? `set to <strong>${fmtDate(newDate)}</strong>`
+    : !newDate ? `removed (was <strong>${fmtDate(oldDate)}</strong>)`
+    : `changed from <strong>${fmtDate(oldDate)}</strong> to <strong>${fmtDate(newDate)}</strong>`;
+  return {
+    subject: `📅 Due date changed — ${label}`,
+    html: base(`
+      ${iconHeading(`${APP_URL}/icon-reminder.png`, 'Due Date Changed')}
+      <p>Hi <strong>${recipientName}</strong>, <strong>${actorName}</strong> ${change} the due date on this ${noun}.</p>
+      ${bidTable(bid)}
+      ${actionButtons(bid, { href: APP_URL, label: 'Open App' })}
+    `),
+  };
+}
+
 function emailFollowup(bid, note, nextDate, loggedByName) {
   return {
     subject: `Follow-up logged — ${bid.project_name || bid.bid_number || 'Unnamed'}`,
@@ -629,4 +646,4 @@ function emailIdeaStatusChanged(idea, newStatus) {
   };
 }
 
-module.exports = { sendMail, emailAssigned, emailFollowup, emailAwarded, emailRoleAwardNotice, emailApprovedToBid, emailForwardBidInvite, emailReminder, emailWalkthroughSet, emailWalkthroughAssigned, emailWalkthroughReminder, emailDigest, emailIdeaSubmitted, emailIdeaStatusChanged, wantsNotification, NOTIFICATION_CATEGORIES };
+module.exports = { sendMail, emailAssigned, emailFollowup, emailAwarded, emailRoleAwardNotice, emailApprovedToBid, emailForwardBidInvite, emailDueDateChanged, emailReminder, emailWalkthroughSet, emailWalkthroughAssigned, emailWalkthroughReminder, emailDigest, emailIdeaSubmitted, emailIdeaStatusChanged, wantsNotification, NOTIFICATION_CATEGORIES };
