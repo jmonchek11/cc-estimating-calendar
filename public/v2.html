@@ -2169,7 +2169,7 @@ async function renderFlyout(fresh) {
     // Not set here — bidNode() already shows the "Open in OneDrive" button
     // in the card itself, right under the bid #, so a second one up in the
     // header would just be redundant.
-    body = bidNode(b);
+    body = bidNode(b, d);
     if (b.stage === 'awarded') { const job = d.jobs.find(j => j.winning_bid_id === b.id); if (job) body += jobNode(job); }
   } else {
     let co = null, job = null;
@@ -2211,7 +2211,7 @@ function renderHierarchy(d) {
   const jobByWinningBid = {};
   d.jobs.forEach(j => { if (j.winning_bid_id) jobByWinningBid[j.winning_bid_id] = j; });
   for (const b of d.bids) {
-    html += bidNode(b);
+    html += bidNode(b, d);
     const job = jobByWinningBid[b.id];
     if (job) html += jobNode(job);
   }
@@ -2304,7 +2304,29 @@ function activitySectionHtml(b) {
   </div>`;
 }
 
-function bidNode(b) {
+// Opportunity-intake fields (Job Location, Type of Work, Project Size,
+// Description) — these live on the Project, not the Bid, and previously
+// only showed on the full project page, not the bid card/flyout most
+// people actually open. Shows whichever pieces are present; renders
+// nothing if the project has none of them set.
+function projectDetailsHtml(proj) {
+  if (!proj) return '';
+  const bits = [];
+  if (proj.location) bits.push(`📍 ${esc(proj.location)}`);
+  if (proj.type_of_work) bits.push(`🏗️ ${esc(proj.type_of_work)}`);
+  if (proj.size_bucket) bits.push(`📐 ${esc(proj.size_bucket)}`);
+  if (!bits.length && !proj.description) return '';
+  return `<div style="font-size:12px;margin-top:4px">
+    ${bits.length ? `<div style="color:var(--text-muted)">${bits.join(' · ')}</div>` : ''}
+    ${proj.description ? `<div style="color:var(--text-muted);font-style:italic;margin-top:2px">${esc(proj.description)}</div>` : ''}
+  </div>`;
+}
+// `proj` (the parent project — Location/Type of Work/Project Size/
+// Description all live there, not on the bid) is optional so existing
+// call sites that don't have it handy don't break; when given, those
+// intake fields show right on the card instead of only on the full
+// project page.
+function bidNode(b, proj) {
   const isAwarded = b.stage === 'awarded';
   const dueOverdue = ['opportunity', 'active_bid'].includes(b.stage) && b.due_date && b.due_date < today;
   const metaBits = [];
@@ -2341,6 +2363,7 @@ function bidNode(b) {
         </div>` : ''}
       </div>
       ${metaBits.length ? `<div class="bc-meta">${metaBits.join(' · ')}</div>` : ''}
+      ${projectDetailsHtml(proj)}
       <div class="bc-divider"></div>
       ${customersSectionHtml(b)}
       <div class="bc-divider"></div>
