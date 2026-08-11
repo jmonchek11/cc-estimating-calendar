@@ -8,6 +8,7 @@
 const express = require('express');
 const v2db = require('./db');
 const jis = require('./jis');
+const bulkAddr = require('./bulkAddressImport');
 const notify = require('./notify');
 const maindb = require('../db');   // v1 db — for the logged-in user's admin flag
 const directory = require('./directory');
@@ -422,6 +423,21 @@ router.post('/api/v2/jis/preview', async (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 router.post('/api/v2/jis/apply', t(req => jis.applyJISImport(req.body)));
+
+// Retroactive job-address backfill (see v2/bulkAddressImport.js) — admin
+// compiles a spreadsheet, this matches each row to an existing Project by
+// Bid # (preferred) or fuzzy project-name match; nothing is written until
+// the admin reviews the matches and confirms via /apply. Admin-gated since
+// it's a bulk write across projects, unlike the single-bid JIS import above.
+router.post('/api/v2/admin/bulk-address-import/preview', requireAdmin, async (req, res) => {
+  try {
+    if (!req.body.file_base64) return res.status(400).json({ error: 'No file provided' });
+    const buffer = Buffer.from(req.body.file_base64, 'base64');
+    res.json(await bulkAddr.previewBulkAddressImport(buffer));
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+router.post('/api/v2/admin/bulk-address-import/apply', requireAdmin, t(req => bulkAddr.applyBulkAddressImport(req.body.rows),
+  (req, r) => ({ action: 'admin.bulk_address_import', summary: `Bulk-imported job addresses for ${r.applied} project(s)`, entity_type: 'project', entity_id: null })));
 
 // ── Contacts ──────────────────────────────────────────────────────────────────
 router.get('/api/v2/contacts',           async (req, res) => { try { res.json(await v2db.getContacts(req.query)); } catch (e) { res.status(500).json({ error: e.message }); } });

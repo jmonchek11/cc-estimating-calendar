@@ -37,11 +37,18 @@ function splitCityStateZip(v) {
   if (m) return { city: m[1].trim(), state: m[2].toUpperCase(), zip: m[3] };
   return { city: v.trim(), state: null, zip: null };
 }
+// Generic construction/project vocabulary — long enough (>=4 chars) to pass
+// the word-length filter below but carries no distinguishing signal on its
+// own, so two otherwise-unrelated projects that both happen to say e.g.
+// "Project" or "Building" in their name would otherwise score as a match.
+// Real caught case: "Totally Unknown Project XYZ" vs "West Chester
+// Project" — both contain "Project" and nothing else in common.
+const PROJ_MATCH_STOPWORDS = new Set(['project', 'building', 'phase', 'renovation', 'addition', 'expansion', 'campus', 'building.', 'construction']);
 function projMatchScore(qn, on) {
   if (!qn || !on) return null;
   if (on === qn) return 0;
   if (on.includes(qn) || qn.includes(on)) return 1;
-  const words = qn.split(' ').filter(w => w.length >= 4);
+  const words = qn.split(' ').filter(w => w.length >= 4 && !PROJ_MATCH_STOPWORDS.has(w));
   if (words.some(w => on.includes(w))) return 2;
   return null;
 }
@@ -230,4 +237,4 @@ async function applyJISImport(payload) {
   return { bid_id: bidId, project_id: projectId };
 }
 
-module.exports = { parseTitleSheet, previewJISImport, applyJISImport };
+module.exports = { parseTitleSheet, previewJISImport, applyJISImport, projMatchScore };

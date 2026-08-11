@@ -4023,6 +4023,7 @@ async function showHealth() {
       <div style="font-size:13px;color:var(--text-muted)">
         ${h.counts.projects} projects · ${h.counts.bids} bids · ${h.counts.jobs} jobs · ${h.counts.change_orders} COs · ${h.counts.companies} companies
       </div>
+      ${admin ? `<button class="v2-btn amber" style="margin-left:auto;padding:6px 12px;font-size:12px" onclick="actBulkAddressImport()">📍 Bulk Import Job Addresses</button>` : ''}
     </div>
 
     ${(h.overrides && h.overrides.length) ? card('Saved cleanup (survives re-import)', h.overrides.length, 'these replay automatically on every import — undo one to stop it (re-import to fully revert merges/renames)',
@@ -5112,6 +5113,101 @@ function actImportJIS(targetBidId) {
       ov.remove();
       renderJISReview(preview, targetBidId);
     } catch (e) { errEl.textContent = e.message; errEl.style.display = 'block'; }
+  };
+}
+
+// ── Bulk job-address backfill (admin, Data Health) — see v2/bulkAddressImport.js.
+// Same upload → preview → review-and-correct → apply shape as the JIS
+// importer, but across a whole spreadsheet of rows instead of one bid.
+let BULK_ADDR_STATE = { rows: [], projects: [] };
+function actBulkAddressImport() {
+  document.getElementById('v2-form-overlay')?.remove();
+  const ov = document.createElement('div');
+  ov.className = 'v2-overlay'; ov.id = 'v2-form-overlay';
+  ov.innerHTML = `
+    <div class="v2-modal" style="max-width:460px">
+      <div class="v2-modal-hd">📍 Bulk Import Job Addresses<button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">✕</button></div>
+      <div class="v2-modal-bd">
+        <p style="font-size:13px;color:var(--text-muted);margin:0 0 8px">Upload a spreadsheet with a header row containing a <strong>Project Name</strong> or <strong>Bid #</strong> column, plus any of <strong>Street</strong>, <strong>City</strong>, <strong>State</strong>, <strong>Zip</strong>. Each row is matched to an existing project — you'll review and can correct matches before anything is saved.</p>
+        <input type="file" id="bulk-addr-file-input" accept=".xlsx,.xls,.csv" style="font-size:13px">
+        <div id="bulk-addr-upload-err" style="color:#dc2626;font-size:12px;display:none;margin-top:6px"></div>
+      </div>
+      <div class="v2-modal-ft">
+        <button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">Cancel</button>
+        <button class="v2-btn amber" id="bulk-addr-upload-btn">Read File →</button>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+  document.getElementById('bulk-addr-upload-btn').onclick = async () => {
+    const input = document.getElementById('bulk-addr-file-input');
+    const errEl = document.getElementById('bulk-addr-upload-err');
+    if (!input.files.length) { errEl.textContent = 'Choose a file first'; errEl.style.display = 'block'; return; }
+    const file = input.files[0];
+    try {
+      const base64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result.split(',')[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const [rows, projects] = await Promise.all([
+        api('POST', '/api/v2/admin/bulk-address-import/preview', { file_base64: base64 }),
+        api('GET', '/api/v2/projects'),
+      ]);
+      BULK_ADDR_STATE = { rows, projects: projects.map(p => ({ id: p.id, name: p.name })) };
+      renderBulkAddressReview();
+    } catch (e) { errEl.textContent = e.message; errEl.style.display = 'block'; }
+  };
+}
+function bulkAddrMatchLabel(matchType) {
+  if (matchType === 'bid_number') return '<span style="color:#166534;font-weight:700">matched by Bid #</span>';
+  if (matchType === 'name_exact') return '<span style="color:#166534;font-weight:700">matched by name</span>';
+  if (matchType === 'name_fuzzy') return '<span style="color:#92400e;font-weight:700">fuzzy match — check this</span>';
+  return '<span style="color:#dc2626;font-weight:700">no match — pick one</span>';
+}
+function renderBulkAddressReview() {
+  document.getElementById('v2-form-overlay')?.remove();
+  const ov = document.createElement('div');
+  ov.className = 'v2-overlay'; ov.id = 'v2-form-overlay';
+  const { rows, projects } = BULK_ADDR_STATE;
+  const matchedCount = rows.filter(r => r.matched_project_id).length;
+  ov.innerHTML = `
+    <div class="v2-modal" style="max-width:640px;max-height:88vh;overflow-y:auto">
+      <div class="v2-modal-hd">📍 Review Address Matches<button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">✕</button></div>
+      <div class="v2-modal-bd">
+        <p style="font-size:12.5px;color:var(--text-muted);margin:0 0 10px">${rows.length} row${rows.length!==1?'s':''} with an address to import, ${matchedCount} auto-matched. Correct any wrong or missing match below, then apply — rows left unmatched are skipped.</p>
+        ${rows.length ? rows.map((r, i) => `
+          <div style="border-bottom:1px solid var(--border);padding:10px 0">
+            <div style="font-size:12px;color:var(--text-muted)">Row ${r.row}${r.input_bid_number ? ` · Bid # ${esc(r.input_bid_number)}` : ''}${r.input_project_name ? ` · "${esc(r.input_project_name)}"` : ''}</div>
+            <div style="font-size:13px;margin:3px 0">${[r.street, [r.city, [r.state, r.zip].filter(Boolean).join(' ')].filter(Boolean).join(', ')].filter(Boolean).join(', ')}</div>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px">
+              <span style="font-size:11px">${bulkAddrMatchLabel(r.match_type)}</span>
+              <select id="bulk-addr-proj-${i}" style="font-size:12px;flex:1;min-width:180px" onchange="BULK_ADDR_STATE.rows[${i}].matched_project_id = this.value ? Number(this.value) : null">
+                <option value="">— skip this row —</option>
+                ${projects.map(p => `<option value="${p.id}" ${r.matched_project_id === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
+              </select>
+            </div>
+            ${r.current_address && (r.current_address.street || r.current_address.city) ? `<div style="font-size:11px;color:var(--text-muted);margin-top:3px">Currently on file: ${esc([r.current_address.street, r.current_address.city].filter(Boolean).join(', ') || '—')} — will be overwritten</div>` : ''}
+          </div>`).join('') : '<div style="color:var(--text-muted);font-size:13px">No rows with an address and a name/bid # match found — check the spreadsheet\'s column headers.</div>'}
+      </div>
+      <div class="v2-modal-err" id="bulk-addr-err" style="display:none"></div>
+      <div class="v2-modal-ft">
+        <button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">Cancel</button>
+        <button class="v2-btn amber" id="bulk-addr-apply-btn" ${rows.length ? '' : 'disabled'}>Apply</button>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+  document.getElementById('bulk-addr-apply-btn').onclick = async () => {
+    const payload = BULK_ADDR_STATE.rows.filter(r => r.matched_project_id).map(r => ({
+      project_id: r.matched_project_id, street: r.street, city: r.city, state: r.state, zip: r.zip,
+    }));
+    if (!payload.length) { const e = document.getElementById('bulk-addr-err'); e.textContent = 'No rows have a project selected.'; e.style.display = 'block'; return; }
+    try {
+      const result = await api('POST', '/api/v2/admin/bulk-address-import/apply', { rows: payload });
+      ov.remove();
+      alert(`Imported addresses for ${result.applied} project${result.applied!==1?'s':''}.`);
+      showHealth();
+    } catch (e) { const el = document.getElementById('bulk-addr-err'); el.textContent = e.message; el.style.display = 'block'; }
   };
 }
 
