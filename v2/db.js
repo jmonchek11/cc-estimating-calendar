@@ -2748,6 +2748,26 @@ async function getDashboard(userId, mineOnly) {
   };
 }
 
+// Dashboard's "Jobs awaiting Job #" box, clicked — always scoped to the
+// logged-in user specifically (same jobOwner rule as getDashboard's "mine"
+// filter: pm_id, falling back to the winning bid's estimator/salesperson),
+// regardless of whether the dashboard itself is currently on My View or
+// All. The point is self-service: "what do *I* still need to go enter",
+// not whatever the toggle happens to be set to.
+async function getMyPendingJobs(userId) {
+  const M = getModels();
+  const uid = Number(userId);
+  if (!uid) return [];
+  const [jobs, bids, projects] = await Promise.all([M.Job.find({ job_number: null }).lean(), M.Bid.find().lean(), M.Project.find().lean()]);
+  const bidById = {}; bids.forEach(b => bidById[b._id] = b);
+  const pName = {}; projects.forEach(p => pName[p._id] = p.name);
+  const jobOwner = (j) => j.pm_id || bidById[j.winning_bid_id]?.estimator_id || bidById[j.winning_bid_id]?.salesperson_id || null;
+  return jobs.filter(j => jobOwner(j) === uid).map(j => ({
+    id: j._id, project_id: j.project_id, project: pName[j.project_id] || '—',
+    bid_number: bidById[j.winning_bid_id]?.bid_number || null, created_at: j.created_at,
+  })).sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
+}
+
 async function getDataHealth() {
   const M = getModels();
   const [projects, bids, jobs, cos, companies, bidCustomers, contacts, submissions, reminders, members] = await Promise.all([
@@ -3331,6 +3351,7 @@ module.exports = {
   createOpportunity, createDirectBid, startBid, submitBid, addSubmission, reactivateBid, addBidCustomers, updateOpportunity, adminUpdate,
   promoteLead, demoteToLead,
   getReleaseNotes, createReleaseNote, deleteReleaseNote, getUnseenReleaseCount, markReleasesSeen,
+  getMyPendingJobs,
   getContacts, getContactDetail, createContact, updateContact, deleteContact, getContactBids, getCompanyBids,
   addBidCustomerContact, removeBidCustomerContact,
   awardSubmission, notAwardSubmission, closeBid, approveToBid, unapproveToBid, logFollowupV2, updateFollowup,

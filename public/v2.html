@@ -1906,7 +1906,7 @@ async function renderDashboard() {
       ${stat('Active Change Orders', d.activeCoCount, '', '#f97316', "renderCoList('active_co')")}
       ${stat('Awarded (YTD)', d.awardedYTD.count, fmt$(d.awardedYTD.value) + (d.awardedYTD.missingAwardDate ? ` · ${d.awardedYTD.missingAwardDate} missing award date` : ''), '#166534', 'showAwardedByMonth()')}
       ${stat('Overdue Follow-ups', d.overdueBidCount + d.overdueCoCount, `${d.overdueBidCount} bid · ${d.overdueCoCount} CO`, (d.overdueBidCount+d.overdueCoCount) ? '#dc2626' : '#166534')}
-      ${stat('Jobs awaiting Job #', d.jobsPending, DASH_MINE ? 'assigned to you' : 'from accounting', '#0891b2')}
+      ${stat('Jobs awaiting Job #', d.jobsPending, DASH_MINE ? 'assigned to you' : '', '#0891b2', 'openMyPendingJobsModal()')}
     </div>
     <div class="dashboard-grid">
       <div class="card">
@@ -1984,6 +1984,43 @@ function toggleAwardedMonth(month) {
   if (AWARDED_MONTHS_OPEN.has(month)) AWARDED_MONTHS_OPEN.delete(month); else AWARDED_MONTHS_OPEN.add(month);
   const body = document.getElementById('awarded-by-month-body');
   if (body) body.innerHTML = awardedByMonthHtml(DASH_DATA.awardedYTD.byMonth || []);
+}
+
+// "Jobs awaiting Job #" box, clicked — always your own jobs specifically
+// (PM, or falling back to the winning bid's estimator/salesperson),
+// regardless of whether the dashboard is on My View or All, so this is a
+// quick self-service way to see exactly what you personally still need to
+// go enter — not the whole company's backlog.
+async function openMyPendingJobsModal() {
+  document.getElementById('v2-form-overlay')?.remove();
+  const ov = document.createElement('div');
+  ov.className = 'v2-overlay'; ov.id = 'v2-form-overlay';
+  ov.innerHTML = `
+    <div class="v2-modal" style="max-width:480px;max-height:85vh;overflow-y:auto">
+      <div class="v2-modal-hd">🔢 Your Jobs Awaiting a Job #<button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">✕</button></div>
+      <div class="v2-modal-bd" id="my-pending-jobs-body"><div style="color:var(--text-muted);font-size:13px">Loading…</div></div>
+    </div>`;
+  document.body.appendChild(ov);
+  let jobs = [];
+  try { jobs = await api('GET', '/api/v2/jobs-pending-mine'); }
+  catch (e) { document.getElementById('my-pending-jobs-body').innerHTML = `<div class="err-card">${esc(e.message)}</div>`; return; }
+  const body = document.getElementById('my-pending-jobs-body');
+  if (!body) return; // modal was closed while the request was in flight
+  body.innerHTML = jobs.length ? jobs.map(j => `
+    <div class="proj-row">
+      <div style="flex:1;min-width:0;cursor:pointer" onclick="document.getElementById('v2-form-overlay').remove();renderProjectPage(${j.project_id})">
+        <div class="proj-name">${esc(j.project)}${j.bid_number ? ` <span style="color:var(--text-muted);font-weight:400;font-size:12px">#${esc(j.bid_number)}</span>` : ''}</div>
+      </div>
+      <button class="v2-btn amber" style="padding:4px 10px;font-size:11px;flex-shrink:0" onclick="actSetJobNumberFromModal(${j.id})">Set Job #</button>
+    </div>`).join('') : '<div style="color:#166534;font-size:13px">Nothing waiting on you — all your jobs have numbers.</div>';
+}
+// Same form as actSetJobNumber, but re-opens this modal afterward (refreshed)
+// instead of leaving the user on whatever page they started from — the
+// point of this modal is knocking several of these out in one sitting.
+function actSetJobNumberFromModal(jobId) {
+  showForm('Set Job # (from accounting)', [
+    { id: 'job_number', label: 'Job #', type: 'text', required: true, placeholder: '26-XXXX' },
+  ], async data => { await api('PATCH', `/api/v2/jobs/${jobId}`, data); openMyPendingJobsModal(); }, 'Save', 'amber');
 }
 
 // ── Dedicated project page (full hierarchy on its own page) ───────────────────
