@@ -65,6 +65,11 @@ router.get('/api/v2/jobs-pending-mine', async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+router.get('/api/v2/jobs-pending-all', async (req, res) => {
+  try { res.json(await v2db.getAllPendingJobs()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.get('/api/v2/projects/:id', async (req, res) => {
   try {
     const detail = await v2db.getProjectDetail(req.params.id);

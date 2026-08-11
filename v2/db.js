@@ -2768,6 +2768,31 @@ async function getMyPendingJobs(userId) {
   })).sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
 }
 
+// Same box on the dashboard's All view — every job awaiting a job #,
+// company-wide, with the assigned PM (falling back to the winning bid's
+// estimator/salesperson, same rule as everywhere else this "who owns this
+// job" question comes up) so the list can be sorted/filtered by PM,
+// including an explicit "no PM assigned" bucket.
+async function getAllPendingJobs() {
+  const M = getModels();
+  const [jobs, bids, projects, members] = await Promise.all([
+    M.Job.find({ job_number: null }).lean(), M.Bid.find().lean(), M.Project.find().lean(), M.TeamMember.find().lean(),
+  ]);
+  const bidById = {}; bids.forEach(b => bidById[b._id] = b);
+  const pName = {}; projects.forEach(p => pName[p._id] = p.name);
+  const tmName = {}; members.forEach(m => tmName[m._id] = m.name);
+  const jobOwner = (j) => j.pm_id || bidById[j.winning_bid_id]?.estimator_id || bidById[j.winning_bid_id]?.salesperson_id || null;
+  return jobs.map(j => {
+    const ownerId = jobOwner(j);
+    return {
+      id: j._id, project_id: j.project_id, project: pName[j.project_id] || '—',
+      bid_number: bidById[j.winning_bid_id]?.bid_number || null,
+      pm_id: ownerId, pm: ownerId ? (tmName[ownerId] || '?') : null,
+      created_at: j.created_at,
+    };
+  }).sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
+}
+
 async function getDataHealth() {
   const M = getModels();
   const [projects, bids, jobs, cos, companies, bidCustomers, contacts, submissions, reminders, members] = await Promise.all([
@@ -3351,7 +3376,7 @@ module.exports = {
   createOpportunity, createDirectBid, startBid, submitBid, addSubmission, reactivateBid, addBidCustomers, updateOpportunity, adminUpdate,
   promoteLead, demoteToLead,
   getReleaseNotes, createReleaseNote, deleteReleaseNote, getUnseenReleaseCount, markReleasesSeen,
-  getMyPendingJobs,
+  getMyPendingJobs, getAllPendingJobs,
   getContacts, getContactDetail, createContact, updateContact, deleteContact, getContactBids, getCompanyBids,
   addBidCustomerContact, removeBidCustomerContact,
   awardSubmission, notAwardSubmission, closeBid, approveToBid, unapproveToBid, logFollowupV2, updateFollowup,

@@ -1906,7 +1906,7 @@ async function renderDashboard() {
       ${stat('Active Change Orders', d.activeCoCount, '', '#f97316', "renderCoList('active_co')")}
       ${stat('Awarded (YTD)', d.awardedYTD.count, fmt$(d.awardedYTD.value) + (d.awardedYTD.missingAwardDate ? ` · ${d.awardedYTD.missingAwardDate} missing award date` : ''), '#166534', 'showAwardedByMonth()')}
       ${stat('Overdue Follow-ups', d.overdueBidCount + d.overdueCoCount, `${d.overdueBidCount} bid · ${d.overdueCoCount} CO`, (d.overdueBidCount+d.overdueCoCount) ? '#dc2626' : '#166534')}
-      ${stat('Jobs awaiting Job #', d.jobsPending, DASH_MINE ? 'assigned to you' : '', '#0891b2', 'openMyPendingJobsModal()')}
+      ${stat('Jobs awaiting Job #', d.jobsPending, DASH_MINE ? 'assigned to you' : '', '#0891b2', DASH_MINE ? 'openMyPendingJobsModal()' : 'openAllPendingJobsModal()')}
     </div>
     <div class="dashboard-grid">
       <div class="card">
@@ -2021,6 +2021,74 @@ function actSetJobNumberFromModal(jobId) {
   showForm('Set Job # (from accounting)', [
     { id: 'job_number', label: 'Job #', type: 'text', required: true, placeholder: '26-XXXX' },
   ], async data => { await api('PATCH', `/api/v2/jobs/${jobId}`, data); openMyPendingJobsModal(); }, 'Save', 'amber');
+}
+
+// Dashboard's All view — every job company-wide still awaiting a job #,
+// sortable by clicking a column header (same pattern as the Contacts list)
+// and filterable by PM, including an explicit "No PM Assigned" option —
+// those are exactly the ones nobody's on the hook for yet, so being able
+// to isolate them matters as much as sorting by a specific PM's name.
+let PENDING_JOBS_ALL_STATE = { rows: [], sortKey: 'created_at', sortDir: 1, pmFilter: '' };
+async function openAllPendingJobsModal() {
+  document.getElementById('v2-form-overlay')?.remove();
+  const ov = document.createElement('div');
+  ov.className = 'v2-overlay'; ov.id = 'v2-form-overlay';
+  ov.innerHTML = `
+    <div class="v2-modal" style="max-width:560px;max-height:85vh;overflow-y:auto">
+      <div class="v2-modal-hd">🔢 Jobs Awaiting a Job #<button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">✕</button></div>
+      <div class="v2-modal-bd" id="all-pending-jobs-body"><div style="color:var(--text-muted);font-size:13px">Loading…</div></div>
+    </div>`;
+  document.body.appendChild(ov);
+  try { PENDING_JOBS_ALL_STATE.rows = await api('GET', '/api/v2/jobs-pending-all'); }
+  catch (e) { const b = document.getElementById('all-pending-jobs-body'); if (b) b.innerHTML = `<div class="err-card">${esc(e.message)}</div>`; return; }
+  renderAllPendingJobsBody();
+}
+function sortAllPendingJobs(key) {
+  const s = PENDING_JOBS_ALL_STATE;
+  if (s.sortKey === key) s.sortDir *= -1; else { s.sortKey = key; s.sortDir = 1; }
+  renderAllPendingJobsBody();
+}
+function filterAllPendingJobsByPm(value) {
+  PENDING_JOBS_ALL_STATE.pmFilter = value;
+  renderAllPendingJobsBody();
+}
+function renderAllPendingJobsBody() {
+  const body = document.getElementById('all-pending-jobs-body');
+  if (!body) return; // modal was closed while the request was in flight
+  const { rows, sortKey, sortDir, pmFilter } = PENDING_JOBS_ALL_STATE;
+  const pmOpts = [...new Set(rows.filter(j => j.pm).map(j => j.pm))].sort();
+  let out = rows;
+  if (pmFilter === '__none__') out = out.filter(j => !j.pm);
+  else if (pmFilter) out = out.filter(j => j.pm === pmFilter);
+  const sortVal = (j, key) => key === 'pm' ? (j.pm || '￿') : key === 'project' ? (j.project || '') : (j.created_at || '');
+  out = [...out].sort((a, b) => sortDir * String(sortVal(a, sortKey)).localeCompare(String(sortVal(b, sortKey))));
+  const th = (label, key) => `<th style="text-align:left;padding:6px 10px;color:var(--text-muted);font-weight:600;font-size:11px;cursor:pointer;user-select:none" onclick="sortAllPendingJobs('${key}')">${label}${sortKey === key ? (sortDir === 1 ? ' ▲' : ' ▼') : ''}</th>`;
+  body.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:8px">
+      <div style="font-size:12px;color:var(--text-muted)">${out.length} of ${rows.length}</div>
+      <select onchange="filterAllPendingJobsByPm(this.value)" style="font-size:12px">
+        <option value="" ${!pmFilter ? 'selected' : ''}>All PMs</option>
+        <option value="__none__" ${pmFilter === '__none__' ? 'selected' : ''}>No PM Assigned</option>
+        ${pmOpts.map(pm => `<option value="${esc(pm)}" ${pmFilter === pm ? 'selected' : ''}>${esc(pm)}</option>`).join('')}
+      </select>
+    </div>
+    ${out.length ? `
+    <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+      <thead><tr style="border-bottom:1px solid var(--border)">${th('Project', 'project')}${th('PM', 'pm')}<th style="text-align:left;padding:6px 10px;color:var(--text-muted);font-weight:600;font-size:11px">Bid #</th>${th('Since', 'created_at')}<th></th></tr></thead>
+      <tbody>${out.map(j => `
+        <tr style="border-bottom:1px solid #f1f5f9">
+          <td style="padding:6px 10px;cursor:pointer" onclick="document.getElementById('v2-form-overlay').remove();renderProjectPage(${j.project_id})">${esc(j.project)}</td>
+          <td style="padding:6px 10px">${j.pm ? esc(j.pm) : '<span style="color:#dc2626">No PM assigned</span>'}</td>
+          <td style="padding:6px 10px">${j.bid_number ? esc(j.bid_number) : '—'}</td>
+          <td style="padding:6px 10px;color:var(--text-muted)">${fmtD(j.created_at.slice(0,10))}</td>
+          <td style="padding:6px 10px;text-align:right"><button class="v2-btn amber" style="padding:3px 9px;font-size:11px" onclick="actSetJobNumberFromAllModal(${j.id})">Set Job #</button></td>
+        </tr>`).join('')}</tbody>
+    </table>` : '<div style="color:#166534;font-size:13px">None</div>'}`;
+}
+function actSetJobNumberFromAllModal(jobId) {
+  showForm('Set Job # (from accounting)', [
+    { id: 'job_number', label: 'Job #', type: 'text', required: true, placeholder: '26-XXXX' },
+  ], async data => { await api('PATCH', `/api/v2/jobs/${jobId}`, data); openAllPendingJobsModal(); }, 'Save', 'amber');
 }
 
 // ── Dedicated project page (full hierarchy on its own page) ───────────────────
