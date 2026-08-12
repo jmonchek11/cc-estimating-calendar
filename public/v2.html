@@ -2173,6 +2173,7 @@ async function renderFlyout(fresh) {
     // header would just be redundant.
     body = bidNode(b, d);
     if (b.stage === 'awarded') { const job = d.jobs.find(j => j.winning_bid_id === b.id); if (job) body += jobNode(job); }
+    body += gateChecklistPlaceholderHtml(b.id);
   } else {
     let co = null, job = null;
     for (const j of d.jobs) { const c = j.change_orders.find(x => x.id === FLYOUT.id); if (c) { co = c; job = j; break; } }
@@ -2190,6 +2191,7 @@ async function renderFlyout(fresh) {
     </div>`;
   panel.querySelector('.fly-body')?.remove();
   panel.insertAdjacentHTML('beforeend', `<div class="fly-body">${body}</div>`);
+  if (FLYOUT.kind === 'bid') loadGateChecklist(FLYOUT.id);
 }
 
 function renderHierarchy(d) {
@@ -2322,6 +2324,101 @@ function projectDetailsHtml(proj) {
     ${bits.length ? `<div style="color:var(--text-muted)">${bits.join(' · ')}</div>` : ''}
     ${proj.description ? `<div style="color:var(--text-muted);font-style:italic;margin-top:2px">${esc(proj.description)}</div>` : ''}
   </div>`;
+}
+
+// ── Gate 1-4 pilot (docs/GATES_1_4_IMPLEMENTATION_PLAN.md) ─────────────────
+// Bid-flyout-only (not the full-project hierarchy list — 44 tasks per bid
+// is too much to fetch/render per row in a list). Only ever shows for a
+// bid that actually has a task pack (new bids created during this pilot);
+// silently hides for everything else — informational, never a block.
+let GATE_TASKS_CACHE = {};     // bidId -> tasks[]
+let GATE_GROUP_OPEN = new Set(); // which gate numbers are expanded, this flyout
+const GATE_STATUS_META = {
+  not_started:        { label: 'Not started',    color: '#64748b', bg: '#f1f5f9' },
+  evidence_recorded:   { label: 'Evidence recorded', color: '#1e40af', bg: '#eff6ff' },
+  attested:            { label: 'Attested',        color: '#1e40af', bg: '#eff6ff' },
+  verification_requested: { label: 'Awaiting verification', color: '#92400e', bg: '#fffbeb' },
+  verified:            { label: 'Verified',        color: '#166534', bg: '#f0fdf4' },
+  returned:            { label: 'Returned',        color: '#dc2626', bg: '#fef2f2' },
+  on_hold:             { label: 'On hold',         color: '#92400e', bg: '#fffbeb' },
+  needs_information:   { label: 'Needs information', color: '#b45309', bg: '#fffbeb' },
+  exception_requested: { label: 'Exception requested', color: '#92400e', bg: '#fffbeb' },
+  exception_approved:  { label: 'Exception approved',  color: '#166534', bg: '#f0fdf4' },
+  exception_rejected:  { label: 'Exception rejected',  color: '#dc2626', bg: '#fef2f2' },
+  superseded_by_template: { label: 'Superseded', color: '#64748b', bg: '#f1f5f9' },
+};
+function gateChecklistPlaceholderHtml(bidId) {
+  GATE_GROUP_OPEN = new Set();
+  return `<div class="bc-section" id="gate-checklist-${bidId}">
+    <div class="bc-sec-hd"><span class="bc-sec-title">🚧 Gate Checklist (Pilot)</span></div>
+    <div style="font-size:12px;color:var(--text-muted);padding:6px 0">Loading…</div>
+  </div>`;
+}
+async function loadGateChecklist(bidId) {
+  try { GATE_TASKS_CACHE[bidId] = await api('GET', `/api/v2/bids/${bidId}/gate-tasks`); }
+  catch { GATE_TASKS_CACHE[bidId] = []; }
+  renderGateChecklistBody(bidId);
+}
+function renderGateChecklistBody(bidId) {
+  const el = document.getElementById('gate-checklist-' + bidId);
+  if (!el) return; // flyout was closed/changed while the request was in flight
+  const tasks = GATE_TASKS_CACHE[bidId] || [];
+  if (!tasks.length) { el.remove(); return; } // no task pack on this bid (predates the pilot) — nothing to show
+  const gates = [1, 2, 3, 4];
+  const gateNames = { 1: 'Business Development and Lead Generation', 2: 'Bid Preparation and Setup', 3: 'Estimate Takeoff and Submission', 4: 'Sales Follow-Up and Award Decision' };
+  el.innerHTML = `
+    <div class="bc-sec-hd"><span class="bc-sec-title">🚧 Gate Checklist (Pilot)</span>
+      <span style="font-size:11px;color:var(--text-muted);font-weight:400">LIS-OPS-001 draft — informational only, does not block this bid</span>
+    </div>
+    ${gates.map(g => {
+      const gTasks = tasks.filter(t => t.gate === g);
+      if (!gTasks.length) return '';
+      const addressed = gTasks.filter(t => t.status !== 'not_started').length;
+      const open = GATE_GROUP_OPEN.has(g);
+      return `<div style="border:1px solid var(--border);border-radius:8px;margin-bottom:6px;overflow:hidden">
+        <div style="padding:8px 10px;background:#f8fafc;display:flex;align-items:center;gap:8px;cursor:pointer" onclick="toggleGateGroup(${bidId},${g})">
+          <span style="font-weight:700;font-size:12.5px;flex:1">Gate ${g} — ${esc(gateNames[g])}</span>
+          <span style="font-size:11px;color:var(--text-muted)">${addressed}/${gTasks.length} addressed</span>
+          <span style="font-size:11px;color:var(--text-muted)">${open ? '▲' : '▼'}</span>
+        </div>
+        ${open ? gTasks.map(t => gateTaskRowHtml(bidId, t)).join('') : ''}
+      </div>`;
+    }).join('')}`;
+}
+function toggleGateGroup(bidId, gate) {
+  if (GATE_GROUP_OPEN.has(gate)) GATE_GROUP_OPEN.delete(gate); else GATE_GROUP_OPEN.add(gate);
+  renderGateChecklistBody(bidId);
+}
+function gateTaskRowHtml(bidId, t) {
+  const meta = GATE_STATUS_META[t.status] || GATE_STATUS_META.not_started;
+  const evidenceLine = (t.latest_evidence || []).length
+    ? t.latest_evidence.map(ev => `${ev.label ? esc(ev.label) : 'Evidence'}${ev.ref ? `: <a href="${esc(ev.ref)}" target="_blank" rel="noopener">${esc(ev.ref)}</a>` : ''}`).join('; ')
+    : null;
+  return `<div style="padding:8px 10px;border-top:1px solid #f1f5f9;font-size:12.5px">
+    <div style="display:flex;align-items:flex-start;gap:8px">
+      <div style="flex:1;min-width:0">
+        <div title="${esc(t.criterion_text)}">${esc(t.plain_text || t.criterion_text)}</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${esc(t.responsible_role)}${t.evidence_class === 'automatic_evidence' ? ' · auto-recorded when the Calendar action happens' : ''}</div>
+        ${t.pilot_exception ? `<div style="font-size:11px;color:#92400e;margin-top:3px">⚠️ Pilot exception: ${esc(t.pilot_exception)}</div>` : ''}
+        ${t.latest_note ? `<div style="font-size:11.5px;color:var(--text-muted);margin-top:3px">📝 "${esc(t.latest_note.note)}" — ${esc(t.latest_note.by || 'unknown')}, ${fmtD(t.latest_note.at.slice(0,10))}</div>` : ''}
+        ${evidenceLine ? `<div style="font-size:11.5px;color:var(--text-muted);margin-top:3px">🔗 ${evidenceLine}</div>` : ''}
+      </div>
+      <span class="badge" style="background:${meta.bg};color:${meta.color};font-size:10px;white-space:nowrap">${meta.label}</span>
+    </div>
+    <div style="margin-top:5px"><a href="#" onclick="event.preventDefault();actUpdateGateTask(${bidId},${t.id})" style="font-size:11px;color:#2563eb">Add note / evidence / mark status</a></div>
+  </div>`;
+}
+function actUpdateGateTask(bidId, taskId) {
+  const t = (GATE_TASKS_CACHE[bidId] || []).find(x => x.id === taskId);
+  if (!t) return;
+  showForm(`Gate Task — ${t.plain_text || t.criterion_text}`, [
+    { id: 'note', label: 'Note (optional)', type: 'textarea', placeholder: 'A short note about what was checked or found…' },
+    { id: 'evidence_label', label: 'Evidence description (optional)', type: 'text', placeholder: 'e.g. Project HQ item, OneDrive file, email…' },
+    { id: 'evidence_url', label: 'Evidence link/reference (optional)', type: 'text', placeholder: 'Paste a link, or a short reference if there is no link' },
+    { id: 'status', label: 'Mark as', type: 'select', emptyLabel: 'No status change', options: [
+      { value: 'verified', label: '✅ Verified' }, { value: 'on_hold', label: '⏸ On hold' }, { value: 'needs_information', label: '❓ Needs information' },
+    ] },
+  ], data => api('POST', `/api/v2/bids/${bidId}/gate-tasks/${taskId}/update`, data).then(() => loadGateChecklist(bidId)), 'Save', 'blue');
 }
 // `proj` (the parent project — Location/Type of Work/Project Size/
 // Description all live there, not on the bid) is optional so existing

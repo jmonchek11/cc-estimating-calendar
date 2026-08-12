@@ -767,6 +767,10 @@ async function createOpportunity({ project_id, project_name, notes, description,
     project_id: pid, bid_id: bidId, actor_id: actorId,
     payload: { project_name: proj.name, stage: startStage, estimator_id: null, salesperson_id: null, due_date: due_date || null },
   });
+  // Gate 1-4 pilot: every brand-new Bid gets the full task pack — covers
+  // both lead/opportunity creation here AND direct active_bid creation,
+  // since createDirectBid delegates through this same function.
+  await createGateTaskPack(bidId, pid, actorId);
   return { project_id: pid, bid_id: bidId, new_contacts: newContacts };
 }
 
@@ -849,6 +853,7 @@ async function startBid(id, data, actorId) {
     project_id: bid.project_id, bid_id: bid._id, actor_id: actorId || null,
     payload: { from: 'opportunity', to: 'active_bid', project_name: proj?.name || null },
   });
+  await recordGateAutomaticEvidence(bid._id, 'g2.calendar_updated_no_conflicts', `Bid setup recorded — #${bid_number}, due ${data.due_date}, estimator/salesperson assigned as of Start Bid`, actorId);
   return { bid_id: bid._id, bid_number };
 }
 
@@ -1272,6 +1277,7 @@ async function submitBid(id, data, actorId) {
       payload: { from: 'active_bid', to: 'submitted', project_name: proj?.name || null },
     });
   }
+  await recordGateAutomaticEvidence(bid._id, 'g3.submission_logged', `Submission recorded on Estimating Calendar — ${data.date_submitted}, $${data.amount}`, actorId);
   return { bid_id: bid._id, stage: allSubmitted ? 'submitted' : bid.stage, remaining: allCustomers.length - submittedCompanyIds.size };
 }
 
@@ -1330,6 +1336,7 @@ async function addSubmission(id, data, actorId) {
       });
     }
   }
+  await recordGateAutomaticEvidence(bid._id, 'g3.submission_logged', `Submission recorded on Estimating Calendar — ${data.date_submitted}, $${data.amount} (${data.submission_type})`, actorId);
   return { bid_id: bid._id, stage };
 }
 
@@ -1488,6 +1495,7 @@ async function awardSubmission(submissionId, data, actorId) {
     project_id: bid.project_id, bid_id: bid._id, job_id: jobId, actor_id: actorId || null,
     payload: { project_name: proj?.name || null, company_name: company?.name || null, award_date: data.award_date, pm_id: pmId, from_bid: true },
   });
+  await recordGateAutomaticEvidence(bid._id, 'g4.all_systems_awarded', `Calendar-side award recorded — awarded to ${company?.name || 'company #' + sub.company_id} on ${data.award_date}, Job #${jobId} created`, actorId);
   return { submission_id: sub._id, bid_id: bid._id, job_id: jobId };
 }
 
@@ -1599,6 +1607,7 @@ async function approveToBid(id, actor, assignment) {
     project_id: bid.project_id, bid_id: bid._id, actor_id: actor?.id || null,
     payload: { project_name: proj?.name || null },
   });
+  await recordGateAutomaticEvidence(bid._id, 'g1.decision_recorded', 'Approved to bid — recorded on Estimating Calendar', actor?.id);
   return { bid_id: bid._id };
 }
 async function unapproveToBid(id, actor) {
@@ -3398,6 +3407,132 @@ async function buildIcsFeed(teamMemberId) {
   return ics.buildCalendar(vevents, `${member?.name || 'My'} — LIS Estimating`);
 }
 
+// ── Gate 1-4 pilot (docs/GATES_1_4_IMPLEMENTATION_PLAN.md) ───────────────────
+// New Bids only. Never blocks a Calendar transition — every call site below
+// runs strictly AFTER the transition's own primary write already succeeded,
+// same placement convention as events.safeEmit(). No liberty-core emission
+// yet (plan §6/§8 — deliberately deferred to a later phase).
+const { GATE_TASK_TEMPLATE, SOP_DOCUMENT_NUMBER, SOP_VERSION, TEMPLATE_VERSION } = require('./gateTaskTemplate');
+const GATE_UPDATE_STATUSES = ['verified', 'on_hold', 'needs_information'];
+
+// Stamps the full 44-task template (all Gate 1-4 criteria, plan §6.2.2 — the
+// set is not trimmed) onto a brand-new Bid. Called once, from
+// createOpportunity — createDirectBid delegates through createOpportunity
+// internally, so this naturally covers both entry points (lead/opportunity
+// creation and direct active_bid creation) without a second call site.
+// Failure here must never break bid creation itself.
+async function createGateTaskPack(bidId, projectId, actorId) {
+  try {
+    const M = getModels();
+    const actor = actorId ? await M.TeamMember.findById(Number(actorId)).lean() : null;
+    for (const tpl of GATE_TASK_TEMPLATE) {
+      const taskId = await nextId('bid_gate_tasks');
+      await M.BidGateTask.create({
+        _id: taskId, bid_id: bidId, project_id: projectId,
+        task_key: tpl.task_key, criterion_text: tpl.criterion_text, plain_text: tpl.plain_text || null,
+        sop_document_number: SOP_DOCUMENT_NUMBER, sop_version: SOP_VERSION, template_version: TEMPLATE_VERSION,
+        gate: tpl.gate, phase: tpl.phase, evidence_class: tpl.evidence_class, responsible_role: tpl.responsible_role,
+        pilot_exception: tpl.pilot_exception || null, created_by: actorId || null, origin: 'new_bid',
+      });
+      const eventId = await nextId('bid_gate_task_events');
+      await M.BidGateTaskEvent.create({
+        _id: eventId, task_id: taskId, bid_id: bidId, actor_id: actorId || null, actor_snapshot: actor?.name || null,
+        event_type: 'task_created', status: 'not_started',
+      });
+    }
+  } catch (e) { console.error('[gate pilot] createGateTaskPack failed:', e.message); }
+}
+
+// Appends one automatic-evidence event to the named task, if this bid has a
+// task pack at all (older, pre-pilot bids don't — silently no-ops, exactly
+// like a missing task is meant to be informational-only per plan §6.1).
+// Never throws — always called after the real Calendar write it's
+// observing has already succeeded.
+async function recordGateAutomaticEvidence(bidId, taskKey, evidenceLabel, actorId) {
+  try {
+    const M = getModels();
+    const task = await M.BidGateTask.findOne({ bid_id: Number(bidId), task_key: taskKey }).lean();
+    if (!task) return;
+    const actor = actorId ? await M.TeamMember.findById(Number(actorId)).lean() : null;
+    const eventId = await nextId('bid_gate_task_events');
+    await M.BidGateTaskEvent.create({
+      _id: eventId, task_id: task._id, bid_id: task.bid_id, actor_id: actorId || null, actor_snapshot: actor?.name || null,
+      event_type: 'automatic_evidence_recorded', status: 'evidence_recorded',
+      evidence: [{ type: 'calendar_action', label: evidenceLabel, ref: null, captured_at: ts() }],
+    });
+  } catch (e) { console.error('[gate pilot] recordGateAutomaticEvidence failed:', e.message); }
+}
+
+// Read model for the Bid Gate Checklist UI — current status/latest note/
+// latest evidence are DERIVED from the event history each call (plan
+// §4.1's disposable read projection), never stored as a mutable field.
+async function getGateTasksForBid(bidId) {
+  const M = getModels();
+  const tasks = await M.BidGateTask.find({ bid_id: Number(bidId) }).sort({ gate: 1, _id: 1 }).lean();
+  if (!tasks.length) return [];
+  const taskIds = tasks.map(t => t._id);
+  const events = await M.BidGateTaskEvent.find({ task_id: { $in: taskIds } }).sort({ _id: 1 }).lean();
+  const eventsByTask = {};
+  events.forEach(e => (eventsByTask[e.task_id] = eventsByTask[e.task_id] || []).push(e));
+  return tasks.map(t => {
+    const evs = eventsByTask[t._id] || [];
+    const latest = evs[evs.length - 1] || null;
+    const lastWithNote = [...evs].reverse().find(e => e.note);
+    const lastWithEvidence = [...evs].reverse().find(e => e.evidence?.length);
+    return {
+      id: t._id, gate: t.gate, phase: t.phase, task_key: t.task_key,
+      criterion_text: t.criterion_text, plain_text: t.plain_text,
+      evidence_class: t.evidence_class, responsible_role: t.responsible_role,
+      pilot_exception: t.pilot_exception,
+      status: latest?.status || 'not_started',
+      latest_note: lastWithNote ? { note: lastWithNote.note, by: lastWithNote.actor_snapshot, at: lastWithNote.at } : null,
+      latest_evidence: lastWithEvidence ? lastWithEvidence.evidence : [],
+      history_count: evs.length,
+      updated_at: latest?.at || t.created_at,
+    };
+  });
+}
+
+// The PC's update action — one append-only event capturing whatever was
+// actually submitted (a note, an evidence reference, a status decision, or
+// any combination), never a mutation of a prior event. Status only moves
+// when the PC explicitly picks verified/on_hold/needs_information; a
+// plain note-only update carries the currently-effective status forward
+// unchanged so the history doesn't read as a status change that never happened.
+async function addGateTaskUpdate(taskId, data, actor) {
+  const M = getModels();
+  const task = await M.BidGateTask.findById(Number(taskId)).lean();
+  if (!task) throw new Error('Gate task not found');
+  const note = data.note ? String(data.note).trim() : null;
+  const evidenceLabel = data.evidence_label ? String(data.evidence_label).trim() : null;
+  const evidenceRef = data.evidence_url ? String(data.evidence_url).trim() : null;
+  const status = GATE_UPDATE_STATUSES.includes(data.status) ? data.status : null;
+  if (!note && !evidenceLabel && !evidenceRef && !status) {
+    throw new Error('Add a note, an evidence reference, or a status to record an update.');
+  }
+  const lastEvent = await M.BidGateTaskEvent.findOne({ task_id: task._id }).sort({ _id: -1 }).lean();
+  const effectiveStatus = status || lastEvent?.status || 'not_started';
+  // Gate 4's verification task carries a documented pilot exception (plan
+  // §Pilot Decisions) — stamp it onto the verification event itself, not
+  // just the static template, so the exception is visible in the audit
+  // trail at the moment it was actually used, not only in the task description.
+  const exception = (task.task_key === 'g4.pilot_verification' && status === 'verified') ? {
+    pilot_exception: true,
+    reason: 'PC verified Gate 4 during the pilot — a documented exception to the current draft SOP, which assigns Gate 4 verification to the Operations Manager (PC recused).',
+  } : null;
+  const eventId = await nextId('bid_gate_task_events');
+  await M.BidGateTaskEvent.create({
+    _id: eventId, task_id: task._id, bid_id: task.bid_id, actor_id: actor?.id || null, actor_snapshot: actor?.name || null,
+    event_type: status === 'verified' ? 'verified' : status ? 'returned' : 'manual_update',
+    status: effectiveStatus, note, evidence: (evidenceLabel || evidenceRef) ? [{ type: 'other', label: evidenceLabel, ref: evidenceRef, captured_at: ts() }] : [],
+    verifier_id: status === 'verified' ? (actor?.id || null) : null,
+    verified_at: status === 'verified' ? ts() : null,
+    verification_decision: status === 'verified' ? 'verified' : null,
+    exception,
+  });
+  return { task_id: task._id, status: effectiveStatus };
+}
+
 module.exports = {
   getProjects, getJobsPicker, getProjectDetail, getMeta, getDashboard, getBidList, getCoList, getSearchResults, getDataHealth, mergeProjects, mergeCompanies, mergeJobs,
   dismissDuplicates, deleteEmptyProject, applyCleanupOverrides, removeOverride,
@@ -3406,6 +3541,7 @@ module.exports = {
   promoteLead, demoteToLead,
   getReleaseNotes, createReleaseNote, deleteReleaseNote, getUnseenReleaseCount, markReleasesSeen,
   getMyPendingJobs, getAllPendingJobs,
+  getGateTasksForBid, addGateTaskUpdate,
   getContacts, getContactDetail, createContact, updateContact, deleteContact, getContactBids, getCompanyBids,
   addBidCustomerContact, removeBidCustomerContact,
   awardSubmission, notAwardSubmission, closeBid, approveToBid, unapproveToBid, logFollowupV2, updateFollowup,

@@ -428,6 +428,62 @@ const ReleaseNoteSchema = new mongoose.Schema({
   created_at:     { type: String, default: ts },
 }, opts);
 
+// ── Gate 1-4 pilot (docs/GATES_1_4_IMPLEMENTATION_PLAN.md) ───────────────────
+// Two append-only records, not mutable checkboxes (plan §4.1): a task
+// instance never changes its criterion/role/gate after creation, and a
+// task's current status/evidence/notes are derived from its event history,
+// never overwritten in place. New Bids only for this pilot — see
+// createGateTaskPack in v2/db.js. No liberty-core emission yet (plan §6/§8
+// item — deliberately deferred).
+const BidGateTaskSchema = new mongoose.Schema({
+  _id:               Number,
+  bid_id:            { type: Number, required: true, index: true },
+  project_id:        { type: Number, required: true },              // denormalized join aid only — Bid remains the ownership boundary
+  task_key:          { type: String, required: true },               // stable template key, e.g. 'g3.submission_logged'
+  criterion_text:    { type: String, required: true },               // exact SOP checklist text, copied at instantiation — never edited in place
+  plain_text:        { type: String, default: null },                // plain-English version for the PC-facing UI
+  sop_document_number: { type: String, required: true },             // 'LIS-OPS-001'
+  sop_version:       { type: String, required: true },               // explicit draft identifier — never blank
+  template_version:  { type: String, required: true },               // v2/gateTaskTemplate.js TEMPLATE_VERSION at creation time
+  gate:              { type: Number, required: true },               // 1-4
+  phase:             { type: String, required: true },               // gate name, e.g. 'Bid Preparation and Setup'
+  evidence_class:    { type: String, enum: ['automatic_evidence', 'manual_attestation', 'gate_verification'], required: true },
+  responsible_role:  { type: String, required: true },                // free text (plan wording) — TeamMember.role doesn't model these roles yet
+  pilot_exception:   { type: String, default: null },                 // set only on the one task carrying a documented pilot exception (Gate 4)
+  assignee_id:       { type: Number, default: null },
+  assignee_snapshot: { type: String, default: null },
+  created_at:        { type: String, default: ts },
+  created_by:        { type: Number, default: null },
+  origin:            { type: String, enum: ['new_bid', 'existing_record_adoption'], default: 'new_bid' },
+}, opts);
+
+const BidGateTaskEventSchema = new mongoose.Schema({
+  _id:             Number,
+  task_id:         { type: Number, required: true, index: true },
+  bid_id:          { type: Number, required: true, index: true },
+  at:              { type: String, default: ts },
+  actor_id:        { type: Number, default: null },
+  actor_snapshot:  { type: String, default: null },                  // display name at event time — survives a later name change
+  event_type:      { type: String, required: true },                 // 'task_created' | 'automatic_evidence_recorded' | 'manual_update' | 'verified' | 'returned'
+  status:          { type: String, required: true, enum: [
+                       'not_started', 'evidence_recorded', 'attested', 'verification_requested',
+                       'verified', 'returned', 'on_hold', 'needs_information',
+                       'exception_requested', 'exception_approved', 'exception_rejected', 'superseded_by_template',
+                     ] },
+  note:            { type: String, default: null },                  // short free-text note (this pilot's "add a short note" action)
+  evidence:        { type: [{
+                       type: { type: String, enum: ['calendar_field', 'calendar_action', 'outbox_event', 'project_hq', 'onedrive', 'accubid', 'cm_platform', 'email', 'document', 'other'] },
+                       label: String, ref: String, captured_at: String,
+                     }], default: [] },
+  attestation_text: { type: String, default: null },
+  verifier_id:      { type: Number, default: null },
+  verified_at:      { type: String, default: null },
+  verification_decision: { type: String, default: null },
+  verification_notes:    { type: String, default: null },
+  exception:       { type: mongoose.Schema.Types.Mixed, default: null },
+  related_calendar_event_id: { type: mongoose.Schema.Types.Mixed, default: null },
+}, opts);
+
 // ── Export models bound to the v2 connection ──────────────────────────────────
 
 function getModels() {
@@ -447,6 +503,8 @@ function getModels() {
     TeamMember:  V1TeamMember,
     Idea:        V1Idea,
     ReleaseNote: c.model('ReleaseNote', ReleaseNoteSchema, 'release_notes'),
+    BidGateTask: c.model('BidGateTask', BidGateTaskSchema, 'bid_gate_tasks'),
+    BidGateTaskEvent: c.model('BidGateTaskEvent', BidGateTaskEventSchema, 'bid_gate_task_events'),
     Settings:    c.model('Settings', SettingsSchema, 'settings'),
     Counter:     c.model('Counter', CounterSchema, 'counters'),
     IgnoredPair: c.model('IgnoredPair', IgnoredPairSchema, 'ignored_pairs'),

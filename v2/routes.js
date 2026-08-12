@@ -522,4 +522,16 @@ router.patch('/api/v2/change-orders/:id/due-date',    t(async req => {
     return r;
   }));
 
+// ── Gate 1-4 pilot (docs/GATES_1_4_IMPLEMENTATION_PLAN.md) — new bids only.
+// Open to any logged-in user for the pilot (see plan §5 / the summary
+// after this build): the Calendar's TeamMember.role doesn't yet model a
+// PC role to gate this behind. Read-only for older bids with no task pack
+// (returns []) — never an error, never a block.
+router.get('/api/v2/bids/:id/gate-tasks', async (req, res) => {
+  try { res.json(await v2db.getGateTasksForBid(req.params.id)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+router.post('/api/v2/bids/:id/gate-tasks/:taskId/update', t(async req => v2db.addGateTaskUpdate(req.params.taskId, req.body, await actorOf(req)),
+  async (req) => ({ action: 'gate_task.update', summary: `Updated Gate task #${req.params.taskId} on bid ${await v2db.bidLabel(req.params.id)}`, entity_type: 'bid', entity_id: Number(req.params.id) })));
+
 module.exports = router;
