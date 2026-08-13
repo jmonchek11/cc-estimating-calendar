@@ -3033,11 +3033,24 @@ function showForm(title, fields, onSubmit, submitLabel = 'Save', submitClass = '
     }
     const errEl = document.getElementById('vf-err');
     if (missing.length) { errEl.textContent = 'Required: ' + missing.join(', '); errEl.style.display = 'block'; return; }
+    // Guards against a slow/stuck request getting fired twice (or more) by
+    // repeated clicks — confirmed happening in production (duplicate leads
+    // from clicking Save while a request was still in flight). The button
+    // itself is the single choke point for every showForm-based save in
+    // the app, so fixing it here covers all of them, not just one form.
+    const btn = document.getElementById('vf-submit');
+    if (btn.disabled) return;
+    btn.disabled = true;
+    const originalLabel = btn.textContent;
+    btn.textContent = 'Saving…';
     try {
       await onSubmit(data);
       ov.remove();
       await refresh();
-    } catch (e) { errEl.textContent = e.message; errEl.style.display = 'block'; }
+    } catch (e) {
+      errEl.textContent = e.message; errEl.style.display = 'block';
+      btn.disabled = false; btn.textContent = originalLabel;
+    }
   };
 }
 

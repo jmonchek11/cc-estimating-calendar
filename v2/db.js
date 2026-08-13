@@ -35,6 +35,20 @@ async function nextId(name) {
   return doc.seq;
 }
 
+// Reserves `count` sequential ids in ONE atomic increment, for bulk-insert
+// call sites that would otherwise need `count` separate round-trip calls to
+// nextId() — see createGateTaskPack, which needs 44 of these per call and
+// was the whole app's slowdown before this existed (each nextId() call is
+// its own network round-trip to Atlas; 44 of them serialized, twice over
+// for tasks+events, added several real seconds to every opportunity/lead
+// creation).
+async function nextIdBlock(name, count) {
+  const { Counter } = getModels();
+  const doc = await Counter.findByIdAndUpdate(name, { $inc: { seq: count } }, { new: true, upsert: true });
+  const first = doc.seq - count + 1;
+  return Array.from({ length: count }, (_, i) => first + i);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // AUDIT TRAIL — who did what, when. Logging must never break the action it's
 // logging, so every call site wraps it in try/catch and swallows failures.
@@ -3424,22 +3438,26 @@ const GATE_UPDATE_STATUSES = ['verified', 'on_hold', 'needs_information'];
 async function createGateTaskPack(bidId, projectId, actorId) {
   try {
     const M = getModels();
-    const actor = actorId ? await M.TeamMember.findById(Number(actorId)).lean() : null;
-    for (const tpl of GATE_TASK_TEMPLATE) {
-      const taskId = await nextId('bid_gate_tasks');
-      await M.BidGateTask.create({
-        _id: taskId, bid_id: bidId, project_id: projectId,
-        task_key: tpl.task_key, criterion_text: tpl.criterion_text, plain_text: tpl.plain_text || null,
-        sop_document_number: SOP_DOCUMENT_NUMBER, sop_version: SOP_VERSION, template_version: TEMPLATE_VERSION,
-        gate: tpl.gate, phase: tpl.phase, evidence_class: tpl.evidence_class, responsible_role: tpl.responsible_role,
-        pilot_exception: tpl.pilot_exception || null, created_by: actorId || null, origin: 'new_bid',
-      });
-      const eventId = await nextId('bid_gate_task_events');
-      await M.BidGateTaskEvent.create({
-        _id: eventId, task_id: taskId, bid_id: bidId, actor_id: actorId || null, actor_snapshot: actor?.name || null,
-        event_type: 'task_created', status: 'not_started',
-      });
-    }
+    const n = GATE_TASK_TEMPLATE.length;
+    const [actor, taskIds, eventIds] = await Promise.all([
+      actorId ? M.TeamMember.findById(Number(actorId)).lean() : null,
+      nextIdBlock('bid_gate_tasks', n),
+      nextIdBlock('bid_gate_task_events', n),
+    ]);
+    const taskDocs = GATE_TASK_TEMPLATE.map((tpl, i) => ({
+      _id: taskIds[i], bid_id: bidId, project_id: projectId,
+      task_key: tpl.task_key, criterion_text: tpl.criterion_text, plain_text: tpl.plain_text || null,
+      sop_document_number: SOP_DOCUMENT_NUMBER, sop_version: SOP_VERSION, template_version: TEMPLATE_VERSION,
+      gate: tpl.gate, phase: tpl.phase, evidence_class: tpl.evidence_class, responsible_role: tpl.responsible_role,
+      pilot_exception: tpl.pilot_exception || null, created_by: actorId || null, origin: 'new_bid',
+    }));
+    const eventDocs = GATE_TASK_TEMPLATE.map((tpl, i) => ({
+      _id: eventIds[i], task_id: taskIds[i], bid_id: bidId, actor_id: actorId || null, actor_snapshot: actor?.name || null,
+      event_type: 'task_created', status: 'not_started',
+    }));
+    // Two bulk inserts instead of 44 x 4 sequential round-trips (was the
+    // whole app's slowdown — see nextIdBlock's comment).
+    await Promise.all([M.BidGateTask.insertMany(taskDocs), M.BidGateTaskEvent.insertMany(eventDocs)]);
   } catch (e) { console.error('[gate pilot] createGateTaskPack failed:', e.message); }
 }
 
