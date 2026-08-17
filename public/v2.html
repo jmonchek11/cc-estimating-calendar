@@ -478,6 +478,36 @@ const onedriveButtonHtml = (url) => url
 const onedriveIconBoxHtml = (url, bidId, bidLabel) => url
   ? `<a class="onedrive-icon-box has-link" href="${esc(url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Open in OneDrive">${ONEDRIVE_ICON}</a>`
   : `<span class="onedrive-icon-box no-link" onclick="event.stopPropagation();actSetBidFolder(${bidId},'${escJs(bidLabel || '')}')" title="OneDrive link not set yet — click to add">${ONEDRIVE_ICON}</span>`;
+
+// ── Admin-only delete, across list/detail views (not just Data Health's
+// narrow duplicate-cleanup tools) — same underlying delete functions and
+// safety rules as before (can't delete an awarded bid, a company with real
+// history, a submitted CO, etc.), just reachable from more places, for the
+// people who actually have Admin. A blocked delete shows a clear reason and
+// the alert dismisses on its own — nothing gets stuck open.
+const ADMIN_DELETE_ENDPOINT = {
+  bid: id => `/api/v2/admin/bid/${id}`,
+  change_order: id => `/api/v2/admin/change-order/${id}`,
+  company: id => `/api/v2/admin/company/${id}`,
+  project: id => `/api/v2/admin/project/${id}`,
+  contact: id => `/api/v2/contacts/${id}`,
+};
+function adminDeleteIconHtml(kind, id, label) {
+  if (!CURRENT_USER?.is_admin) return '';
+  return `<span class="onedrive-icon-box no-link" style="color:#dc2626" onclick="event.stopPropagation();actAdminDelete('${kind}',${id},'${escJs(label || '')}')" title="Delete (admin)">🗑</span>`;
+}
+async function actAdminDelete(kind, id, label) {
+  if (!confirm(`Delete ${label || 'this entry'}? This can't be undone if it succeeds.`)) return;
+  try {
+    await api('DELETE', ADMIN_DELETE_ENDPOINT[kind](id));
+    document.getElementById('v2-profile-overlay')?.remove();
+    // A deleted project can't re-render itself (404) — bounce to the
+    // Projects list instead of trying to refresh the page that just
+    // disappeared out from under the user.
+    if (kind === 'project' && VIEW.name === 'project' && VIEW.arg === id) navigate('projects');
+    else await refresh();
+  } catch (e) { alert('Delete failed: ' + e.message); }
+}
 // Calendar-day difference between two "YYYY-MM-DD" strings, parsed as UTC
 // noon (not midnight) so DST transitions in between can't shift the count
 // by a day — a due date is a calendar date, not a moment in time.
@@ -1688,6 +1718,7 @@ function renderBidListBody(stage) {
           </div>
         </div>
         <div style="display:flex;align-items:center;gap:12px;flex-shrink:0;align-self:center">
+          ${adminDeleteIconHtml('bid', b.id, `${b.bid_number || 'No bid #'} — ${b.project}`)}
           ${onedriveIconBoxHtml(b.folder_url, b.id, `${b.bid_number || 'No bid #'} — ${b.project}`)}
           <div style="text-align:right;min-width:108px">${right(b)}</div>
         </div>
@@ -1757,8 +1788,9 @@ function renderCoListBody(stage) {
             ${c.estimator ? ` Est ${ini(c.estimator)}` : ''}
           </div>
         </div>
-        <div style="text-align:right;flex-shrink:0">
-          ${right(c)}
+        <div style="display:flex;align-items:center;gap:12px;flex-shrink:0">
+          ${adminDeleteIconHtml('change_order', c.id, `${esc(c.co_number)} — ${esc(c.name)}`)}
+          <div style="text-align:right">${right(c)}</div>
         </div>
       </div>`; }).join('') : '<div style="padding:24px;text-align:center;color:var(--text-muted)">No matches</div>';
 }
@@ -2206,7 +2238,8 @@ async function renderFlyout(fresh) {
 function renderHierarchy(d) {
   let html = `<div class="v2-actions" style="margin:0 0 4px">
     <button class="v2-btn green" onclick="actAddBidToProject(${d.id})">+ Add Bid to this Project</button>
-    ${CURRENT_USER?.is_admin ? `<button class="v2-btn outline" onclick="actEditProject(${d.id})">✏️ Edit Project</button>` : ''}
+    ${CURRENT_USER?.is_admin ? `<button class="v2-btn outline" onclick="actEditProject(${d.id})">✏️ Edit Project</button>
+    <button class="v2-btn outline" style="color:#dc2626;border-color:#dc2626" onclick="actAdminDelete('project',${d.id},'${escJs(d.name)}')">🗑 Delete Project</button>` : ''}
   </div>`;
 
   // Duplicate-jobs warning: same job # on more than one job here (legacy + bid-backed
@@ -5153,7 +5186,7 @@ async function openContactProfile(id) {
     <div class="card" style="padding:0;max-height:280px;overflow-y:auto">${bidHistoryRowsHtml(hist.bids)}</div>
     <div class="v2-actions" style="margin-top:12px">
       <button class="v2-btn outline" onclick="actEditContact(${c.id})">✏️ Edit</button>
-      <button class="v2-btn red" onclick="actDeleteContact(${c.id})">🗑 Delete</button>
+      ${CURRENT_USER?.is_admin ? `<button class="v2-btn red" onclick="actDeleteContact(${c.id})">🗑 Delete</button>` : ''}
     </div>`;
   openProfileModal(`👤 ${esc(c.full_name)}`, body);
 }
@@ -5177,7 +5210,7 @@ async function openCompanyProfile(companyId) {
     </div>
     <div style="font-weight:700;font-size:13px;margin:12px 0 4px">Bid History</div>
     <div class="card" style="padding:0;max-height:260px;overflow-y:auto">${bidHistoryRowsHtml(hist.bids)}</div>`;
-  const titleExtra = `${companyTypeBadge(co?.type)}${CURRENT_USER?.is_admin ? ` <a href="#" onclick="event.preventDefault();actEditCompanyType(${companyId})" style="font-size:11px;color:#2563eb;font-weight:400;margin-left:6px">edit type</a>` : ''}`;
+  const titleExtra = `${companyTypeBadge(co?.type)}${CURRENT_USER?.is_admin ? ` <a href="#" onclick="event.preventDefault();actEditCompanyType(${companyId})" style="font-size:11px;color:#2563eb;font-weight:400;margin-left:6px">edit type</a> <a href="#" onclick="event.preventDefault();actAdminDelete('company',${companyId},'${escJs(co?.name || 'this company')}')" style="font-size:11px;color:#dc2626;font-weight:400;margin-left:6px">delete</a>` : ''}`;
   openProfileModal(`🏢 ${esc(co?.name || 'Company')} ${titleExtra}`, body);
 }
 function actEditCompanyType(companyId) {

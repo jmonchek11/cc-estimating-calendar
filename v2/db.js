@@ -3210,6 +3210,12 @@ async function deleteBid(id) {
   const label = [bid.bid_number, bid.project_name].filter(Boolean).join(' ') || `bid #${bid._id}`;
   await M.BidCustomer.deleteMany({ bid_id: bid._id });
   await M.Reminder.deleteMany({ parent_type: 'bid', parent_id: bid._id });
+  // Gate 1-4 pilot task pack (if this bid has one) — would otherwise orphan.
+  const gateTasks = await M.BidGateTask.find({ bid_id: bid._id }).lean();
+  if (gateTasks.length) {
+    await M.BidGateTaskEvent.deleteMany({ task_id: { $in: gateTasks.map(t => t._id) } });
+    await M.BidGateTask.deleteMany({ bid_id: bid._id });
+  }
   await M.Bid.deleteOne({ _id: bid._id });
   return { deleted: bid._id, label };
 }
