@@ -2221,8 +2221,14 @@ function _clusterSimilar(items, ignore, opts = {}) {
   const find = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
   const union = (a, b) => { parent[find(a)] = find(b); };
   const words = (k) => (k || '').split(' ').filter(Boolean);
+  // Default minimum (5) exists so a generic short word doesn't false-match
+  // across unrelated records. Company names routinely ARE short — real
+  // abbreviations like "D&R", "RC", "DPR" — so callers matching companies
+  // pass a lower bareWordMinLength (see the dupCompanies call site); this
+  // stays 5 for anything that doesn't opt in, e.g. project names.
+  const bareWordMinLength = opts.bareWordMinLength || 5;
   const bareVsFirstWord = (shortWords, longWords) =>
-    shortWords.length === 1 && shortWords[0].length >= 5 && longWords.length > 1 && longWords[0] === shortWords[0];
+    shortWords.length === 1 && shortWords[0].length >= bareWordMinLength && longWords.length > 1 && longWords[0] === shortWords[0];
   for (let i = 0; i < items.length; i++) for (let j = i + 1; j < items.length; j++) {
     const a = items[i].key, b = items[j].key; if (!a || !b) continue;
     const same = a === b;
@@ -2867,7 +2873,7 @@ async function getDataHealth() {
 
   // near-duplicate projects / companies (merge candidates; honors "not a duplicate")
   const dupProjects = _clusterSimilar(projects.map(p => ({ id: p._id, name: p.name, key: _norm(p.name), bids: (bidsByProj[p._id] || []).length, cos: projCo(p) })), ignoreSet('project'));
-  const dupCompanies = _clusterSimilar(companies.map(c => ({ id: c._id, name: c.name, key: _norm(c.name) })), ignoreSet('company'), { firstWordMatch: true });
+  const dupCompanies = _clusterSimilar(companies.map(c => ({ id: c._id, name: c.name, key: _norm(c.name) })), ignoreSet('company'), { firstWordMatch: true, bareWordMinLength: 2 });
   // Exact-duplicate bids — same bid # created twice under the same project
   // (e.g. a double-click or double-submit). Project-merge doesn't touch this
   // since it operates one level up; this is its own class of mistake.

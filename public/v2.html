@@ -554,6 +554,15 @@ async function api(method, url, body, _isRetry) {
     await new Promise(res => setTimeout(res, 1200));
     return api(method, url, body, true);
   }
+  // A session simply expires (8-hour cookie) mid-use — previously this just
+  // surfaced as a bare "Failed: Not authenticated" alert on whatever action
+  // the user happened to be doing, with no indication of what to do about
+  // it. Same graceful bounce-to-login as ensureMeta()'s bootstrap check,
+  // now applied to every API call, not just the initial page load.
+  if (r.status === 401) {
+    window.location.href = '/legacy?returnTo=' + encodeURIComponent(location.pathname + location.hash);
+    return new Promise(() => {}); // navigating away — never resolve, don't render a flash of "error"
+  }
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
   return data;
