@@ -597,6 +597,10 @@ app.get('/api/online', async (req, res) => {
 
 // ── Ideas / feedback ──────────────────────────────────────────────────────────
 const IDEA_ADMIN_NOTIFY_EMAIL = 'jmonchek@libertyintegrated.com';
+// Non-admin submissions sit in 'pending_approval' until one of these people
+// approves them (see approveIdea in db.js) — matches the current is_admin set
+// minus Joe, who's already the one being notified via IDEA_ADMIN_NOTIFY_EMAIL.
+const IDEA_APPROVER_EMAILS = ['cwinters@libertyintegrated.com', 'jbaker@libertyintegrated.com', 'ddosenbach@libertyintegrated.com', 'cyaffe@libertyintegrated.com'];
 
 app.post('/api/ideas', async (req, res) => {
   if (!req.session.userId) return res.status(401).json({ error: 'Not logged in' });
@@ -606,11 +610,31 @@ app.post('/api/ideas', async (req, res) => {
     // Fire-and-forget — never let a mail hiccup affect the actual submission.
     // Logged loudly on failure since this runs outside the request/response
     // cycle and a silent .catch(() => {}) here was undiagnosable last time.
-    console.log(`[ideas] #${result.id} submitted by user ${req.session.userId} — notifying ${IDEA_ADMIN_NOTIFY_EMAIL}`);
     db.getMember(req.session.userId).then(submitter => {
+      if (result.status === 'pending_approval') {
+        console.log(`[ideas] #${result.id} submitted by user ${req.session.userId} — pending approval, notifying approvers`);
+        return Promise.all(IDEA_APPROVER_EMAILS.map(to => {
+          const { subject, html } = mailer.emailIdeaNeedsApproval(req.body, submitter?.name);
+          return mailer.sendMail({ to, subject, html });
+        }));
+      }
+      console.log(`[ideas] #${result.id} submitted by user ${req.session.userId} — notifying ${IDEA_ADMIN_NOTIFY_EMAIL}`);
       const { subject, html } = mailer.emailIdeaSubmitted(req.body, submitter?.name);
       return mailer.sendMail({ to: IDEA_ADMIN_NOTIFY_EMAIL, subject, html });
     }).catch(e => console.error(`[ideas] submission-notify email failed for #${result.id}:`, e.message));
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.post('/api/ideas/:id/approve', async (req, res) => {
+  try {
+    const user = await db.getMember(req.session.userId);
+    if (!user || !user.is_admin) return res.status(403).json({ error: 'Admin only' });
+    const idea = await db.approveIdea(req.params.id, req.session.userId);
+    res.json({ ok: true });
+    console.log(`[ideas] #${idea.id} approved by user ${req.session.userId} — notifying ${IDEA_ADMIN_NOTIFY_EMAIL}`);
+    const { subject, html } = mailer.emailIdeaSubmitted(idea, idea.submitter_name);
+    mailer.sendMail({ to: IDEA_ADMIN_NOTIFY_EMAIL, subject, html })
+      .catch(e => console.error(`[ideas] approval-notify email failed for #${idea.id}:`, e.message));
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 

@@ -5713,7 +5713,7 @@ const IDEA_PAGE_NAMES = {
 // across re-renders (voting/commenting re-fetches + rebuilds this modal).
 let IDEAS_CACHE = [];
 const IDEAS_COMMENTS_OPEN = new Set();
-const IDEA_STATUS_LABEL = { new: 'New', reviewed: 'Reviewed', done: 'Done', wontfix: "Won't Fix" };
+const IDEA_STATUS_LABEL = { pending_approval: 'Pending Approval', new: 'New', reviewed: 'Reviewed', done: 'Done', wontfix: "Won't Fix" };
 const IDEA_TYPE_ICON = t => t === 'issue' ? '🐛' : '💡';
 
 // Screenshots attached to a not-yet-submitted idea/bug — a plain JS array
@@ -5795,13 +5795,14 @@ function openImageLightbox(src) {
 function ideaCardHtml(i, isAdmin) {
   const upActive = i.my_vote === 1, downActive = i.my_vote === -1;
   const done = i.is_terminal;
+  const pending = i.is_pending_approval;
   const openComments = IDEAS_COMMENTS_OPEN.has(i.id);
   return `
     <div style="display:flex;gap:10px;padding:10px 0;border-bottom:1px solid #f1f5f9;${done ? 'opacity:0.55' : ''}">
       <div style="display:flex;flex-direction:column;align-items:center;flex-shrink:0;width:28px">
-        <button onclick="voteOnIdea(${i.id},1)" style="border:none;background:none;cursor:pointer;font-size:13px;padding:1px;color:${upActive ? '#2563eb' : 'var(--text-muted)'}" title="Upvote">▲</button>
+        <button onclick="voteOnIdea(${i.id},1)" ${pending ? 'disabled' : ''} style="border:none;background:none;cursor:pointer;font-size:13px;padding:1px;color:${upActive ? '#2563eb' : 'var(--text-muted)'}" title="Upvote">▲</button>
         <div style="font-size:12px;font-weight:700;color:var(--text)">${i.score}</div>
-        <button onclick="voteOnIdea(${i.id},-1)" style="border:none;background:none;cursor:pointer;font-size:13px;padding:1px;color:${downActive ? '#dc2626' : 'var(--text-muted)'}" title="Downvote">▼</button>
+        <button onclick="voteOnIdea(${i.id},-1)" ${pending ? 'disabled' : ''} style="border:none;background:none;cursor:pointer;font-size:13px;padding:1px;color:${downActive ? '#dc2626' : 'var(--text-muted)'}" title="Downvote">▼</button>
       </div>
       <div style="flex:1;min-width:0">
         <div style="display:flex;align-items:flex-start;gap:8px">
@@ -5812,10 +5813,14 @@ function ideaCardHtml(i, isAdmin) {
             <div style="font-size:11px;color:var(--text-muted);margin-top:4px">
               ${i.submitted_by_name ? esc(i.submitted_by_name) : 'Anonymous'} · ${fmtD((i.created_at || '').slice(0, 10))}
               ${i.page ? ` · <span style="background:#f1f5f9;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:600">${esc(IDEA_PAGE_NAMES[i.page] || i.page)}</span>` : ''}
-              · <span style="background:#f1f5f9;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:600">${IDEA_STATUS_LABEL[i.status]}</span>
+              · <span style="background:${pending ? '#fffbeb' : '#f1f5f9'};color:${pending ? '#92400e' : 'inherit'};padding:1px 5px;border-radius:3px;font-size:10px;font-weight:600">${IDEA_STATUS_LABEL[i.status]}</span>
+              ${pending && !isAdmin ? ` · <span style="font-size:10px;color:var(--text-muted)">not yet visible to others</span>` : ''}
             </div>
           </div>
-          ${isAdmin ? `<select style="font-size:11px;border-radius:4px;padding:2px 4px;border:1px solid var(--border);cursor:pointer;flex-shrink:0" onchange="setIdeaStatus(${i.id}, this.value)">
+          ${isAdmin && pending ? `<div style="display:flex;gap:4px;flex-shrink:0">
+            <button class="v2-btn blue" style="font-size:11px;padding:3px 8px" onclick="approveIdea(${i.id})">Approve</button>
+            <button class="v2-btn outline" style="font-size:11px;padding:3px 8px" onclick="setIdeaStatus(${i.id},'wontfix')">Decline</button>
+          </div>` : isAdmin ? `<select style="font-size:11px;border-radius:4px;padding:2px 4px;border:1px solid var(--border);cursor:pointer;flex-shrink:0" onchange="setIdeaStatus(${i.id}, this.value)">
             ${['new', 'reviewed', 'done', 'wontfix'].map(s => `<option value="${s}" ${i.status === s ? 'selected' : ''}>${IDEA_STATUS_LABEL[s]}</option>`).join('')}
           </select>` : ''}
         </div>
@@ -5896,7 +5901,12 @@ async function actDeleteReleaseNote(id) {
 async function openIdeasModal() {
   const isAdmin = !!CURRENT_USER?.is_admin;
   try { IDEAS_CACHE = await api('GET', '/api/ideas'); } catch { IDEAS_CACHE = []; }
-  const firstTerminalIdx = IDEAS_CACHE.findIndex(i => i.is_terminal);
+  // Admins get pending items pulled into a dedicated approval section above;
+  // everyone else just sees their own pending item inline (badged) since
+  // it's the only pending item they can see at all.
+  const pendingApproval = isAdmin ? IDEAS_CACHE.filter(i => i.is_pending_approval) : [];
+  const visibleIdeas = isAdmin ? IDEAS_CACHE.filter(i => !i.is_pending_approval) : IDEAS_CACHE;
+  const firstTerminalIdx = visibleIdeas.findIndex(i => i.is_terminal);
 
   // Voting, toggling comments, posting one, and changing status all call
   // this to refresh the list — but it rebuilds the whole modal from
@@ -5939,9 +5949,14 @@ async function openIdeasModal() {
           <div id="idea-image-previews" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"></div>
         </div>
         <div style="display:flex;justify-content:flex-end;margin-top:6px"><button class="v2-btn blue" onclick="submitIdea()">Submit</button></div>
+        ${isAdmin && pendingApproval.length ? `
         <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px">
-          <div style="font-size:13px;font-weight:700;margin-bottom:4px">📥 All Submissions (${IDEAS_CACHE.length})</div>
-          ${IDEAS_CACHE.length ? IDEAS_CACHE.map((i, idx) => (idx === firstTerminalIdx ? '<div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin-top:10px;padding-top:8px;border-top:1px dashed var(--border)">Resolved</div>' : '') + ideaCardHtml(i, isAdmin)).join('') : '<div style="font-size:13px;color:var(--text-muted)">No submissions yet.</div>'}
+          <div style="font-size:13px;font-weight:700;margin-bottom:4px;color:#92400e">⏳ Awaiting Your Approval (${pendingApproval.length})</div>
+          ${pendingApproval.map(i => ideaCardHtml(i, isAdmin)).join('')}
+        </div>` : ''}
+        <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px">
+          <div style="font-size:13px;font-weight:700;margin-bottom:4px">📥 All Submissions (${visibleIdeas.length})</div>
+          ${visibleIdeas.length ? visibleIdeas.map((i, idx) => (idx === firstTerminalIdx ? '<div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin-top:10px;padding-top:8px;border-top:1px dashed var(--border)">Resolved</div>' : '') + ideaCardHtml(i, isAdmin)).join('') : '<div style="font-size:13px;color:var(--text-muted)">No submissions yet.</div>'}
         </div>
       </div>
     </div>`;
@@ -5969,6 +5984,9 @@ async function submitIdea() {
 }
 async function setIdeaStatus(id, status) {
   try { await api('PUT', `/api/ideas/${id}`, { status }); await openIdeasModal(); } catch (e) { alert(e.message); }
+}
+async function approveIdea(id) {
+  try { await api('POST', `/api/ideas/${id}/approve`); await openIdeasModal(); } catch (e) { alert('Failed: ' + e.message); }
 }
 async function voteOnIdea(id, value) {
   const idea = IDEAS_CACHE.find(i => i.id === id);

@@ -1,6 +1,12 @@
 const mongoose = require('mongoose');
 
-const IDEA_STATUSES = ['new', 'reviewed', 'done', 'wontfix'];
+// 'pending_approval' (added 2026-08) is a pre-'new' gate: a submission from
+// anyone who isn't an admin starts here instead of 'new', invisible to
+// everyone but the submitter (their own item, badged "awaiting approval")
+// and admins (who review it) — never posted to the board or emailed out
+// until an admin approves it (see approveIdea in db.js). Admin submitters
+// skip straight to 'new', same as before this existed.
+const IDEA_STATUSES = ['pending_approval', 'new', 'reviewed', 'done', 'wontfix'];
 // "Active" statuses surface at the top of the list, sorted by vote score;
 // "terminal" statuses are crossed off and pushed to the bottom, sorted by
 // whenever they were last touched. See db.js's getIdeas()/updateIdeaStatus().

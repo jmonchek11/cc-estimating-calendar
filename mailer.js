@@ -633,6 +633,22 @@ function emailIdeaSubmitted(idea, submitterName) {
   };
 }
 
+function emailIdeaNeedsApproval(idea, submitterName) {
+  return {
+    subject: `⏳ Needs approval: ${idea.type === 'issue' ? 'bug report' : 'idea'} — ${idea.title}`,
+    html: base(`
+      ${iconHeading(ideaIconUrl(idea.type), IDEA_TYPE_ICON(idea.type))}
+      <p><strong>${submitterName || 'Someone'}</strong> submitted a new ${idea.type === 'issue' ? 'bug report' : 'idea'} that needs approval before it's posted to the board.</p>
+      <table>
+        <tr><td class="lbl">Title</td><td><strong>${idea.title}</strong></td></tr>
+        ${idea.body ? `<tr><td class="lbl">Details</td><td>${idea.body}</td></tr>` : ''}
+        ${idea.page ? `<tr><td class="lbl">Page</td><td>${idea.page}</td></tr>` : ''}
+      </table>
+      ${buttonRow({ href: APP_URL, label: 'Review & Approve' })}
+    `),
+  };
+}
+
 function emailIdeaStatusChanged(idea, newStatus) {
   const label = IDEA_STATUS_LABEL[newStatus] || newStatus;
   const pillClass = newStatus === 'done' ? 'pill-green' : newStatus === 'wontfix' ? 'pill-gray' : 'pill-blue';
@@ -646,4 +662,4 @@ function emailIdeaStatusChanged(idea, newStatus) {
   };
 }
 
-module.exports = { sendMail, emailAssigned, emailFollowup, emailAwarded, emailRoleAwardNotice, emailApprovedToBid, emailForwardBidInvite, emailDueDateChanged, emailReminder, emailWalkthroughSet, emailWalkthroughAssigned, emailWalkthroughReminder, emailDigest, emailIdeaSubmitted, emailIdeaStatusChanged, wantsNotification, NOTIFICATION_CATEGORIES };
+module.exports = { sendMail, emailAssigned, emailFollowup, emailAwarded, emailRoleAwardNotice, emailApprovedToBid, emailForwardBidInvite, emailDueDateChanged, emailReminder, emailWalkthroughSet, emailWalkthroughAssigned, emailWalkthroughReminder, emailDigest, emailIdeaSubmitted, emailIdeaNeedsApproval, emailIdeaStatusChanged, wantsNotification, NOTIFICATION_CATEGORIES };

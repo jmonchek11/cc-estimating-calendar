@@ -967,6 +967,11 @@ async function getOnlineUsers() {
 const IDEA_MAX_IMAGES = 3;
 const IDEA_MAX_IMAGE_BYTES = 4 * 1024 * 1024; // ~4MB decoded, generous headroom over a compressed screenshot
 
+// Admins post straight to 'new', same as always. Anyone else starts at
+// 'pending_approval' — invisible to everyone but themselves and admins
+// until an admin approves it (approveIdea below). Per Joe's request: every
+// non-admin submission needs sign-off before it reaches the board or his
+// inbox.
 async function submitIdea(data) {
   const images = Array.isArray(data.images) ? data.images.slice(0, IDEA_MAX_IMAGES) : [];
   for (const img of images) {
@@ -974,6 +979,9 @@ async function submitIdea(data) {
     const approxBytes = img.length * 0.75;
     if (approxBytes > IDEA_MAX_IMAGE_BYTES) throw new Error('Image too large (max ~4MB each)');
   }
+  const submitterId = data.submitted_by ? Number(data.submitted_by) : null;
+  const submitter = submitterId ? await getMember(submitterId) : null;
+  const status = submitter?.is_admin ? 'new' : 'pending_approval';
   const id = await nextId('ideas');
   const now = nowStr();
   await Idea.create({
@@ -982,27 +990,37 @@ async function submitIdea(data) {
     title: String(data.title || '').trim(),
     body: String(data.body || '').trim(),
     page: data.page ? String(data.page).trim() : null,
-    submitted_by: data.submitted_by ? Number(data.submitted_by) : null,
-    status: 'new',
+    submitted_by: submitterId,
+    status,
     images,
     created_at: now,
     updated_at: now,
   });
-  return { id };
+  return { id, status };
 }
 
 // Ideas/issues are visible to every logged-in user (not just admins) — the
 // whole point of voting is that people can see what's already been
 // suggested and back it instead of filing a duplicate. Only status changes
-// stay admin-only (enforced at the route level).
+// stay admin-only (enforced at the route level). A 'pending_approval' item
+// is the one exception: it's hidden from everyone except its own submitter
+// (who sees it badged "awaiting approval," not votable/commentable yet) and
+// admins (who see every pending item, to review).
 async function getIdeas(viewerId) {
   const { IDEA_TERMINAL_STATUSES } = require('./models/Idea');
+  const viewer = viewerId ? await getMember(viewerId) : null;
+  const viewerIsAdmin = !!viewer?.is_admin;
   const ideas = await Idea.find({}).lean();
   const teamMap = {};
   (await TeamMember.find({}).lean()).forEach(m => { teamMap[m._id] = m; });
   const nameFor = uid => uid && teamMap[uid] ? teamMap[uid].name : (uid ? `#${uid}` : 'Anonymous');
 
-  const shaped = ideas.map(i => {
+  const visible = ideas.filter(i => {
+    if (i.status !== 'pending_approval') return true;
+    return viewerIsAdmin || (viewerId && i.submitted_by === Number(viewerId));
+  });
+
+  const shaped = visible.map(i => {
     const votes = i.votes instanceof Map ? Object.fromEntries(i.votes) : (i.votes || {});
     const score = Object.values(votes).reduce((s, v) => s + v, 0);
     return {
@@ -1019,16 +1037,21 @@ async function getIdeas(viewerId) {
         user_name: nameFor(c.user_id),
       })).sort((a, b) => (a.created_at || '').localeCompare(b.created_at || '')),
       is_terminal: IDEA_TERMINAL_STATUSES.includes(i.status),
+      is_pending_approval: i.status === 'pending_approval',
     };
   });
 
-  // Active items first (highest score, then newest), terminal items last
-  // (most recently resolved first) — see models/Idea.js for the split.
-  const active = shaped.filter(i => !i.is_terminal)
+  // Pending-approval items the viewer can see come first (oldest first —
+  // the longest-waiting one needs attention most), then active items
+  // (highest score, then newest), terminal items last (most recently
+  // resolved first) — see models/Idea.js for the split.
+  const pending = shaped.filter(i => i.is_pending_approval)
+    .sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
+  const active = shaped.filter(i => !i.is_terminal && !i.is_pending_approval)
     .sort((a, b) => b.score - a.score || (b.created_at || '').localeCompare(a.created_at || ''));
   const terminal = shaped.filter(i => i.is_terminal)
     .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''));
-  return [...active, ...terminal];
+  return [...pending, ...active, ...terminal];
 }
 
 async function updateIdeaStatus(id, status) {
@@ -1038,6 +1061,21 @@ async function updateIdeaStatus(id, status) {
   if (!before) throw new Error('Idea not found');
   await Idea.updateOne({ _id: Number(id) }, { status, updated_at: nowStr() });
   return { id: Number(id), from: before.status, to: status, submitted_by: before.submitted_by, title: before.title, type: before.type };
+}
+
+// An admin clears a non-admin's submission off the approval queue —
+// the ONLY way a 'pending_approval' item reaches 'new' (posted to the
+// board, and the point where the "new idea submitted" email that used to
+// fire at submission time now fires instead — see the /approve route).
+// Declining uses the existing generic status-update path (-> 'wontfix'),
+// no separate function needed for that side.
+async function approveIdea(id, approverId) {
+  const idea = await Idea.findById(Number(id)).lean();
+  if (!idea) throw new Error('Idea not found');
+  if (idea.status !== 'pending_approval') throw new Error(`This isn't awaiting approval (status is '${idea.status}')`);
+  await Idea.updateOne({ _id: Number(id) }, { status: 'new', updated_at: nowStr() });
+  const submitter = idea.submitted_by ? await getMember(idea.submitted_by) : null;
+  return { id: Number(id), type: idea.type, title: idea.title, body: idea.body, page: idea.page, submitted_by: idea.submitted_by, submitter_name: submitter?.name || null };
 }
 
 // value: 1 (upvote), -1 (downvote), or 0 (remove my vote)
@@ -1940,7 +1978,7 @@ module.exports = {
   getPropagatableCustomersByJobNum, applyPropagateCustomersByJobNum,
   addIgnoredPair, getIgnoredPairs,
   heartbeat, getOnlineUsers,
-  submitIdea, getIdeas, updateIdeaStatus, voteIdea, addIdeaComment,
+  submitIdea, getIdeas, updateIdeaStatus, approveIdea, voteIdea, addIdeaComment,
   getEstimatorBids,
   savePhase, getLinkedCOs, linkCOToParent, checkDuplicateBidNumber,
   getSettings, updateSettings,
