@@ -488,6 +488,7 @@ router.delete('/api/v2/reminders/:id',         t(req => v2db.deleteReminder(req.
 // ── Notes (polymorphic — bid or change_order; dateless, separate from Reminders) ──
 router.get('/api/v2/notes',                    async (req, res) => { try { res.json(await v2db.getNotesFor(req.query.parent_type, req.query.parent_id)); } catch (e) { res.status(500).json({ error: e.message }); } });
 router.post('/api/v2/notes',                   t(req => v2db.addNote(req.body.parent_type, req.body.parent_id, req.body, req.session.userId)));
+router.patch('/api/v2/notes/:id',              t(req => v2db.updateNote(req.params.id, req.body.text)));
 router.delete('/api/v2/notes/:id',             t(req => v2db.deleteNote(req.params.id)));
 
 // ── Jobs ──────────────────────────────────────────────────────────────────────

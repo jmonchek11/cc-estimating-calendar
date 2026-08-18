@@ -242,7 +242,7 @@ async function getProjectDetail(projectId) {
     $or: [{ parent_type: 'bid', parent_id: { $in: bidIds } }, { parent_type: 'change_order', parent_id: { $in: cos.map(c => c._id) } }],
   }).sort({ created_at: -1 }).lean();
   const notesFor = (type, id) => allNotes.filter(n => n.parent_type === type && n.parent_id === id)
-    .map(n => ({ id: n._id, text: n.text, created_at: n.created_at, author: tm[n.created_by] || null }));
+    .map(n => ({ id: n._id, text: n.text, created_at: n.created_at, edited_at: n.edited_at || null, author: tm[n.created_by] || null }));
   const allFollowups = await M.Followup.find({
     $or: [
       { parent_type: 'bid', parent_id: { $in: bidIds } },
@@ -1959,6 +1959,12 @@ async function addNote(parentType, parentId, { text }, actorId) {
   await M.Note.create({ _id: id, parent_type: parentType, parent_id: Number(parentId), text: text.trim(), created_by: actorId || null });
   return { id };
 }
+async function updateNote(id, text) {
+  if (!text || !text.trim()) throw new Error('Note text is required');
+  const M = getModels();
+  await M.Note.updateOne({ _id: Number(id) }, { $set: { text: text.trim(), edited_at: ts() } });
+  return { ok: true };
+}
 async function deleteNote(id) {
   const M = getModels();
   await M.Note.deleteOne({ _id: Number(id) });
@@ -3616,7 +3622,7 @@ module.exports = {
   _norm, resolveCompanyByName, ensureBidCustomer, teamMap,
   addReminder, dismissReminder, deleteReminder, getRemindersFor, getDueReminders, markReminderEmailed,
   addWalkthrough, updateWalkthrough, removeWalkthrough, getBidsNeedingWalkthroughReminder, markWalkthroughReminderSent, setWalkthroughRsvp,
-  addNote, deleteNote, getNotesFor,
+  addNote, updateNote, deleteNote, getNotesFor,
   getDigest,
   getTeamV2, createTeamMemberV2, updateTeamMemberV2, updateMyNotificationPrefs, updateSettingsV2, getSettings,
   removeBidCustomer, createCompanyV2, deleteBid, addSubEstimator, removeSubEstimator,

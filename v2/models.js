@@ -325,6 +325,7 @@ const NoteSchema = new mongoose.Schema({
   text:        { type: String, required: true },
   created_by:  { type: Number, default: null },
   created_at:  { type: String, default: ts },
+  edited_at:   { type: String, default: null },
 }, opts);
 
 // TeamMember is v1's ACTUAL model (not a v2-isolated copy). v1 and v2 used to

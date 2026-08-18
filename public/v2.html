@@ -2362,7 +2362,7 @@ function projectDetailsHtml(proj) {
   if (proj.type_of_work) bits.push(`🏗️ ${esc(proj.type_of_work)}`);
   if (proj.size_bucket) bits.push(`📐 ${esc(proj.size_bucket)}`);
   if (!bits.length && !proj.description) return '';
-  return `<div style="font-size:12px;margin-top:4px">
+  return `<div style="font-size:12px;padding:0 16px 12px">
     ${bits.length ? `<div style="color:var(--text-muted)">${bits.join(' · ')}</div>` : ''}
     ${proj.description ? `<div style="color:var(--text-muted);font-style:italic;margin-top:2px">${esc(proj.description)}</div>` : ''}
   </div>`;
@@ -2603,8 +2603,9 @@ function actAddReminder(parentType, parentId) {
 // single static Notes description field.
 function notesHtml(parentType, parentId, notesLog) {
   const rows = (notesLog || []).map(n => `<div style="font-size:12px;padding:3px 0">
-      <span style="color:var(--text-muted)">${fmtHistoryTs(n.created_at)}${n.author ? ` · ${esc(n.author.name)}` : ''}:</span>
+      <span style="color:var(--text-muted)">${fmtHistoryTs(n.created_at)}${n.author ? ` · ${esc(n.author.name)}` : ''}${n.edited_at ? ' · <span style="font-style:italic">edited</span>' : ''}:</span>
       ${esc(n.text)}
+      <a href="#" onclick="event.preventDefault();actEditNote('${parentType}',${parentId},${n.id},'${escJs(n.text)}')" style="font-size:11px;color:#2563eb;margin-left:4px">edit</a>
       <a href="#" onclick="event.preventDefault();actDeleteNote('${parentType}',${parentId},${n.id})" style="font-size:11px;color:#dc2626;margin-left:4px">delete</a>
     </div>`).join('');
   return `<div style="margin-top:4px">${rows}
@@ -2615,6 +2616,11 @@ function actAddNote(parentType, parentId) {
   showForm('🗒️ Add Note', [
     { id: 'text', label: 'Note', type: 'textarea', required: true, placeholder: 'Anything worth remembering — no date attached…' },
   ], data => api('POST', '/api/v2/notes', { ...data, parent_type: parentType, parent_id: parentId }), 'Add Note', 'blue');
+}
+function actEditNote(parentType, parentId, id, text) {
+  showForm('🗒️ Edit Note', [
+    { id: 'text', label: 'Note', type: 'textarea', required: true, value: text },
+  ], data => api('PATCH', `/api/v2/notes/${id}`, data), 'Save', 'blue');
 }
 async function actDeleteNote(parentType, parentId, id) {
   if (!confirm('Delete this note?')) return;
