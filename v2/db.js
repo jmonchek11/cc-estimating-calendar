@@ -804,13 +804,22 @@ async function demoteToLead(id, actorId) {
 }
 
 // ── opportunity → active_bid ("Start Bid") ────────────────────────────────────
+// An opportunity arrives here already carrying real info — due date,
+// customers/contacts (New Opportunity or Promote Lead), estimator/PM
+// (Approve to Bid) — so this only re-requires what's genuinely new at this
+// stage (bid #, date received) and otherwise treats the opportunity's
+// existing values as the default: the frontend prefills the Start Bid form
+// from them, and a customer already on the bid's roster is left alone
+// rather than re-required or re-created as a duplicate row.
 async function startBid(id, data, actorId) {
   const M = getModels();
   const bid = await loadBid(id);
   if (bid.stage !== 'opportunity') throw new Error(`Cannot start bid from stage '${bid.stage}'`);
   require_(data, ['bid_number', 'date_received', 'due_date']);
-  const companyIds = await resolveCompanyIds(data.company_ids, data.new_companies);
-  if (!companyIds.length) throw new Error('At least one customer company is required');
+  const existingCustomerCount = await M.BidCustomer.countDocuments({ bid_id: bid._id });
+  if (!existingCustomerCount && !(data.company_ids?.length || data.new_companies?.length)) {
+    throw new Error('At least one customer company is required');
+  }
 
   // Bid # is entered manually for now (generated outside this system).
   // Future: auto-generate the B-year-sequence here.
@@ -819,7 +828,10 @@ async function startBid(id, data, actorId) {
   await M.Bid.updateOne({ _id: bid._id }, { $set: {
     stage: 'active_bid',
     bid_number,
-    // Estimator/salesperson can be left TBD and assigned later.
+    // Estimator/salesperson can be left TBD and assigned later — but an
+    // estimator/PM assigned earlier at Approve to Bid is prefilled into this
+    // form rather than defaulting to blank, so leaving it alone here doesn't
+    // silently clear that assignment.
     estimator_id: data.estimator_id ? Number(data.estimator_id) : null,
     salesperson_id: data.salesperson_id ? Number(data.salesperson_id) : null,
     sub_estimators: data.sub_estimators || [],
@@ -836,13 +848,10 @@ async function startBid(id, data, actorId) {
     prevailing_wage: data.prevailing_wage === '' || data.prevailing_wage == null ? null : (Number(data.prevailing_wage) === 1),
     updated_at: ts(),
   }});
-  for (const companyId of companyIds) {
-    await M.BidCustomer.create({
-      _id: await nextId('bid_customers'),
-      bid_id: bid._id, company_id: companyId,
-      contact_ids: (data.contact_ids_by_company || {})[companyId] || [],
-    });
-  }
+  // ensureBidCustomer (inside here) no-ops for a company already on the
+  // roster — safe to call even though the frontend now normally skips
+  // asking for customers that are already attached.
+  await attachCustomersAndContacts(bid._id, data);
   const proj = await M.Project.findById(bid.project_id).lean();
   await events.safeEmit('bid.stage_changed', {
     project_id: bid.project_id, bid_id: bid._id, actor_id: actorId || null,
