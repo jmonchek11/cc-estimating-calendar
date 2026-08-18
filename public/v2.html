@@ -3380,10 +3380,66 @@ async function actNewLead() {
     { id: 'notes', label: 'Notes (internal discussion)', type: 'textarea', placeholder: 'Why are we tracking this? What do we still need to know?' },
   ], data => api('POST', '/api/v2/leads', data), 'Create Lead');
 }
+// A lead is deliberately lighter-weight than an opportunity (see the New
+// Lead form above) — promoting one now collects everything a directly-
+// created opportunity would have needed, same required fields and same
+// per-customer POC picker as actNewOpportunity, so nothing skips the gate
+// just because it started life as a lead.
 async function actPromoteLead(bidId) {
-  if (!confirm('Promote this lead to a real opportunity? It will move to the Daily Bid / No Bid list for daily review.')) return;
-  try { await api('POST', `/api/v2/bids/${bidId}/promote-to-opportunity`); await refresh(); }
-  catch (e) { alert('Failed: ' + e.message); }
+  const b = DETAIL_CACHE[OPEN_PROJECT]?.bids.find(x => x.id === bidId)
+    || (VIEW.name === 'bidlist' ? LIST_STATE[VIEW.arg] : null)?.find(x => x.id === bidId) || {};
+  const projectId = OPEN_PROJECT || b.project_id;
+  let proj = null, bidDetail = null;
+  try {
+    proj = await api('GET', `/api/v2/projects/${projectId}`);
+    bidDetail = proj.bids.find(x => x.id === bidId);
+  } catch { /* form still opens with blanks if this lookup fails */ }
+
+  let contactsByCompany = {};
+  try {
+    const contacts = (await api('GET', '/api/v2/contacts')).sort((a, c) => (a.full_name || '').localeCompare(c.full_name || ''));
+    contacts.forEach(c => { if (c.company_id) (contactsByCompany[c.company_id] = contactsByCompany[c.company_id] || []).push(c); });
+  } catch { /* per-customer contact lists just come up empty if this fails */ }
+
+  const sourceValue = OPPORTUNITY_SOURCE_OPTIONS.some(o => o.value === bidDetail?.source) ? bidDetail.source : undefined;
+
+  showForm('✓ Promote to Opportunity', [
+    { id: 'source', label: 'Source', type: 'select', required: true, value: sourceValue, options: OPPORTUNITY_SOURCE_OPTIONS },
+    { id: 'owner_id', label: 'Opportunity Owner', type: 'select', required: true, options: teamOpts(), value: bidDetail?.owner?.id },
+    { id: 'due_date', label: 'Due Date', type: 'date', required: true, value: bidDetail?.due_date },
+    { id: 'due_time', label: 'Due Time (optional)', type: 'time', value: bidDetail?.due_time },
+    { id: 'location', label: 'Job Location', type: 'text', required: true, value: proj?.location, placeholder: 'City, State or site address…' },
+    { id: 'type_of_work', label: 'Type of Work', type: 'select', required: true, value: proj?.type_of_work, options: TYPE_OF_WORK_OPTIONS },
+    { id: 'size_bucket', label: 'Project Size', type: 'select', emptyLabel: 'Unknown / not yet known', value: proj?.size_bucket, options: PROJECT_SIZE_BUCKETS },
+    { id: 'description', label: 'Project Description', type: 'textarea', required: true, value: proj?.description, placeholder: 'Brief description of the scope of work…' },
+    { id: 'company_ids', label: 'Customer(s) — GC, owner, etc. (add as many as apply)', type: 'company', multi: true, required: true, newKey: 'new_companies', options: companyOpts(), placeholder: 'Type customer name…',
+      onChange: () => renderOppContactPickers(contactsByCompany) },
+    { id: 'opp_contacts_section', type: 'custom' },
+    { id: 'notes', label: 'Additional Notes — why are we considering this?', type: 'textarea', required: true, value: bidDetail?.notes, placeholder: 'Why are we considering this?' },
+    { id: 'rfi_due_date', label: 'RFI Due Date (not required)', type: 'date', value: bidDetail?.rfi_due_date },
+    { id: 'rfi_due_time', label: 'RFI Due Time (optional)', type: 'time', value: bidDetail?.rfi_due_time },
+  ], data => {
+    const contact_ids_by_company = {};
+    const new_contacts_by_company = {};
+    const selected = COMBO_STATE['company_ids'] || [];
+    const existingCompanies = selected.filter(s => s.id);
+    let pocCount = 0;
+    existingCompanies.forEach(s => {
+      const picks = COMBO_STATE['opp_contact_' + s.id] || [];
+      const existingIds = picks.filter(p => p.id).map(p => p.id);
+      const newNames = picks.filter(p => !p.id).map(p => p.name);
+      if (existingIds.length) contact_ids_by_company[s.id] = existingIds;
+      if (newNames.length) new_contacts_by_company[s.id] = newNames;
+      pocCount += existingIds.length + newNames.length;
+    });
+    if (existingCompanies.length && !pocCount) return Promise.reject(new Error('Required: POC (add at least one point of contact for a customer)'));
+    return api('POST', `/api/v2/bids/${bidId}/promote-to-opportunity`, { ...data, contact_ids_by_company, new_contacts_by_company }).then(result => {
+      if (result.new_contacts?.length) openNewContactFollowup(result.new_contacts);
+      return result;
+    });
+  }, 'Promote to Opportunity', 'green');
+
+  renderOppContactPickers(contactsByCompany);
 }
 async function actDemoteToLead(bidId) {
   if (!confirm('Move this back to Active Leads? Use this if it turns out there\'s no real substance yet (no funding, no contact).')) return;

@@ -733,44 +733,7 @@ async function createOpportunity({ project_id, project_name, notes, description,
   const ownerId = owner_id ? Number(owner_id) : (created_by ? Number(created_by) : null);
   await M.Bid.create({ _id: bidId, project_id: pid, stage: startStage, notes: notes || null, due_date: due_date || null, due_time: due_time || null, rfi_due_date: rfi_due_date || null, rfi_due_time: rfi_due_time || null, owner_id: ownerId, source: source || null });
 
-  const companyIds = await resolveCompanyIds(company_ids, new_companies);
-  for (const companyId of companyIds) await ensureBidCustomer(bidId, companyId);
-  // Each customer only gets the contacts picked specifically for THEM (the
-  // frontend only offers a company's own contacts once it's selected) —
-  // new companies typed in fresh have no contacts yet, nothing to attach.
-  if (contact_ids_by_company) {
-    for (const [companyIdStr, contactIds] of Object.entries(contact_ids_by_company)) {
-      const companyId = Number(companyIdStr);
-      if (!companyIds.includes(companyId) || !contactIds?.length) continue;
-      const bc = await M.BidCustomer.findOne({ bid_id: bidId, company_id: companyId }).lean();
-      if (bc) await M.BidCustomer.updateOne({ _id: bc._id }, { $addToSet: { contact_ids: { $each: contactIds.map(Number) } } });
-    }
-  }
-  // Contacts typed in fresh via the picker's "add new" option — create the
-  // Contact record first, then attach it same as an existing pick. Only a
-  // name comes from that picker (no email/phone/position field there), so
-  // every one created this way is collected into newContacts and handed
-  // back to the caller — the frontend follows up with a prompt to fill in
-  // the rest right after the opportunity is created, since otherwise that
-  // info tends to just never get added.
-  const newContacts = [];
-  if (new_contacts_by_company) {
-    for (const [companyIdStr, names] of Object.entries(new_contacts_by_company)) {
-      const companyId = Number(companyIdStr);
-      if (!companyIds.includes(companyId) || !names?.length) continue;
-      const bc = await M.BidCustomer.findOne({ bid_id: bidId, company_id: companyId }).lean();
-      if (!bc) continue;
-      for (const rawName of names) {
-        const name = String(rawName || '').trim();
-        if (!name) continue;
-        const [first, ...rest] = name.split(/\s+/);
-        const contactId = await nextId('contacts');
-        await M.Contact.create({ _id: contactId, company_id: companyId, first_name: first || null, last_name: rest.join(' ') || null, active: 1 });
-        await M.BidCustomer.updateOne({ _id: bc._id }, { $addToSet: { contact_ids: contactId } });
-        newContacts.push({ id: contactId, name, company_id: companyId });
-      }
-    }
-  }
+  const { newContacts } = await attachCustomersAndContacts(bidId, { company_ids, new_companies, contact_ids_by_company, new_contacts_by_company });
 
   const actorId = created_by ? Number(created_by) : null;
   const proj = await M.Project.findById(pid).lean();
@@ -791,17 +754,35 @@ async function createOpportunity({ project_id, project_name, notes, description,
 // ── lead → opportunity ("Promote to Opportunity") ─────────────────────────────
 // A lead becomes a real opportunity once there's something concrete to
 // review daily (a contact, plans, actual funding) — see DATA_MODEL_SPEC.md.
-async function promoteLead(id, actorId) {
+// A lead is deliberately created with only a handful of fields (see
+// createOpportunity's stage:'lead' path) — promoting it now requires
+// filling in everything a directly-created opportunity would have needed,
+// so the same required-field set applies here.
+async function promoteLead(id, data, actorId) {
   const M = getModels();
   const bid = await loadBid(id);
   if (bid.stage !== 'lead') throw new Error(`Cannot promote from stage '${bid.stage}' — only leads can be promoted to an opportunity`);
-  await M.Bid.updateOne({ _id: bid._id }, { $set: { stage: 'opportunity', updated_at: ts() } });
+  require_(data, ['location', 'type_of_work', 'description', 'due_date', 'notes', 'source', 'owner_id']);
+
+  await M.Project.updateOne({ _id: bid.project_id }, { $set: {
+    description: data.description, location: data.location,
+    size_bucket: data.size_bucket || null, type_of_work: data.type_of_work,
+  } });
+  await M.Bid.updateOne({ _id: bid._id }, { $set: {
+    stage: 'opportunity', updated_at: ts(),
+    notes: data.notes, due_date: data.due_date, due_time: data.due_time || null,
+    rfi_due_date: data.rfi_due_date || null, rfi_due_time: data.rfi_due_time || null,
+    owner_id: Number(data.owner_id), source: data.source,
+  } });
+
+  const { newContacts } = await attachCustomersAndContacts(bid._id, data);
+
   const proj = await M.Project.findById(bid.project_id).lean();
   await events.safeEmit('bid.stage_changed', {
     project_id: bid.project_id, bid_id: bid._id, actor_id: actorId || null,
     payload: { from: 'lead', to: 'opportunity', project_name: proj?.name || null },
   });
-  return { bid_id: bid._id, stage: 'opportunity' };
+  return { bid_id: bid._id, stage: 'opportunity', new_contacts: newContacts };
 }
 
 // ── opportunity → lead ("Move to Lead") ────────────────────────────────────────
@@ -946,6 +927,52 @@ async function resolveCompanyIds(company_ids, new_companies) {
   for (const cid of (company_ids || [])) { const n = Number(cid); if (n) ids.push(n); }
   for (const nm of (new_companies || [])) ids.push(await resolveCompanyByName(nm));
   return [...new Set(ids)];
+}
+
+// Attach a bid's customer roster + their POCs from the New Opportunity /
+// Promote to Opportunity picker payload — shared by both since the fields
+// captured are identical. Each customer only gets the contacts picked
+// specifically for THEM (the frontend only offers a company's own contacts
+// once it's selected); new companies typed in fresh have no contacts yet,
+// nothing to attach.
+async function attachCustomersAndContacts(bidId, { company_ids, new_companies, contact_ids_by_company, new_contacts_by_company }) {
+  const M = getModels();
+  const companyIds = await resolveCompanyIds(company_ids, new_companies);
+  for (const companyId of companyIds) await ensureBidCustomer(bidId, companyId);
+  if (contact_ids_by_company) {
+    for (const [companyIdStr, contactIds] of Object.entries(contact_ids_by_company)) {
+      const companyId = Number(companyIdStr);
+      if (!companyIds.includes(companyId) || !contactIds?.length) continue;
+      const bc = await M.BidCustomer.findOne({ bid_id: bidId, company_id: companyId }).lean();
+      if (bc) await M.BidCustomer.updateOne({ _id: bc._id }, { $addToSet: { contact_ids: { $each: contactIds.map(Number) } } });
+    }
+  }
+  // Contacts typed in fresh via the picker's "add new" option — create the
+  // Contact record first, then attach it same as an existing pick. Only a
+  // name comes from that picker (no email/phone/position field there), so
+  // every one created this way is collected into newContacts and handed
+  // back to the caller — the frontend follows up with a prompt to fill in
+  // the rest right after the opportunity is created, since otherwise that
+  // info tends to just never get added.
+  const newContacts = [];
+  if (new_contacts_by_company) {
+    for (const [companyIdStr, names] of Object.entries(new_contacts_by_company)) {
+      const companyId = Number(companyIdStr);
+      if (!companyIds.includes(companyId) || !names?.length) continue;
+      const bc = await M.BidCustomer.findOne({ bid_id: bidId, company_id: companyId }).lean();
+      if (!bc) continue;
+      for (const rawName of names) {
+        const name = String(rawName || '').trim();
+        if (!name) continue;
+        const [first, ...rest] = name.split(/\s+/);
+        const contactId = await nextId('contacts');
+        await M.Contact.create({ _id: contactId, company_id: companyId, first_name: first || null, last_name: rest.join(' ') || null, active: 1 });
+        await M.BidCustomer.updateOne({ _id: bc._id }, { $addToSet: { contact_ids: contactId } });
+        newContacts.push({ id: contactId, name, company_id: companyId });
+      }
+    }
+  }
+  return { companyIds, newContacts };
 }
 
 // ── Contacts ───────────────────────────────────────────────────────────────
