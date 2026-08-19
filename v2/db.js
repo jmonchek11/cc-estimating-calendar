@@ -3059,11 +3059,11 @@ async function getAllPendingJobs() {
 
 async function getDataHealth() {
   const M = getModels();
-  const [projects, bids, jobs, cos, companies, bidCustomers, contacts, submissions, reminders, members] = await Promise.all([
+  const [projects, bids, jobs, cos, companies, bidCustomers, contacts, submissions, reminders, members, followups] = await Promise.all([
     M.Project.find().lean(), M.Bid.find().lean(), M.Job.find().lean(),
     M.ChangeOrder.find().lean(), M.Company.find().lean(), M.BidCustomer.find().lean(),
     M.Contact.find({ active: 1 }).lean(), M.BidSubmission.find().lean(), M.Reminder.find().lean(),
-    M.TeamMember.find().lean(),
+    M.TeamMember.find().lean(), M.Followup.find({ contact_id: { $ne: null } }).lean(),
   ]);
   const tmName = {}; members.forEach(m => tmName[m._id] = m.name);
   const ignoredPairs = await M.IgnoredPair.find().lean();
@@ -3139,10 +3139,37 @@ async function getDataHealth() {
   const contactsByCompany = {};
   contacts.forEach(c => { if (!c.company_id) return; (contactsByCompany[c.company_id] = contactsByCompany[c.company_id] || []).push(c); });
   let dupContacts = [];
+  const flaggedContactIds = new Set();
   for (const [companyId, list] of Object.entries(contactsByCompany)) {
     const items = list.map(c => ({ id: c._id, name: [c.first_name, c.last_name].filter(Boolean).join(' ') || '(no name)', key: _norm([c.first_name, c.last_name].filter(Boolean).join(' ')), phone: c.phone, email: c.email }));
     const groups = _clusterSimilar(items, ignoreSet('contact'));
-    groups.forEach(g => dupContacts.push({ company_id: Number(companyId), company: companyName[companyId] || '?', contacts: g }));
+    groups.forEach(g => { dupContacts.push({ company_id: Number(companyId), company: companyName[companyId] || '?', contacts: g }); g.forEach(x => flaggedContactIds.add(x.id)); });
+  }
+  // First-name-only + has calls logged, at a company that also has a fuller
+  // record with the same first name — e.g. a bare "Maggie" gets a call
+  // logged before anyone notices "Maggie Higgins" already exists. The name
+  // clustering above requires ~10 chars to safely prefix-match, which a bare
+  // first name almost never clears, so it's caught separately here — gated
+  // on having a logged call so an incomplete-but-otherwise-untouched record
+  // doesn't get flagged just for lacking a last name.
+  const contactIdsWithCalls = new Set(followups.map(f => f.contact_id));
+  for (const [companyId, list] of Object.entries(contactsByCompany)) {
+    const bareWithCalls = list.filter(c => c.first_name && !c.last_name && contactIdsWithCalls.has(c._id) && !flaggedContactIds.has(c._id));
+    for (const bare of bareWithCalls) {
+      const fuller = list.find(c => c._id !== bare._id && !flaggedContactIds.has(c._id)
+        && _norm(c.first_name) === _norm(bare.first_name) && c.last_name);
+      if (!fuller) continue;
+      const pairKey = Math.min(bare._id, fuller._id) + ':' + Math.max(bare._id, fuller._id);
+      if (ignoreSet('contact').has(pairKey)) continue;
+      dupContacts.push({
+        company_id: Number(companyId), company: companyName[companyId] || '?',
+        contacts: [
+          { id: fuller._id, name: [fuller.first_name, fuller.last_name].filter(Boolean).join(' '), phone: fuller.phone, email: fuller.email },
+          { id: bare._id, name: bare.first_name, phone: bare.phone, email: bare.email },
+        ],
+      });
+      flaggedContactIds.add(bare._id).add(fuller._id);
+    }
   }
 
   // Companies with zero activity anywhere (no bids ever bid to them, no
@@ -3283,8 +3310,9 @@ async function mergeCompanies(survivorId, mergeIds) {
 }
 
 // ── Merge duplicate contacts — repoints any BidCustomer.contact_ids arrays
-// that reference a merged id to the survivor (deduping in case a bid somehow
-// ended up referencing both), then deletes the merged rows.
+// and any Followup.contact_id (communications timeline) that reference a
+// merged id to the survivor (deduping in case a bid somehow ended up
+// referencing both), then deletes the merged rows.
 async function mergeContacts(survivorId, mergeIds) {
   const M = getModels();
   const sid = Number(survivorId);
@@ -3297,6 +3325,7 @@ async function mergeContacts(survivorId, mergeIds) {
     const newIds = [...new Set(bc.contact_ids.map(cid => ids.includes(cid) ? sid : cid))];
     await M.BidCustomer.updateOne({ _id: bc._id }, { $set: { contact_ids: newIds } });
   }
+  await M.Followup.updateMany({ contact_id: { $in: ids } }, { $set: { contact_id: sid } });
   await M.Contact.deleteMany({ _id: { $in: ids } });
   return { survivor: sid, merged: ids.length };
 }
