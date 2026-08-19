@@ -2514,8 +2514,16 @@ async function getBidList(stage) {
   // 'queue' is a view onto 'opportunity' rows that have been approved to
   // move forward, not a real stage in the bid state machine — approving one
   // pulls it out of the plain Opportunities list (below) and into this one.
+  // 'closed'/'incomplete' are both the real 'closed' stage, split by whether
+  // a bid # was ever assigned — a bid closed before Start Bid was never more
+  // than a declined opportunity; one closed after already had a bid # (real
+  // estimating work in flight) is a dropped/incomplete bid, not just a
+  // declined opportunity. Same distinction reactivateBid() already uses to
+  // decide where "Reactivate" sends it back to.
   const filter = stage === 'queue' ? { stage: 'opportunity', approved_to_bid: true, superseded: { $ne: 1 } }
     : stage === 'opportunity' ? { stage, approved_to_bid: { $ne: true }, superseded: { $ne: 1 } }
+    : stage === 'closed' ? { stage: 'closed', bid_number: null, superseded: { $ne: 1 } }
+    : stage === 'incomplete' ? { stage: 'closed', bid_number: { $ne: null }, superseded: { $ne: 1 } }
     : { stage, superseded: { $ne: 1 } };
   const bids = await M.Bid.find(filter).sort({ due_date: 1, _id: 1 }).lean();
   const ids = bids.map(b => b._id);
@@ -2558,6 +2566,7 @@ async function getBidList(stage) {
       // (which may have been changed at award) is authoritative.
       job_number: job ? job.job_number : null, pm: job?.pm_id ? tm[job.pm_id] : (b.pm_id ? tm[b.pm_id] : null),
       closed_date: b.closed_date, closed_approved_by: b.closed_approved_by, close_reason: b.close_reason,
+      date_not_awarded: b.date_not_awarded, not_awarded_notes: b.not_awarded_notes,
     };
   });
 }
@@ -2565,7 +2574,11 @@ async function getBidList(stage) {
 // ── Change order list for a stage ─────────────────────────────────────────────
 async function getCoList(stage) {
   const M = getModels();
-  const filter = stage ? { stage, superseded: { $ne: 1 } } : { stage: { $in: ['active_co', 'submitted_co'] }, superseded: { $ne: 1 } };
+  // A voided CO lives in the same "not approved" list as one the customer
+  // explicitly rejected — both are a dead end for that CO, just a different
+  // reason, and splitting them into a 4th sidebar page wasn't worth it.
+  const filter = stage === 'not_approved' ? { stage: { $in: ['not_approved', 'voided'] }, superseded: { $ne: 1 } }
+    : stage ? { stage, superseded: { $ne: 1 } } : { stage: { $in: ['active_co', 'submitted_co'] }, superseded: { $ne: 1 } };
   const cos = await M.ChangeOrder.find(filter).sort({ due_date: 1, _id: 1 }).lean();
   const [jobs, projects, members] = await Promise.all([M.Job.find().lean(), M.Project.find().lean(), M.TeamMember.find().lean()]);
   const jobById = {}; jobs.forEach(j => jobById[j._id] = j);
@@ -2584,6 +2597,7 @@ async function getCoList(stage) {
       salesperson: job?.pm_id ? (tm[job.pm_id] || null) : null,
       due_date: c.due_date,
       estimate_amount: c.estimate_amount, date_submitted: c.date_submitted, next_followup_date: c.next_followup_date,
+      approval_date: c.approval_date, void_reason: c.void_reason, not_approved_notes: c.not_approved_notes,
     };
   });
 }
