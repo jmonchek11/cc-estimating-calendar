@@ -460,6 +460,7 @@ router.get('/api/v2/reports', async (req, res) => { try { res.json(await v2db.ge
 
 router.get('/api/v2/companies/:id/bids', async (req, res) => { try { res.json(await v2db.getCompanyBids(req.params.id)); } catch (e) { res.status(500).json({ error: e.message }); } });
 router.get('/api/v2/companies/:id/communications', async (req, res) => { try { res.json(await v2db.getCompanyCommunications(req.params.id)); } catch (e) { res.status(500).json({ error: e.message }); } });
+router.get('/api/v2/communications', async (req, res) => { try { res.json(await v2db.getAllCommunications(req.query)); } catch (e) { res.status(500).json({ error: e.message }); } });
 router.post('/api/v2/companies',         t(req => v2db.createCompanyV2(req.body)));
 
 // Per-bid-customer contact linking (bid flyout's per-customer contact list)

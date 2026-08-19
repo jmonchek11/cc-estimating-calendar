@@ -390,10 +390,10 @@ async function getProjectDetail(projectId) {
       pm: tm[j.pm_id] || null,
       apm: tm[j.apm_id] || null,
       award_date: j.award_date,
-      // The Job's folder IS the winning bid's folder — same OneDrive folder,
-      // just renamed at award from "bid# - bid name" to "job# - job name".
-      // No separate field on Job; look it up via the bid relationship instead.
-      folder_url: j.winning_bid_id ? (bids.find(b => b._id === j.winning_bid_id)?.folder_url || null) : null,
+      // Job's own folder_url, snapshotted from the winning bid's at award
+      // (same real folder, just renamed) — falls back to the bid's current
+      // value only for older jobs awarded before Job had its own field.
+      folder_url: j.folder_url || (j.winning_bid_id ? (bids.find(b => b._id === j.winning_bid_id)?.folder_url || null) : null),
       change_orders: cos
         .filter(c => c.job_id === j._id)
         .map(fmtCo)
@@ -1447,7 +1447,7 @@ const ADMIN_EDITABLE = {
   bid:            ['bid_number', 'estimator_id', 'salesperson_id', 'apm_id', 'pm_id', 'date_received', 'due_date', 'due_time', 'start_date',
                    'drawing_stage', 'notes', 'jurisdiction', 'superseded', 'owner_id', 'source', 'rfi_due_date', 'rfi_due_time', 'folder_url',
                    'certified_payroll', 'tax_exempt', 'prevailing_wage'],
-  job:            ['job_number', 'pm_id', 'apm_id', 'awarded_company_id', 'award_date'],
+  job:            ['job_number', 'pm_id', 'apm_id', 'awarded_company_id', 'award_date', 'folder_url'],
   change_order:   ['co_number', 'name', 'due_date', 'start_date', 'estimator_id', 'notes',
                    'estimate_amount', 'date_submitted', 'approved_by', 'approval_date'],
   bid_submission: ['company_id', 'amount', 'date_submitted', 'approved_by', 'submission_type', 'notes', 'is_current', 'not_awarded_notes'],
@@ -1531,6 +1531,7 @@ async function awardSubmission(submissionId, data, actorId) {
     awarded_company_id: sub.company_id,
     pm_id: pmId,
     award_date: data.award_date,
+    folder_url: bid.folder_url || null,
   });
 
   const [proj, company, pm] = await Promise.all([
@@ -1906,6 +1907,57 @@ async function getContactCommunications(contactId) {
     .sort((a, b) => b.sort_key.localeCompare(a.sort_key));
 }
 
+// Every communication in the system, across every company — the Data section's
+// "Communications" page (mirrors History's "everything, newest first" feel,
+// but for follow-ups/check-ins instead of the audit trail). Each row also
+// carries which company it was with, since that's not implicit here the way
+// it is on a single company's own timeline.
+async function getAllCommunications({ limit } = {}) {
+  const M = getModels();
+  const [followups, bids, subs, cos, jobs, bidCustomers, companies, members, contacts] = await Promise.all([
+    M.Followup.find({}).lean(),
+    M.Bid.find({}).lean(),
+    M.BidSubmission.find({}).lean(),
+    M.ChangeOrder.find({}).lean(),
+    M.Job.find({}).lean(),
+    M.BidCustomer.find({}).lean(),
+    M.Company.find({}).lean(),
+    M.TeamMember.find({}).lean(),
+    M.Contact.find({}).lean(),
+  ]);
+  const bidById = {}; bids.forEach(b => bidById[b._id] = b);
+  const subById = {}; subs.forEach(s => subById[s._id] = s);
+  const coById = {}; cos.forEach(c => coById[c._id] = c);
+  const jobById = {}; jobs.forEach(j => jobById[j._id] = j);
+  const companyById = {}; companies.forEach(c => companyById[c._id] = c);
+  const custByBid = {}; bidCustomers.forEach(bc => (custByBid[bc.bid_id] = custByBid[bc.bid_id] || []).push(bc.company_id));
+  const projectIds = [...new Set([...bids.map(b => b.project_id), ...jobs.map(j => j.project_id)])];
+  const projects = projectIds.length ? await M.Project.find({ _id: { $in: projectIds } }).lean() : [];
+  const pName = {}; projects.forEach(p => pName[p._id] = p.name);
+  const tm = teamMap(members);
+  const contactById = {}; contacts.forEach(c => contactById[c._id] = c);
+
+  const companyFor = (f) => {
+    if (f.parent_type === 'company') return f.parent_id;
+    if (f.parent_type === 'bid') return (custByBid[f.parent_id] || [])[0] || null;
+    if (f.parent_type === 'bid_submission') return subById[f.parent_id]?.company_id || null;
+    if (f.parent_type === 'change_order') {
+      const c = coById[f.parent_id]; const j = c ? jobById[c.job_id] : null;
+      return j?.awarded_company_id || null;
+    }
+    return null;
+  };
+
+  const ctx = { tm, contactById, bidById, subById, coById, jobById, pName };
+  return followups
+    .map(f => {
+      const cid = companyFor(f);
+      return { ...shapeCommunication(f, ctx), company: cid ? { id: cid, name: companyById[cid]?.name || '?' } : null };
+    })
+    .sort((a, b) => b.sort_key.localeCompare(a.sort_key))
+    .slice(0, Math.min(Number(limit) || 200, 500));
+}
+
 // ── Reminders (polymorphic — bid or change_order) ─────────────────────────────
 async function addReminder(parentType, parentId, { note, remind_on }) {
   if (!remind_on) throw new Error('remind_on required');
@@ -2174,6 +2226,7 @@ async function createLegacyJob(data) {
     awarded_company_id: awardedCompanyId,
     pm_id: pmId,
     award_date: data.award_date || null,
+    folder_url: data.folder_url || null,
   });
 
   const actorId = data.created_by ? Number(data.created_by) : null;
@@ -3822,7 +3875,7 @@ module.exports = {
   getMyPendingJobs, getAllPendingJobs,
   getGateTasksForBid, addGateTaskUpdate,
   getContacts, getContactDetail, createContact, updateContact, deleteContact, getContactBids, getCompanyBids,
-  getCompanyCommunications, getContactCommunications,
+  getCompanyCommunications, getContactCommunications, getAllCommunications,
   addBidCustomerContact, removeBidCustomerContact,
   awardSubmission, notAwardSubmission, closeBid, approveToBid, unapproveToBid, logFollowupV2, updateFollowup,
   createLegacyJob, updateJob,

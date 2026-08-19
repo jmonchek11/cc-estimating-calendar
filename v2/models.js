@@ -181,6 +181,11 @@ const JobSchema = new mongoose.Schema({
   pm_id:              { type: Number, default: null },           // FK → TeamMember — gets CO follow-up notifications
   apm_id:             { type: Number, default: null },           // FK → TeamMember — additional assignment, see Bid.apm_id
   award_date:         { type: String, default: null },
+  // Snapshotted from the winning bid's folder_url at award time (same real
+  // folder, just renamed) but stored independently so it can be corrected
+  // later without touching the bid, and so a legacy job (no bid at all) can
+  // have one too — same field, same editing UI as Bid.folder_url.
+  folder_url:         { type: String, default: null },
   created_at: { type: String, default: ts },
   updated_at: { type: String, default: ts },
 }, opts);

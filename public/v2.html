@@ -402,6 +402,7 @@
       <a class="nav-item" data-page="vendors" href="#vendors" onclick="navigate('vendors');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg></span> Vendors</a>
       <div class="nav-section-label">DATA</div>
       <a class="nav-item" data-page="health" href="#health" onclick="navigate('health');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></span> Data Health</a>
+      <a class="nav-item" data-page="communications" href="#communications" onclick="navigate('communications');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span> Communications</a>
       <a class="nav-item" data-page="history" href="#history" id="nav-history" style="display:none" onclick="navigate('history');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 16 14"/></svg></span> History</a>
       <a class="nav-item" data-page="settings" href="#settings" onclick="navigate('settings');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span> Settings</a>
       <div id="sidebar-user" style="margin-top:auto;padding:10px 16px 2px;font-size:11.5px;color:var(--text-muted)"></div>
@@ -468,6 +469,7 @@ const PAGE_ICONS = {
   vendors: '<rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/>',
   health: '<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>',
   history: '<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 16 14"/>',
+  communications: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
   settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
   search: '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
 };
@@ -704,6 +706,7 @@ function navigate(page) {
   if (page === 'dashboard') { VIEW = { name: 'dashboard' }; return renderDashboard(); }
   if (page === 'health') { VIEW = { name: 'health' }; return showHealth(); }
   if (page === 'history') { VIEW = { name: 'history' }; return renderHistory(); }
+  if (page === 'communications') { VIEW = { name: 'communications' }; return renderCommunications(); }
   if (page === 'leads') { VIEW = { name: 'bidlist', arg: 'lead' }; return renderBidList('lead'); }
   if (page === 'opportunities') { VIEW = { name: 'bidlist', arg: 'opportunity' }; return renderBidList('opportunity'); }
   if (page === 'closed-opportunities') { VIEW = { name: 'bidlist', arg: 'closed' }; return renderBidList('closed'); }
@@ -743,6 +746,7 @@ async function rerenderView() {
     case 'dashboard': return renderDashboard();
     case 'health':    return showHealth();
     case 'history':   return renderHistory();
+    case 'communications': return renderCommunications();
   }
 }
 
@@ -1581,7 +1585,10 @@ function defaultMine() { return !!CURRENT_USER && CURRENT_USER.role !== 'oversig
 function filterState(key) { return (FILTER_STATE[key] = FILTER_STATE[key] || { q: '', person: '', mine: defaultMine(), sort: 'due' }); }
 
 function personOpts() {
-  return META.team.map(t => [`${t.role === 'sales' ? 'sal' : 'est'}:${t.id}`, `${t.name} (${t.initials})`]);
+  return [
+    ...META.team.map(t => [`${t.role === 'sales' ? 'sal' : 'est'}:${t.id}`, `${t.name} (${t.initials})`]),
+    ...META.team.filter(t => t.is_apm).map(t => [`apm:${t.id}`, `${t.name} (${t.initials}) — APM`]),
+  ];
 }
 
 function filterBarHtml(key, sortOpts) {
@@ -1623,9 +1630,9 @@ function applyPersonMine(rows, s) {
   let out = rows;
   if (s.person) {
     const [kind, id] = s.person.split(':'); const nid = Number(id);
-    out = out.filter(r => kind === 'sal' ? r.salesperson?.id === nid : (r.estimator?.id === nid || (r.sub_estimators || []).some(se => se.id === nid)));
+    out = out.filter(r => kind === 'sal' ? r.salesperson?.id === nid : kind === 'apm' ? r.apm?.id === nid : (r.estimator?.id === nid || (r.sub_estimators || []).some(se => se.id === nid)));
   }
-  if (s.mine && CURRENT_USER) out = out.filter(r => r.estimator?.id === CURRENT_USER.id || r.salesperson?.id === CURRENT_USER.id || (r.sub_estimators || []).some(se => se.id === CURRENT_USER.id));
+  if (s.mine && CURRENT_USER) out = out.filter(r => r.estimator?.id === CURRENT_USER.id || r.salesperson?.id === CURRENT_USER.id || r.apm?.id === CURRENT_USER.id || (r.sub_estimators || []).some(se => se.id === CURRENT_USER.id));
   return out;
 }
 function applyTextSearch(rows, q, getFields) {
@@ -1643,14 +1650,14 @@ async function renderBidList(stage) {
   catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
 
   const sortOpts = stage === 'submitted'
-    ? [['submitted', 'Recently submitted'], ['followup', 'Follow-up date'], ['due', 'Due date'], ['amount', 'Amount'], ['project', 'Project name']]
+    ? [['submitted', 'Recently submitted'], ['followup', 'Follow-up date'], ['due', 'Due Date Ascending'], ['due_desc', 'Due Date Descending'], ['amount', 'Amount'], ['project', 'Project name']]
     : stage === 'awarded'
     ? [['award', 'Recently awarded'], ['amount', 'Amount'], ['project', 'Project name']]
     : stage === 'not_awarded'
     ? [['not_awarded', 'Recently decided'], ['amount', 'Amount'], ['project', 'Project name']]
     : (stage === 'closed' || stage === 'incomplete')
     ? [['closed', 'Recently closed'], ['amount', 'Amount'], ['project', 'Project name']]
-    : [['due', 'Due date'], ['amount', 'Amount'], ['project', 'Project name']];
+    : [['due', 'Due Date Ascending'], ['due_desc', 'Due Date Descending'], ['amount', 'Amount'], ['project', 'Project name']];
   // First time landing on a tab (still on the generic 'due' default), jump
   // to the sort that actually matches what the tab is for — most-recently-
   // submitted for Submitted, most-recently-awarded for Awarded — instead of
@@ -1687,6 +1694,7 @@ function renderBidListBody(stage) {
   rows = applyPersonMine(rows, s);
   const sorters = {
     due: (a, b) => (a.due_date || '9999').localeCompare(b.due_date || '9999'),
+    due_desc: (a, b) => (b.due_date || '0000').localeCompare(a.due_date || '0000'),
     followup: (a, b) => (a.next_followup_date || '9999').localeCompare(b.next_followup_date || '9999'),
     submitted: (a, b) => (b.date_submitted || '').localeCompare(a.date_submitted || ''),
     award: (a, b) => (b.award_date || '').localeCompare(a.award_date || ''),
@@ -1757,6 +1765,7 @@ function renderBidListBody(stage) {
             ${stage === 'queue' ? `<span class="proj-meta-sep">·</span> ${b.pm ? `PM ${ini(b.pm)}` : '<span style="color:#dc2626">no PM</span>'}` : ''}
             ${b.estimator ? `<span class="proj-meta-sep">·</span> Est ${ini(b.estimator)}` : ''}
             ${b.salesperson ? ` Sales ${ini(b.salesperson)}` : ''}
+            ${b.apm ? ` APM ${ini(b.apm)}` : ''}
           </div>
         </div>
         <div style="display:flex;align-items:center;gap:12px;flex-shrink:0;align-self:center">
@@ -1776,12 +1785,12 @@ async function renderCoList(stage) {
   catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
 
   const sortOpts = stage === 'submitted_co'
-    ? [['submitted', 'Recently submitted'], ['followup', 'Follow-up date'], ['due', 'Due date'], ['amount', 'Amount'], ['project', 'Project name']]
+    ? [['submitted', 'Recently submitted'], ['followup', 'Follow-up date'], ['due', 'Due Date Ascending'], ['due_desc', 'Due Date Descending'], ['amount', 'Amount'], ['project', 'Project name']]
     : stage === 'approved'
     ? [['approved', 'Recently approved'], ['amount', 'Amount'], ['project', 'Project name']]
     : stage === 'not_approved'
     ? [['project', 'Project name'], ['amount', 'Amount']]
-    : [['due', 'Due date'], ['amount', 'Amount'], ['project', 'Project name']];
+    : [['due', 'Due Date Ascending'], ['due_desc', 'Due Date Descending'], ['amount', 'Amount'], ['project', 'Project name']];
   if (stage === 'submitted_co' && filterState(stage).sort === 'due') filterState(stage).sort = 'submitted';
   if (stage === 'approved' && filterState(stage).sort === 'due') filterState(stage).sort = 'approved';
   if (stage === 'not_approved' && filterState(stage).sort === 'due') filterState(stage).sort = 'project';
@@ -1803,6 +1812,7 @@ function renderCoListBody(stage) {
   rows = applyPersonMine(rows, s);
   const sorters = {
     due: (a, b) => (a.due_date || '9999').localeCompare(b.due_date || '9999'),
+    due_desc: (a, b) => (b.due_date || '0000').localeCompare(a.due_date || '0000'),
     followup: (a, b) => (a.next_followup_date || '9999').localeCompare(b.next_followup_date || '9999'),
     submitted: (a, b) => (b.date_submitted || '').localeCompare(a.date_submitted || ''),
     approved: (a, b) => (b.approval_date || '').localeCompare(a.approval_date || ''),
@@ -2535,6 +2545,7 @@ function bidNode(b, proj) {
   if (b.estimator) metaBits.push(`Est. ${ini(b.estimator)}`);
   b.sub_estimators.forEach(s => metaBits.push(`${ini(s)}<span style="font-size:10px">${esc(s.scope)}<a href="#" onclick="event.preventDefault();actRemoveSubEstimator(${b.id},${s.id},'${escJs(s.scope)}')" style="color:#dc2626;margin-left:2px">✕</a></span>`));
   if (b.salesperson) metaBits.push(`Sales ${ini(b.salesperson)}`);
+  if (b.apm) metaBits.push(`APM ${ini(b.apm)}`);
   if (b.jurisdiction) metaBits.push(`Local ${esc(b.jurisdiction)}`);
   if (b.next_followup_date) metaBits.push(`Next F/U <span class="${b.next_followup_date < today ? 'overdue-txt' : ''}">${fmtD(b.next_followup_date)}${b.next_followup_date < today ? ' — OVERDUE' : ''}</span>`);
   if (b.close_reason) metaBits.push(`Closed ${fmtD(b.closed_date)} by ${esc(b.closed_approved_by)} — ${esc(b.close_reason)}`);
@@ -3540,6 +3551,7 @@ function actNewLegacyJob() {
     { id: 'awarded_company_id', label: 'Customer (who awarded us)', type: 'company', multi: false, newKey: 'new_company', options: companyOpts() },
     { id: 'pm_id', label: 'PM', type: 'select', emptyLabel: 'TBD', options: teamOpts(['pm', 'sales', 'estimator']) },
     { id: 'award_date', label: 'Award Date', type: 'date' },
+    { id: 'folder_url', label: 'Job Folder Link (OneDrive)', type: 'text', placeholder: 'https://onedrive.live.com/…' },
   ], data => api('POST', '/api/v2/jobs', data), 'Create Job');
 }
 
@@ -4006,6 +4018,7 @@ function actEditJob(jobId) {
     { id: 'apm_id', label: 'APM', type: 'select', emptyLabel: 'None', options: apmOpts(), value: j.apm?.id },
     { id: 'awarded_company_id', label: 'Customer (awarded by)', type: 'select', options: companyOpts(), value: j.awarded_company?.id },
     { id: 'award_date', label: 'Award Date', type: 'date', value: j.award_date },
+    { id: 'folder_url', label: 'Job Folder Link (OneDrive)', type: 'text', value: j.folder_url, placeholder: 'https://onedrive.live.com/…' },
   ], data => api('PATCH', `/api/v2/admin/job/${jobId}`, data), 'Save Changes');
 }
 
@@ -4166,6 +4179,7 @@ async function actLogFollowup(parentType, parentId) {
     { id: 'contact_id', label: 'Who did you speak to?', type: 'select', emptyLabel: contacts.length ? '— Type a new name below —' : 'No contacts on file yet — type below',
       options: contacts.map(c => ({ value: c.id, label: c.full_name + (c.title ? ` (${c.title})` : '') })) },
     { id: 'new_contact_name', label: 'New contact (if not listed above)', type: 'text', placeholder: 'Only if they aren’t in the list yet' },
+    { id: 'followup_date', label: 'Date', type: 'date', required: true, value: today },
     { id: 'notes', label: 'What was discussed?', type: 'textarea', required: true },
   ], data => api('POST', '/api/v2/followups', { ...data, parent_type: parentType, parent_id: parentId, company_id: companyId, outcome: 'no_decision' }),
   'Log (no decision yet — timer restarts)');
@@ -4421,6 +4435,22 @@ async function actUndoHistory(id) {
   if (!confirm('Undo this action?')) return;
   try { await api('POST', `/api/v2/activity/${id}/undo`); await renderHistory(); }
   catch (e) { alert('Failed: ' + e.message); }
+}
+
+// Everything logged across every company, newest first — same timeline
+// component the company/contact profiles use, just global and labeled with
+// which company each row is about (see communicationRowHtml's showCompany).
+async function renderCommunications() {
+  setActiveNav('communications');
+  const main = document.getElementById('main');
+  main.innerHTML = '<div style="padding:30px;color:var(--text-muted)">Loading…</div>';
+  let comms;
+  try { await ensureMeta(); comms = await api('GET', '/api/v2/communications?limit=300'); }
+  catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
+
+  main.innerHTML = `
+    <div class="page-header"><div><div class="page-title">${pageIcon('communications')} Communications</div><div class="page-subtitle">${comms.length} most recent — every follow-up and check-in, across all customers</div></div></div>
+    <div class="card" style="padding:6px 16px">${communicationsTimelineHtml(comms, { showCompany: true })}</div>`;
 }
 
 async function showHealth() {
@@ -5380,7 +5410,7 @@ const bidHistoryRowsHtml = (bids) => bids.length ? bids.map(b => `
 // with no project behind it at all. See getCompanyCommunications/
 // getContactCommunications in v2/db.js for how the two are merged.
 const COMM_METHOD_ICON = { phone: '📞', email: '✉️', in_person: '🤝', other: '💬' };
-function communicationRowHtml(c, isLast) {
+function communicationRowHtml(c, isLast, opts = {}) {
   const who = c.contacted_by ? `${ini(c.contacted_by)} <strong>${esc(c.contacted_by.name)}</strong>` : '<span style="color:var(--text-muted)">Someone</span>';
   const contact = c.contact_name ? `<strong>${esc(c.contact_name)}</strong>` : '<span style="color:var(--text-muted)">no one specific</span>';
   const openCtx = !c.context ? '' : c.context.kind === 'bid'
@@ -5389,6 +5419,12 @@ function communicationRowHtml(c, isLast) {
   const projectPill = c.context
     ? `<a href="#" onclick="event.preventDefault();${openCtx}" style="text-decoration:none;display:inline-block;background:rgba(59,130,246,.12);color:#2563eb;border:1px solid rgba(59,130,246,.25);font-size:11px;font-weight:600;padding:2px 8px;border-radius:12px">${esc(c.context.label)}${c.context.project_name ? ' · ' + esc(c.context.project_name) : ''}</a>`
     : `<span class="badge" style="background:#f1f5f9;color:var(--text-muted)">General check-in</span>`;
+  // Global feed (Data → Communications) needs to say WHICH company each row
+  // is about, since that's implicit everywhere else this timeline shows up
+  // (a company's own profile, a contact's own profile).
+  const companyPill = (opts.showCompany && c.company)
+    ? `<a href="#" onclick="event.preventDefault();openCompanyProfile(${c.company.id})" style="text-decoration:none;font-weight:700;color:var(--text)">🏢 ${esc(c.company.name)}</a>`
+    : '';
   return `
     <div style="display:flex;gap:10px">
       <div style="display:flex;flex-direction:column;align-items:center;width:10px;flex-shrink:0">
@@ -5396,6 +5432,7 @@ function communicationRowHtml(c, isLast) {
         ${!isLast ? `<div style="width:2px;flex:1;background:var(--border);margin-top:2px"></div>` : ''}
       </div>
       <div style="flex:1;min-width:0;padding-bottom:16px">
+        ${companyPill ? `<div style="font-size:13px;margin-bottom:2px">${companyPill}</div>` : ''}
         <div style="font-size:13px;line-height:1.5">${who} <span title="${esc(c.method || '')}">${COMM_METHOD_ICON[c.method] || '💬'}</span> ${contact}</div>
         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:3px">
           <span style="font-size:11px;color:var(--text-muted)">${fmtD(c.date)}</span>
@@ -5405,9 +5442,9 @@ function communicationRowHtml(c, isLast) {
       </div>
     </div>`;
 }
-function communicationsTimelineHtml(comms) {
+function communicationsTimelineHtml(comms, opts = {}) {
   if (!comms.length) return `<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px">No communications logged yet</div>`;
-  return `<div style="padding:6px 4px 0">${comms.map((c, i) => communicationRowHtml(c, i === comms.length - 1)).join('')}</div>`;
+  return `<div style="padding:6px 4px 0">${comms.map((c, i) => communicationRowHtml(c, i === comms.length - 1, opts)).join('')}</div>`;
 }
 // Company profile: pick which of the company's contacts (or type a new one).
 async function actLogGeneralCallFromCompany(companyId) {
@@ -6004,7 +6041,7 @@ const IDEA_PAGE_NAMES = {
   'submitted-bids': 'Bids to Follow Up On', 'awarded-bids': 'Awarded Bids', 'not-awarded-bids': 'Not Awarded Bids',
   'active-cos': 'Active Change Orders', 'submitted-cos': 'Change Orders to Follow Up On',
   'approved-cos': 'Approved Change Orders', 'not-approved-cos': 'Not Approved Change Orders',
-  projects: 'Projects', contacts: 'Contacts', vendors: 'Vendors', reports: 'Reports', health: 'Data Health', history: 'History',
+  projects: 'Projects', contacts: 'Contacts', vendors: 'Vendors', reports: 'Reports', health: 'Data Health', history: 'History', communications: 'Communications',
   settings: 'Settings', ideas: 'Ideas & Issues',
 };
 // Visible to everyone (not just admins) — the whole point of voting is that
