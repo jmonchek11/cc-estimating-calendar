@@ -209,7 +209,24 @@
      "More" drawer (same markup, no duplication) reached via the tab bar's
      last tab. Hidden entirely above the breakpoint via the second query.
      ═══════════════════════════════════════════════════════════════════════ */
-  #mobile-nav-backdrop, #mobile-tabbar, #mobile-fab, #mobile-nav-close, #mobile-topbar { display: none; }
+  #mobile-nav-backdrop, #mobile-tabbar, #mobile-nav-close, #mobile-topbar { display: none; }
+
+  /* Log-a-call FAB — shown at every width (not just mobile), so logging a
+     call is a one-click reach whether or not you're already looking at the
+     relevant bid. Sits above the bottom tab bar on mobile (see the media
+     query below); a plain bottom-right corner on desktop. */
+  #mobile-fab {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    position: fixed; right: 20px; bottom: 24px;
+    height: 46px; padding: 0 18px 0 16px; border-radius: 23px; border: none; z-index: 55;
+    background: var(--primary); color: #fff; box-shadow: 0 8px 20px rgba(37,99,235,.4), 0 2px 6px rgba(37,99,235,.3);
+    cursor: pointer; -webkit-tap-highlight-color: transparent;
+    font-family: inherit; font-size: 13px; font-weight: 700; white-space: nowrap;
+    transition: transform .1s ease, box-shadow .15s ease;
+  }
+  #mobile-fab svg { width: 19px; height: 19px; flex-shrink: 0; }
+  #mobile-fab:hover { box-shadow: 0 10px 24px rgba(37,99,235,.48), 0 3px 8px rgba(37,99,235,.35); }
+  #mobile-fab:active { transform: scale(.96); }
 
   @media (max-width: 860px) {
     #app { display: block; height: auto; min-height: 100dvh; }
@@ -266,16 +283,9 @@
     .mtab:active svg { transform: scale(.88); }
     .mtab.active { color: var(--primary); }
 
-    #mobile-fab {
-      display: flex; align-items: center; justify-content: center; gap: 8px;
-      position: fixed; right: 16px; bottom: calc(80px + env(safe-area-inset-bottom));
-      height: 46px; padding: 0 18px 0 16px; border-radius: 23px; border: none; z-index: 55;
-      background: var(--primary); color: #fff; box-shadow: 0 8px 20px rgba(37,99,235,.4), 0 2px 6px rgba(37,99,235,.3);
-      cursor: pointer; -webkit-tap-highlight-color: transparent;
-      font-family: inherit; font-size: 13px; font-weight: 700; white-space: nowrap;
-    }
-    #mobile-fab svg { width: 19px; height: 19px; flex-shrink: 0; }
-    #mobile-fab:active { transform: scale(.96); }
+    /* Sits above the bottom tab bar here — the always-on base rule above
+       covers everything else (color, shape, shadow). */
+    #mobile-fab { right: 16px; bottom: calc(80px + env(safe-area-inset-bottom)); }
 
     /* Forms/dialogs become bottom sheets on mobile — a native-feeling
        pattern instead of a small centered dialog with awkward margins. */
@@ -283,7 +293,7 @@
     .v2-modal { max-width: 100%; width: 100%; border-radius: 18px 18px 0 0; max-height: 90vh; }
   }
   @media (min-width: 861px) {
-    #mobile-tabbar, #mobile-fab, #mobile-nav-backdrop { display: none !important; }
+    #mobile-tabbar, #mobile-nav-backdrop { display: none !important; }
   }
 
   /* Mobile week agenda (see buildCalendarWeekAgenda) — full-width days with
@@ -399,9 +409,9 @@
     </nav>
     <div id="mobile-nav-backdrop" onclick="closeMobileNav()"></div>
     <main id="main"><div style="padding:30px;color:var(--text-muted)">Loading…</div></main>
-    <button id="mobile-fab" onclick="actQuickFollowup()" title="Log a follow-up" aria-label="Log a follow-up">
+    <button id="mobile-fab" onclick="actQuickFollowup()" title="Log a call" aria-label="Log a call">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.362 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
-      <span>Log Follow-up</span>
+      <span>Log a Call</span>
     </button>
     <nav id="mobile-tabbar">
       <a class="mtab" data-page="dashboard" href="#dashboard" onclick="navigate('dashboard');return false">
@@ -4120,18 +4130,37 @@ async function actLogFollowup(parentType, parentId) {
 // at the bid/CO you want to log against, so its own "Log Follow-up" button
 // is enough; on mobile that context is more likely gone (you're calling
 // from the truck), so this is a search-first shortcut to the same form.
+// Log-a-call FAB — now shown site-wide (not just mobile), so this is the
+// fastest path to log either kind of call: tied to a bid/CO (search as
+// before) or a general check-in with no project behind it at all (search
+// companies instead, then straight into the same form the company profile's
+// "+ Log a Call" uses).
+let QUICK_FU_MODE = 'project';   // 'project' | 'general'
 let QUICK_FU_RESULTS = [];
 let quickFuTimer;
 function actQuickFollowup() {
+  QUICK_FU_MODE = 'project';
+  renderQuickFollowupModal();
+}
+function setQuickFollowupMode(mode) {
+  QUICK_FU_MODE = mode;
+  renderQuickFollowupModal();
+}
+function renderQuickFollowupModal() {
   document.getElementById('v2-form-overlay')?.remove();
   const ov = document.createElement('div');
   ov.className = 'v2-overlay'; ov.id = 'v2-form-overlay';
+  const isProject = QUICK_FU_MODE === 'project';
   ov.innerHTML = `
     <div class="v2-modal" style="max-width:420px">
-      <div class="v2-modal-hd">📝 Log a Follow-up<button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">✕</button></div>
+      <div class="v2-modal-hd">📝 Log a Call<button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">✕</button></div>
       <div class="v2-modal-bd">
-        <div class="v2-field"><label>Which bid or change order?</label>
-          <input id="qfu-input" type="text" autocomplete="off" placeholder="Project name, bid #, CO #, company…" oninput="quickFollowupSearch()">
+        <div style="display:flex;gap:4px;background:var(--bg);padding:3px;border-radius:9px;margin-bottom:14px">
+          <button class="v2-btn ${isProject ? 'blue' : 'outline'}" style="flex:1;padding:7px 0;font-size:12.5px;border:none" onclick="setQuickFollowupMode('project')">On a Bid / CO</button>
+          <button class="v2-btn ${!isProject ? 'blue' : 'outline'}" style="flex:1;padding:7px 0;font-size:12.5px;border:none" onclick="setQuickFollowupMode('general')">General Call</button>
+        </div>
+        <div class="v2-field"><label>${isProject ? 'Which bid or change order?' : 'Which company?'}</label>
+          <input id="qfu-input" type="text" autocomplete="off" placeholder="${isProject ? 'Project name, bid #, CO #, company…' : 'Type a company name…'}" oninput="quickFollowupSearch()">
         </div>
         <div id="qfu-results" style="display:flex;flex-direction:column;gap:6px"></div>
       </div>
@@ -4146,6 +4175,19 @@ function quickFollowupSearch() {
   if (!input || !results) return;
   const q = input.value.trim();
   if (q.length < 2) { results.innerHTML = ''; QUICK_FU_RESULTS = []; return; }
+  if (QUICK_FU_MODE === 'general') {
+    const ql = q.toLowerCase();
+    QUICK_FU_RESULTS = META.companies.filter(c => c.name.toLowerCase().includes(ql)).slice(0, 10)
+      .map(c => ({ kind: 'company', id: c.id, label: c.name, sub: c.type || '' }));
+    results.innerHTML = QUICK_FU_RESULTS.length
+      ? QUICK_FU_RESULTS.map((r, i) => `
+        <div onclick="pickQuickFollowup(${i})" style="padding:10px 12px;border:1px solid var(--border);border-radius:9px;cursor:pointer">
+          <div style="font-weight:700;font-size:13px">🏢 ${esc(r.label)}</div>
+          ${r.sub ? `<div style="font-size:11.5px;color:var(--text-muted);margin-top:1px">${esc(r.sub)}</div>` : ''}
+        </div>`).join('')
+      : '<div style="padding:10px 2px;font-size:13px;color:var(--text-muted)">No matches</div>';
+    return;
+  }
   quickFuTimer = setTimeout(async () => {
     let res;
     try { res = await api('GET', '/api/v2/search?q=' + encodeURIComponent(q)); } catch { return; }
@@ -4166,6 +4208,7 @@ function pickQuickFollowup(i) {
   const r = QUICK_FU_RESULTS[i];
   if (!r) return;
   document.getElementById('v2-form-overlay')?.remove();
+  if (r.kind === 'company') { actLogGeneralCallFromCompany(r.id); return; }
   actLogFollowup(r.kind, r.id);
 }
 
