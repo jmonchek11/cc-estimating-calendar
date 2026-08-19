@@ -1031,7 +1031,9 @@ function actEditTeamMember(id) {
     { id: 'email', label: 'Email', type: 'text', value: m?.email },
     { id: 'active', label: 'Active', type: 'select', required: true, value: m?.active ? '1' : '0', options: [{ value: '1', label: 'Active' }, { value: '0', label: 'Inactive' }] },
     { id: 'is_admin', label: 'Admin', type: 'select', required: true, value: m?.is_admin ? '1' : '0', options: [{ value: '1', label: 'Yes — full access incl. Data Health merges' }, { value: '0', label: 'No' }] },
-  ], data => api('PATCH', `/api/v2/team/${id}`, { ...data, active: Number(data.active), is_admin: Number(data.is_admin) }), 'Save');
+    { id: 'is_apm', label: 'APM', type: 'select', required: true, value: m?.is_apm ? '1' : '0',
+      options: [{ value: '1', label: 'Yes — assignable as APM on bids/jobs (in addition to their role above)' }, { value: '0', label: 'No' }] },
+  ], data => api('PATCH', `/api/v2/team/${id}`, { ...data, active: Number(data.active), is_admin: Number(data.is_admin), is_apm: Number(data.is_apm) }), 'Save');
 }
 function actResetTeamPassword(id, name) {
   showForm(`🔑 Set Password — ${esc(name)}`, [
@@ -3110,6 +3112,10 @@ const teamOpts = (roleFilter) => META.team
 const nameOpts = (roleFilter) => META.team
   .filter(t => !roleFilter || roleFilter.includes(t.role))
   .map(t => ({ value: t.name, label: `${t.name} (${t.initials})` }));
+// APM is a flag, not a role — a person keeps their normal estimator/sales/pm
+// role and can ALSO be assignable as APM, so this filters on is_apm instead
+// of the role string teamOpts/nameOpts use.
+const apmOpts = () => META.team.filter(t => t.is_apm).map(t => ({ value: t.id, label: `${t.name} (${t.initials})` }));
 const companyOpts = () => META.companies.map(c => ({ value: c.id, label: c.name }));
 const projectOpts = () => ALL_PROJECTS.map(p => ({ value: p.id, label: p.name }));
 // Rough sqft buckets, captured at intake so LE/Sales can gauge bid/no-bid
@@ -3170,6 +3176,7 @@ const startBidFields = (b = {}) => {
   fields.push(
     { id: 'estimator_id', label: 'Estimator', type: 'select', emptyLabel: 'TBD', options: teamOpts(['estimator']), value: b.estimator?.id },
     { id: 'salesperson_id', label: 'Salesperson', type: 'select', emptyLabel: 'TBD', options: teamOpts(['sales']), value: b.salesperson?.id },
+    { id: 'apm_id', label: 'APM', type: 'select', emptyLabel: 'None', options: apmOpts(), value: b.apm?.id },
     { id: 'date_received', label: 'Date Received', type: 'date', required: true, value: today },
     { id: 'due_date', label: 'Due Date', type: 'date', required: true, value: b.due_date },
     { id: 'due_time', label: 'Due Time (optional)', type: 'time', value: b.due_time },
@@ -3651,6 +3658,7 @@ function actEditBid(bidId) {
     fields.push(
       { id: 'estimator_id', label: 'Estimator', type: 'select', emptyLabel: 'TBD', options: teamOpts(['estimator']), value: b.estimator?.id },
       { id: 'salesperson_id', label: 'Salesperson', type: 'select', emptyLabel: 'TBD', options: teamOpts(['sales']), value: b.salesperson?.id },
+      { id: 'apm_id', label: 'APM', type: 'select', emptyLabel: 'None', options: apmOpts(), value: b.apm?.id },
     );
     if (showSubEst) fields.push({ id: 'sub_est_section', type: 'custom' });
     fields.push(
@@ -3940,6 +3948,7 @@ function actEditJob(jobId) {
   showForm('✏️ Edit Job (admin)', [
     { id: 'job_number', label: 'Job #', type: 'text', value: j.job_number },
     { id: 'pm_id', label: 'PM', type: 'select', emptyLabel: 'TBD', options: teamOpts(['pm', 'sales', 'estimator']), value: j.pm?.id },
+    { id: 'apm_id', label: 'APM', type: 'select', emptyLabel: 'None', options: apmOpts(), value: j.apm?.id },
     { id: 'awarded_company_id', label: 'Customer (awarded by)', type: 'select', options: companyOpts(), value: j.awarded_company?.id },
     { id: 'award_date', label: 'Award Date', type: 'date', value: j.award_date },
   ], data => api('PATCH', `/api/v2/admin/job/${jobId}`, data), 'Save Changes');
@@ -4064,14 +4073,46 @@ function actEditOpportunityDetails(bidId) {
   ], data => api('PATCH', `/api/v2/bids/${bidId}/opportunity`, data), 'Save');
 }
 
-function actLogFollowup(parentType, parentId) {
+// Resolves the "who could this be" contact list + a default company_id (for
+// a freshly-typed name) for whichever bid/submission/CO the follow-up is
+// being logged against. Falls back to an empty list gracefully — the form
+// still works via a typed name, just without a company to attach it to
+// (rare: only when logged from outside the currently-open project, like the
+// mobile quick-search FAB).
+async function resolveFollowupContactContext(parentType, parentId) {
+  const b = DETAIL_CACHE[OPEN_PROJECT]?.bids.find(x =>
+    parentType === 'bid' ? x.id === parentId : parentType === 'bid_submission' ? (x.submissions || []).some(s => s.id === parentId) : false);
+  if (parentType === 'bid' && b) {
+    const contacts = (b.customers || []).flatMap(c => (c.contacts || []).map(ct => ({ ...ct, companyId: c.id })));
+    return { contacts, companyId: b.customers?.[0]?.id || null };
+  }
+  if (parentType === 'bid_submission' && b) {
+    const sub = (b.submissions || []).find(s => s.id === parentId);
+    const co = b.customers?.find(c => c.id === sub?.company?.id);
+    return { contacts: (co?.contacts || []).map(ct => ({ ...ct, companyId: co.id })), companyId: co?.id || null };
+  }
+  if (parentType === 'change_order') {
+    const job = DETAIL_CACHE[OPEN_PROJECT]?.jobs.find(j => (j.change_orders || []).some(c => c.id === parentId));
+    const companyId = job?.awarded_company?.id || null;
+    if (!companyId) return { contacts: [], companyId: null };
+    try {
+      const contacts = (await api('GET', `/api/v2/contacts?company_id=${companyId}`)).map(ct => ({ ...ct, companyId }));
+      return { contacts, companyId };
+    } catch { return { contacts: [], companyId }; }
+  }
+  return { contacts: [], companyId: null };
+}
+async function actLogFollowup(parentType, parentId) {
+  const { contacts, companyId } = await resolveFollowupContactContext(parentType, parentId);
   showForm('📝 Log Follow-up', [
     { id: 'contact_method', label: 'How did you contact them?', type: 'select', required: true, options: [
       { value: 'phone', label: '📞 Phone call' }, { value: 'email', label: '✉️ Email' },
       { value: 'in_person', label: '🤝 In person' }, { value: 'other', label: 'Other' } ] },
-    { id: 'customer_contact', label: 'Who did you speak to?', type: 'text', required: true },
+    { id: 'contact_id', label: 'Who did you speak to?', type: 'select', emptyLabel: contacts.length ? '— Type a new name below —' : 'No contacts on file yet — type below',
+      options: contacts.map(c => ({ value: c.id, label: c.full_name + (c.title ? ` (${c.title})` : '') })) },
+    { id: 'new_contact_name', label: 'New contact (if not listed above)', type: 'text', placeholder: 'Only if they aren’t in the list yet' },
     { id: 'notes', label: 'What was discussed?', type: 'textarea', required: true },
-  ], data => api('POST', '/api/v2/followups', { ...data, parent_type: parentType, parent_id: parentId, outcome: 'no_decision' }),
+  ], data => api('POST', '/api/v2/followups', { ...data, parent_type: parentType, parent_id: parentId, company_id: companyId, outcome: 'no_decision' }),
   'Log (no decision yet — timer restarts)');
 }
 
@@ -5245,6 +5286,73 @@ const bidHistoryRowsHtml = (bids) => bids.length ? bids.map(b => `
       <div style="text-align:right;flex-shrink:0">${b.estimate_amount ? `<span class="amount" style="font-size:13px">${fmt$(b.estimate_amount)}</span>` : ''}</div>
     </div>`).join('') : '<div style="padding:16px;text-align:center;color:var(--text-muted)">No bids yet</div>';
 
+// ── Communications timeline — company/contact profile ──────────────────────
+// A reverse-chronological log of every call/email/in-person touch, whether
+// it happened on a specific bid/submission/CO or as a standalone check-in
+// with no project behind it at all. See getCompanyCommunications/
+// getContactCommunications in v2/db.js for how the two are merged.
+const COMM_METHOD_ICON = { phone: '📞', email: '✉️', in_person: '🤝', other: '💬' };
+function communicationRowHtml(c, isLast) {
+  const who = c.contacted_by ? `${ini(c.contacted_by)} <strong>${esc(c.contacted_by.name)}</strong>` : '<span style="color:var(--text-muted)">Someone</span>';
+  const contact = c.contact_name ? `<strong>${esc(c.contact_name)}</strong>` : '<span style="color:var(--text-muted)">no one specific</span>';
+  const openCtx = !c.context ? '' : c.context.kind === 'bid'
+    ? `closeProfileModal();openBidFlyout(${c.context.project_id},${c.context.bid_id})`
+    : `closeProfileModal();renderProjectPage(${c.context.project_id})`;
+  const projectPill = c.context
+    ? `<a href="#" onclick="event.preventDefault();${openCtx}" style="text-decoration:none;display:inline-block;background:rgba(59,130,246,.12);color:#2563eb;border:1px solid rgba(59,130,246,.25);font-size:11px;font-weight:600;padding:2px 8px;border-radius:12px">${esc(c.context.label)}${c.context.project_name ? ' · ' + esc(c.context.project_name) : ''}</a>`
+    : `<span class="badge" style="background:#f1f5f9;color:var(--text-muted)">General check-in</span>`;
+  return `
+    <div style="display:flex;gap:10px">
+      <div style="display:flex;flex-direction:column;align-items:center;width:10px;flex-shrink:0">
+        <div style="width:8px;height:8px;border-radius:50%;background:#2563eb;margin-top:6px;flex-shrink:0"></div>
+        ${!isLast ? `<div style="width:2px;flex:1;background:var(--border);margin-top:2px"></div>` : ''}
+      </div>
+      <div style="flex:1;min-width:0;padding-bottom:16px">
+        <div style="font-size:13px;line-height:1.5">${who} <span title="${esc(c.method || '')}">${COMM_METHOD_ICON[c.method] || '💬'}</span> ${contact}</div>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:3px">
+          <span style="font-size:11px;color:var(--text-muted)">${fmtD(c.date)}</span>
+          ${projectPill}
+        </div>
+        ${c.notes ? `<div style="font-size:12.5px;color:var(--text-muted);margin-top:4px;line-height:1.45">${esc(c.notes)}</div>` : ''}
+      </div>
+    </div>`;
+}
+function communicationsTimelineHtml(comms) {
+  if (!comms.length) return `<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px">No communications logged yet</div>`;
+  return `<div style="padding:6px 4px 0">${comms.map((c, i) => communicationRowHtml(c, i === comms.length - 1)).join('')}</div>`;
+}
+// Company profile: pick which of the company's contacts (or type a new one).
+async function actLogGeneralCallFromCompany(companyId) {
+  let contacts = [];
+  try { contacts = await api('GET', `/api/v2/contacts?company_id=${companyId}`); } catch { /* form still opens, just no picker options */ }
+  showForm('📞 Log a Call', [
+    { id: 'contact_method', label: 'How did you connect?', type: 'select', required: true, options: [
+      { value: 'phone', label: '📞 Phone call' }, { value: 'email', label: '✉️ Email' },
+      { value: 'in_person', label: '🤝 In person' }, { value: 'other', label: 'Other' } ] },
+    { id: 'contact_id', label: 'Who did you speak to?', type: 'select', emptyLabel: contacts.length ? '— Type a new name below —' : 'No contacts on file yet — type below',
+      options: contacts.map(c => ({ value: c.id, label: c.full_name + (c.title ? ` (${c.title})` : '') })) },
+    { id: 'new_contact_name', label: 'New contact (if not listed above)', type: 'text', placeholder: 'Only if they aren’t in the list yet' },
+    { id: 'followup_date', label: 'Date', type: 'date', required: true, value: today },
+    { id: 'notes', label: 'What did you discuss?', type: 'textarea', required: true, placeholder: 'Upcoming work, how projects are going, general check-in…' },
+  ], async data => {
+    await api('POST', '/api/v2/followups', { ...data, parent_type: 'company', parent_id: companyId });
+    await openCompanyProfile(companyId);
+  }, 'Log Call', 'blue');
+}
+// Contact profile: the contact is already known — no picker, just log it.
+function actLogGeneralCallFromContact(contactId, companyId, contactName) {
+  showForm(`📞 Log a Call — ${esc(contactName)}`, [
+    { id: 'contact_method', label: 'How did you connect?', type: 'select', required: true, options: [
+      { value: 'phone', label: '📞 Phone call' }, { value: 'email', label: '✉️ Email' },
+      { value: 'in_person', label: '🤝 In person' }, { value: 'other', label: 'Other' } ] },
+    { id: 'followup_date', label: 'Date', type: 'date', required: true, value: today },
+    { id: 'notes', label: 'What did you discuss?', type: 'textarea', required: true, placeholder: 'Upcoming work, how projects are going, general check-in…' },
+  ], async data => {
+    await api('POST', '/api/v2/followups', { ...data, parent_type: 'company', parent_id: companyId, contact_id: contactId });
+    await openContactProfile(contactId);
+  }, 'Log Call', 'blue');
+}
+
 function openProfileModal(title, bodyHtml) {
   closeProfileModal(); closeFlyout();
   const ov = document.createElement('div');
@@ -5258,8 +5366,8 @@ function openProfileModal(title, bodyHtml) {
 
 async function openContactProfile(id) {
   openProfileModal('Loading…', '<div style="color:var(--text-muted)">Loading…</div>');
-  let c, hist;
-  try { [c, hist] = await Promise.all([api('GET', `/api/v2/contacts/${id}`), api('GET', `/api/v2/contacts/${id}/bids`)]); }
+  let c, hist, comms;
+  try { [c, hist, comms] = await Promise.all([api('GET', `/api/v2/contacts/${id}`), api('GET', `/api/v2/contacts/${id}/bids`), api('GET', `/api/v2/contacts/${id}/communications`)]); }
   catch (e) { openProfileModal('Error', `<div class="err-card">${esc(e.message)}</div>`); return; }
   CONTACT_DETAIL_CACHE[c.id] = c;
 
@@ -5276,6 +5384,11 @@ async function openContactProfile(id) {
     ${bidStatsHtml(hist.stats)}
     <div style="font-weight:700;font-size:13px;margin:12px 0 4px">Bid History</div>
     <div class="card" style="padding:0;max-height:280px;overflow-y:auto">${bidHistoryRowsHtml(hist.bids)}</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin:16px 0 4px">
+      <div style="font-weight:700;font-size:13px">Communications</div>
+      ${c.company ? `<a href="#" onclick="event.preventDefault();actLogGeneralCallFromContact(${c.id},${c.company.id},'${escJs(c.full_name)}')" style="font-size:12px;color:#2563eb;font-weight:600">+ Log a Call</a>` : ''}
+    </div>
+    <div class="card" style="padding:0 12px;max-height:320px;overflow-y:auto">${communicationsTimelineHtml(comms)}</div>
     <div class="v2-actions" style="margin-top:12px">
       <button class="v2-btn outline" onclick="actEditContact(${c.id})">✏️ Edit</button>
       ${CURRENT_USER?.is_admin ? `<button class="v2-btn red" onclick="actDeleteContact(${c.id})">🗑 Delete</button>` : ''}
@@ -5285,8 +5398,8 @@ async function openContactProfile(id) {
 
 async function openCompanyProfile(companyId) {
   openProfileModal('Loading…', '<div style="color:var(--text-muted)">Loading…</div>');
-  let hist, contacts;
-  try { [hist, contacts] = await Promise.all([api('GET', `/api/v2/companies/${companyId}/bids`), api('GET', `/api/v2/contacts?company_id=${companyId}`)]); }
+  let hist, contacts, comms;
+  try { [hist, contacts, comms] = await Promise.all([api('GET', `/api/v2/companies/${companyId}/bids`), api('GET', `/api/v2/contacts?company_id=${companyId}`), api('GET', `/api/v2/companies/${companyId}/communications`)]); }
   catch (e) { openProfileModal('Error', `<div class="err-card">${esc(e.message)}</div>`); return; }
   const co = META.companies.find(c => c.id === companyId);
 
@@ -5301,7 +5414,12 @@ async function openCompanyProfile(companyId) {
       <div style="padding:8px 14px"><a href="#" onclick="event.preventDefault();actNewContact(${companyId})" style="font-size:12px;color:#2563eb">+ Add contact at this company</a></div>
     </div>
     <div style="font-weight:700;font-size:13px;margin:12px 0 4px">Bid History</div>
-    <div class="card" style="padding:0;max-height:260px;overflow-y:auto">${bidHistoryRowsHtml(hist.bids)}</div>`;
+    <div class="card" style="padding:0;max-height:260px;overflow-y:auto">${bidHistoryRowsHtml(hist.bids)}</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin:16px 0 4px">
+      <div style="font-weight:700;font-size:13px">Communications</div>
+      <a href="#" onclick="event.preventDefault();actLogGeneralCallFromCompany(${companyId})" style="font-size:12px;color:#2563eb;font-weight:600">+ Log a Call</a>
+    </div>
+    <div class="card" style="padding:0 12px;max-height:320px;overflow-y:auto">${communicationsTimelineHtml(comms)}</div>`;
   const titleExtra = `${companyTypeBadge(co?.type)}${CURRENT_USER?.is_admin ? ` <a href="#" onclick="event.preventDefault();actEditCompanyType(${companyId})" style="font-size:11px;color:#2563eb;font-weight:400;margin-left:6px">edit type</a> <a href="#" onclick="event.preventDefault();actAdminDelete('company',${companyId},'${escJs(co?.name || 'this company')}')" style="font-size:11px;color:#dc2626;font-weight:400;margin-left:6px">delete</a>` : ''}`;
   openProfileModal(`🏢 ${esc(co?.name || 'Company')} ${titleExtra}`, body);
 }

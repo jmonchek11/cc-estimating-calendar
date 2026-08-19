@@ -14,6 +14,11 @@ const teamMemberSchema = new mongoose.Schema({
   password_hash: { type: String, default: null },
   must_change_password: { type: Boolean, default: true },
   is_admin: { type: Boolean, default: false },
+  // Assistant PM — an additional-assignment flag, not a role: someone keeps
+  // their normal estimator/sales/PM role and can ALSO be assigned as APM on
+  // a bid (apm_id) or job (apm_id) alongside the primary salesperson/PM, so
+  // both show up on "mine" dashboard filtering. See apmOpts() in v2.html.
+  is_apm: { type: Boolean, default: false },
   last_seen: { type: Date, default: null },
   // Timestamp of the last time this person opened the What's New panel —
   // compared against ReleaseNote.created_at to drive the sidebar's unread

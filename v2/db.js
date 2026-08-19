@@ -265,6 +265,7 @@ async function getProjectDetail(projectId) {
     drawing_stage: b.drawing_stage,
     estimator: tm[b.estimator_id] || null,
     salesperson: tm[b.salesperson_id] || null,
+    apm: tm[b.apm_id] || null,
     // Early PM assignment (set at Approve to Bid) — the Job's own pm_id
     // (set/changeable at award) takes over as authoritative once a Job
     // exists; jobNode() shows that one instead once the bid is awarded.
@@ -387,6 +388,7 @@ async function getProjectDetail(projectId) {
       winning_bid_id: j.winning_bid_id,               // null = legacy job
       awarded_company: j.awarded_company_id ? companyById[j.awarded_company_id] : null,
       pm: tm[j.pm_id] || null,
+      apm: tm[j.apm_id] || null,
       award_date: j.award_date,
       // The Job's folder IS the winning bid's folder — same OneDrive folder,
       // just renamed at award from "bid# - bid name" to "job# - job name".
@@ -587,7 +589,7 @@ async function getMeta() {
   ]);
   return {
     companies: companies.map(c => ({ id: c._id, name: c.name, type: c.type })),
-    team: team.map(t => ({ id: t._id, name: t.name, initials: t.initials, role: t.role })),
+    team: team.map(t => ({ id: t._id, name: t.name, initials: t.initials, role: t.role, is_apm: !!t.is_apm })),
     holidays: getHolidayNamesAround(new Date().getUTCFullYear()),
     vendorCategories: VENDOR_CATEGORIES,
   };
@@ -600,7 +602,7 @@ async function getMeta() {
 async function getTeamV2() {
   const M = getModels();
   const team = await M.TeamMember.find().sort({ name: 1 }).lean();
-  return team.map(t => ({ id: t._id, name: t.name, initials: t.initials, role: t.role, email: t.email, active: !!t.active, is_admin: !!t.is_admin, has_password: !!t.password_hash }));
+  return team.map(t => ({ id: t._id, name: t.name, initials: t.initials, role: t.role, email: t.email, active: !!t.active, is_admin: !!t.is_admin, is_apm: !!t.is_apm, has_password: !!t.password_hash }));
 }
 async function createTeamMemberV2({ name, initials, role, email, temp_password }) {
   require_({ name, initials, role }, ['name', 'initials', 'role']);
@@ -624,6 +626,7 @@ async function updateTeamMemberV2(id, data) {
   if ('email' in data) upd.email = data.email ? String(data.email).toLowerCase().trim() : null;
   if ('active' in data) upd.active = Number(data.active);
   if ('is_admin' in data) upd.is_admin = !!Number(data.is_admin);
+  if ('is_apm' in data) upd.is_apm = !!Number(data.is_apm);
   const r = await M.TeamMember.updateOne({ _id: Number(id) }, { $set: upd });
   if (!r.matchedCount) throw new Error('Team member not found');
   return { ok: true };
@@ -834,6 +837,7 @@ async function startBid(id, data, actorId) {
     // silently clear that assignment.
     estimator_id: data.estimator_id ? Number(data.estimator_id) : null,
     salesperson_id: data.salesperson_id ? Number(data.salesperson_id) : null,
+    apm_id: data.apm_id ? Number(data.apm_id) : null,
     sub_estimators: data.sub_estimators || [],
     date_received: data.date_received,
     due_date: data.due_date,
@@ -1440,15 +1444,15 @@ const ADMIN_EDITABLE = {
   // remove walk-through endpoints, which need find-or-create logic for the
   // site company/contact (and array-entry targeting) this generic whitelist
   // path can't do.
-  bid:            ['bid_number', 'estimator_id', 'salesperson_id', 'pm_id', 'date_received', 'due_date', 'due_time', 'start_date',
+  bid:            ['bid_number', 'estimator_id', 'salesperson_id', 'apm_id', 'pm_id', 'date_received', 'due_date', 'due_time', 'start_date',
                    'drawing_stage', 'notes', 'jurisdiction', 'superseded', 'owner_id', 'source', 'rfi_due_date', 'rfi_due_time', 'folder_url',
                    'certified_payroll', 'tax_exempt', 'prevailing_wage'],
-  job:            ['job_number', 'pm_id', 'awarded_company_id', 'award_date'],
+  job:            ['job_number', 'pm_id', 'apm_id', 'awarded_company_id', 'award_date'],
   change_order:   ['co_number', 'name', 'due_date', 'start_date', 'estimator_id', 'notes',
                    'estimate_amount', 'date_submitted', 'approved_by', 'approval_date'],
   bid_submission: ['company_id', 'amount', 'date_submitted', 'approved_by', 'submission_type', 'notes', 'is_current', 'not_awarded_notes'],
 };
-const NUMERIC_FK = new Set(['estimator_id', 'salesperson_id', 'pm_id', 'awarded_company_id', 'company_id', 'owner_id']);
+const NUMERIC_FK = new Set(['estimator_id', 'salesperson_id', 'apm_id', 'pm_id', 'awarded_company_id', 'company_id', 'owner_id']);
 
 async function adminUpdate(entity, id, data) {
   const M = getModels();
@@ -1673,13 +1677,43 @@ async function unapproveToBid(id, actor) {
   return { bid_id: bid._id };
 }
 
-// ── Follow-up logging (bid or change_order; no_decision restarts the timer) ───
+// ── Follow-up logging (bid, change_order, bid_submission, or a standalone
+// company check-in; no_decision restarts the timer on the project-tied
+// types) ────────────────────────────────────────────────────────────────────
+// "Who did you speak to" resolves to a real Contact wherever possible — either
+// an existing one (data.contact_id) or one typed fresh (data.new_contact_name,
+// created here). data.company_id names which company a freshly-typed contact
+// belongs to; for a standalone company check-in that's just the parent itself.
+// customer_contact (free text) is kept only as a legacy fallback for callers
+// that don't resolve a contact at all — new entries should always resolve one.
 async function logFollowupV2(data) {
   const M = getModels();
   require_(data, ['parent_type', 'parent_id', 'contact_method', 'notes']);
+  if (!data.contact_id && !data.new_contact_name && !data.customer_contact) {
+    throw new Error('Who did you speak to is required');
+  }
+  let contactId = data.contact_id ? Number(data.contact_id) : null;
+  let customerContactText = data.customer_contact || null;
+  if (!contactId && data.new_contact_name) {
+    const companyId = data.company_id ? Number(data.company_id) : (data.parent_type === 'company' ? Number(data.parent_id) : null);
+    if (companyId) {
+      const [first, ...rest] = String(data.new_contact_name).trim().split(/\s+/);
+      const created = await M.Contact.create({ _id: await nextId('contacts'), company_id: companyId, first_name: first || null, last_name: rest.join(' ') || null, active: 1 });
+      contactId = created._id;
+    } else {
+      // No company context to attach a new contact to (e.g. logged from a
+      // cross-project quick search that never loaded one) — degrade to a
+      // plain text note rather than blocking the follow-up entirely.
+      customerContactText = data.new_contact_name;
+    }
+  }
+
   const s = await getSettings();
   const outcome = data.outcome || 'no_decision';
-  const next = outcome === 'no_decision' ? addWorkingDays(today(), s.fu_recurring_days) : null;
+  // A standalone company check-in has no bid/CO/submission to carry a
+  // follow-up timer — only the project-tied types get a next_followup_date.
+  const tracksTimer = data.parent_type !== 'company';
+  const next = (tracksTimer && outcome === 'no_decision') ? addWorkingDays(today(), s.fu_recurring_days) : null;
 
   const fu = await M.Followup.create({
     _id: await nextId('followups'),
@@ -1687,11 +1721,12 @@ async function logFollowupV2(data) {
     followup_date: data.followup_date || today(),
     contacted_by: data.contacted_by ? Number(data.contacted_by) : null,
     contact_method: data.contact_method,
-    customer_contact: data.customer_contact || null,
+    contact_id: contactId,
+    customer_contact: customerContactText,
     notes: data.notes, outcome, next_followup_date: next,
   });
 
-  if (outcome === 'no_decision') {
+  if (tracksTimer && outcome === 'no_decision') {
     if (data.parent_type === 'bid_submission') {
       await M.BidSubmission.updateOne({ _id: Number(data.parent_id) }, { $set: { next_followup_date: next, updated_at: ts() } });
       const sub = await M.BidSubmission.findById(Number(data.parent_id)).lean();
@@ -1704,7 +1739,7 @@ async function logFollowupV2(data) {
   return { followup_id: fu._id, next_followup_date: next };
 }
 
-const FOLLOWUP_EDITABLE = ['followup_date', 'contact_method', 'customer_contact', 'notes', 'outcome', 'next_followup_date'];
+const FOLLOWUP_EDITABLE = ['followup_date', 'contact_method', 'contact_id', 'customer_contact', 'notes', 'outcome', 'next_followup_date'];
 
 // Fixing a mis-logged follow-up (wrong contact, typo in notes, wrong outcome)
 // after the fact — not exposed until now since there was no correction path
@@ -1729,11 +1764,12 @@ async function updateFollowup(id, data, actorId) {
   for (const f of FOLLOWUP_EDITABLE) {
     if (!(f in data)) continue;
     upd[f] = data[f] === '' ? null : data[f];
+    if (f === 'contact_id' && upd[f] != null) upd[f] = Number(upd[f]);
   }
   await M.Followup.updateOne({ _id: fu._id }, { $set: upd });
 
   const siblings = await M.Followup.find({ parent_type: fu.parent_type, parent_id: fu.parent_id }).sort({ followup_date: -1, _id: -1 }).lean();
-  if (siblings[0]?._id === fu._id) {
+  if (fu.parent_type !== 'company' && siblings[0]?._id === fu._id) {
     const nextDate = 'next_followup_date' in upd ? upd.next_followup_date : fu.next_followup_date;
     if (fu.parent_type === 'bid_submission') {
       await M.BidSubmission.updateOne({ _id: fu.parent_id }, { $set: { next_followup_date: nextDate, updated_at: ts() } });
@@ -1745,6 +1781,129 @@ async function updateFollowup(id, data, actorId) {
     }
   }
   return { id: fu._id };
+}
+
+// ── Communications timeline (company/contact profile) ─────────────────────────
+// Shapes one Followup row (whichever parent_type it's attached to) into a
+// display-ready entry: who called, when, how, who they spoke to, and what
+// project/bid/CO it was about (null "context" = a standalone check-in).
+function shapeCommunication(f, { tm, contactById, bidById, subById, coById, jobById, pName }) {
+  let context = null;
+  if (f.parent_type === 'bid') {
+    const b = bidById[f.parent_id];
+    if (b) context = { kind: 'bid', bid_id: b._id, project_id: b.project_id, label: b.bid_number ? `Bid ${b.bid_number}` : 'Bid', project_name: pName[b.project_id] || null };
+  } else if (f.parent_type === 'bid_submission') {
+    const s = subById[f.parent_id];
+    const b = s ? bidById[s.bid_id] : null;
+    if (b) context = { kind: 'bid', bid_id: b._id, project_id: b.project_id, label: b.bid_number ? `Bid ${b.bid_number}` : 'Bid', project_name: pName[b.project_id] || null };
+  } else if (f.parent_type === 'change_order') {
+    const c = coById[f.parent_id];
+    const j = c ? jobById[c.job_id] : null;
+    if (c) context = { kind: 'co', co_id: c._id, project_id: j ? j.project_id : null, label: `CO ${c.co_number}`, project_name: j ? (pName[j.project_id] || null) : null };
+  }
+  const contact = f.contact_id ? contactById[f.contact_id] : null;
+  const contactName = contact ? ([contact.first_name, contact.last_name].filter(Boolean).join(' ') || '(no name)') : (f.customer_contact || null);
+  return {
+    id: f._id,
+    date: f.followup_date,
+    created_at: f.created_at,
+    method: f.contact_method,
+    contacted_by: tm[f.contacted_by] || null,
+    contact_id: f.contact_id || null,
+    contact_name: contactName,
+    notes: f.notes,
+    outcome: f.outcome,
+    context,
+    sort_key: `${f.followup_date || ''} ${f.created_at || ''}`,
+  };
+}
+
+// Every communication touching a company: standalone check-ins logged
+// directly against it, plus every follow-up logged on any bid/submission/CO
+// where this company is a customer or the awarded company — newest first.
+async function getCompanyCommunications(companyId) {
+  const M = getModels();
+  const cid = Number(companyId);
+  const [bidCustomers, standalone, members, contacts, jobs] = await Promise.all([
+    M.BidCustomer.find({ company_id: cid }).lean(),
+    M.Followup.find({ parent_type: 'company', parent_id: cid }).lean(),
+    M.TeamMember.find().lean(),
+    M.Contact.find().lean(),
+    M.Job.find({ awarded_company_id: cid }).lean(),
+  ]);
+  const bidIds = [...new Set(bidCustomers.map(bc => bc.bid_id))];
+  const jobIds = jobs.map(j => j._id);
+  const [bids, subs, cos] = await Promise.all([
+    bidIds.length ? M.Bid.find({ _id: { $in: bidIds } }).lean() : [],
+    bidIds.length ? M.BidSubmission.find({ bid_id: { $in: bidIds }, company_id: cid }).lean() : [],
+    jobIds.length ? M.ChangeOrder.find({ job_id: { $in: jobIds } }).lean() : [],
+  ]);
+  const subIds = subs.map(s => s._id);
+  const coIds = cos.map(c => c._id);
+
+  const orClauses = [];
+  if (bidIds.length) orClauses.push({ parent_type: 'bid', parent_id: { $in: bidIds } });
+  if (subIds.length) orClauses.push({ parent_type: 'bid_submission', parent_id: { $in: subIds } });
+  if (coIds.length) orClauses.push({ parent_type: 'change_order', parent_id: { $in: coIds } });
+  const tied = orClauses.length ? await M.Followup.find({ $or: orClauses }).lean() : [];
+
+  const projectIds = [...new Set([...bids.map(b => b.project_id), ...jobs.map(j => j.project_id)])];
+  const projects = projectIds.length ? await M.Project.find({ _id: { $in: projectIds } }).lean() : [];
+  const pName = {}; projects.forEach(p => pName[p._id] = p.name);
+  const bidById = {}; bids.forEach(b => bidById[b._id] = b);
+  const subById = {}; subs.forEach(s => subById[s._id] = s);
+  const coById = {}; cos.forEach(c => coById[c._id] = c);
+  const jobById = {}; jobs.forEach(j => jobById[j._id] = j);
+  const tm = teamMap(members);
+  const contactById = {}; contacts.forEach(c => contactById[c._id] = c);
+
+  const ctx = { tm, contactById, bidById, subById, coById, jobById, pName };
+  return [...standalone, ...tied]
+    .map(f => shapeCommunication(f, ctx))
+    .sort((a, b) => b.sort_key.localeCompare(a.sort_key));
+}
+
+// Every communication logged specifically with one contact, across every
+// company/bid/CO it happened on — newest first. Only follow-ups with a real
+// contact_id show up here (legacy free-text-only entries have no FK to
+// resolve, so they appear on the company timeline but not this one).
+async function getContactCommunications(contactId) {
+  const M = getModels();
+  const cid = Number(contactId);
+  const [followups, members, contacts] = await Promise.all([
+    M.Followup.find({ contact_id: cid }).lean(),
+    M.TeamMember.find().lean(),
+    M.Contact.find().lean(),
+  ]);
+  const bidIds = followups.filter(f => f.parent_type === 'bid').map(f => f.parent_id);
+  const subIds = followups.filter(f => f.parent_type === 'bid_submission').map(f => f.parent_id);
+  const coIds = followups.filter(f => f.parent_type === 'change_order').map(f => f.parent_id);
+  const [directBids, subs, cos] = await Promise.all([
+    bidIds.length ? M.Bid.find({ _id: { $in: bidIds } }).lean() : [],
+    subIds.length ? M.BidSubmission.find({ _id: { $in: subIds } }).lean() : [],
+    coIds.length ? M.ChangeOrder.find({ _id: { $in: coIds } }).lean() : [],
+  ]);
+  const subBidIds = [...new Set(subs.map(s => s.bid_id))];
+  const jobIds = [...new Set(cos.map(c => c.job_id))];
+  const [subBids, jobs] = await Promise.all([
+    subBidIds.length ? M.Bid.find({ _id: { $in: subBidIds } }).lean() : [],
+    jobIds.length ? M.Job.find({ _id: { $in: jobIds } }).lean() : [],
+  ]);
+  const allBids = [...directBids, ...subBids];
+  const projectIds = [...new Set([...allBids.map(b => b.project_id), ...jobs.map(j => j.project_id)])];
+  const projects = projectIds.length ? await M.Project.find({ _id: { $in: projectIds } }).lean() : [];
+  const pName = {}; projects.forEach(p => pName[p._id] = p.name);
+  const bidById = {}; allBids.forEach(b => bidById[b._id] = b);
+  const subById = {}; subs.forEach(s => subById[s._id] = s);
+  const coById = {}; cos.forEach(c => coById[c._id] = c);
+  const jobById = {}; jobs.forEach(j => jobById[j._id] = j);
+  const tm = teamMap(members);
+  const contactById = {}; contacts.forEach(c => contactById[c._id] = c);
+
+  const ctx = { tm, contactById, bidById, subById, coById, jobById, pName };
+  return followups
+    .map(f => shapeCommunication(f, ctx))
+    .sort((a, b) => b.sort_key.localeCompare(a.sort_key));
 }
 
 // ── Reminders (polymorphic — bid or change_order) ─────────────────────────────
@@ -2379,7 +2538,7 @@ async function getBidList(stage) {
       id: b._id, project_id: b.project_id, project: pName[b.project_id] || '—', size_bucket: pSize[b.project_id] || null,
       type_of_work: pType[b.project_id] || null,
       bid_number: b.bid_number, stage: b.stage, drawing_stage: b.drawing_stage,
-      estimator: tm[b.estimator_id] || null, salesperson: tm[b.salesperson_id] || null,
+      estimator: tm[b.estimator_id] || null, salesperson: tm[b.salesperson_id] || null, apm: tm[b.apm_id] || null,
       owner: tm[b.owner_id] || null, source: b.source,
       sub_estimators: (b.sub_estimators || []).map(s => ({ ...(tm[s.estimator_id] || {}), scope: s.scope })),
       customers: [...new Set((custByBid[b._id] || []).filter(Boolean))],
@@ -2564,7 +2723,7 @@ async function getDigest() {
   // generated once a week and the marginal cost per person is small.
   const byPersonId = {};
   members.forEach(m => {
-    const mine = (b) => b.estimator_id === m._id || b.salesperson_id === m._id || (b.sub_estimators || []).some(s => s.estimator_id === m._id);
+    const mine = (b) => b.estimator_id === m._id || b.salesperson_id === m._id || b.apm_id === m._id || (b.sub_estimators || []).some(s => s.estimator_id === m._id);
     const myBids = bids.filter(mine);
     byPersonId[m._id] = {
       activeBids: myBids.filter(b => b.stage === 'active_bid').sort((a, b) => (a.due_date || '').localeCompare(b.due_date || '')).map(shapeBid),
@@ -2639,10 +2798,10 @@ async function getReports({ from, to, granularity, personId } = {}) {
   const jobById = {}; jobs.forEach(j => jobById[j._id] = j);
   const tm = teamMap(members);
 
-  const bidMatchesPerson = (b) => !pid || b.estimator_id === pid || b.salesperson_id === pid || (b.sub_estimators || []).some(s => s.estimator_id === pid);
+  const bidMatchesPerson = (b) => !pid || b.estimator_id === pid || b.salesperson_id === pid || b.apm_id === pid || (b.sub_estimators || []).some(s => s.estimator_id === pid);
   const jobMatchesPerson = (j) => {
     if (!pid) return true;
-    if (j.pm_id === pid) return true;
+    if (j.pm_id === pid || j.apm_id === pid) return true;
     const wb = j.winning_bid_id ? bidById[j.winning_bid_id] : null;
     return wb ? bidMatchesPerson(wb) : false;
   };
@@ -2787,10 +2946,15 @@ async function getDashboard(userId, mineOnly) {
   const coName = {}; companies.forEach(c => coName[c._id] = c.name);
   const bidById = {}; bids.forEach(b => bidById[b._id] = b);
 
-  const isMyBid = (b) => !uid || b.estimator_id === uid || b.salesperson_id === uid || (b.sub_estimators || []).some(s => s.estimator_id === uid);
+  const isMyBid = (b) => !uid || b.estimator_id === uid || b.salesperson_id === uid || b.apm_id === uid || (b.sub_estimators || []).some(s => s.estimator_id === uid);
   const isMyCo = (c) => !uid || c.estimator_id === uid;
+  // jobOwner resolves the single "primary owner" shown for display — apm_id
+  // is intentionally NOT folded into this fallback chain (it would silently
+  // hide the PM as "owner" whenever an APM is also assigned). isMyJob checks
+  // apm_id as an independent OR instead, so a job with both a PM and an APM
+  // assigned shows up on both of their dashboards.
   const jobOwner = (j) => j.pm_id || bidById[j.winning_bid_id]?.estimator_id || bidById[j.winning_bid_id]?.salesperson_id || null;
-  const isMyJob = (j) => !uid || jobOwner(j) === uid;
+  const isMyJob = (j) => !uid || jobOwner(j) === uid || j.apm_id === uid;
 
   const myBids = bids.filter(isMyBid), myCos = cos.filter(isMyCo);
   const stageCount = (st) => myBids.filter(b => b.stage === st && !b.superseded).length;
@@ -2807,7 +2971,7 @@ async function getDashboard(userId, mineOnly) {
   const awardedYTD = myBids.filter(b => b.stage === 'awarded' && b.award_date && b.award_date >= yearStart && b.award_date <= today);
   const awardedMissingDate = myBids.filter(b => b.stage === 'awarded' && !b.award_date).length;
 
-  const overdueBids = subs.filter(s => s.is_current && s.outcome === 'pending' && s.next_followup_date && s.next_followup_date < today && (!uid || bidById[s.bid_id]?.salesperson_id === uid));
+  const overdueBids = subs.filter(s => s.is_current && s.outcome === 'pending' && s.next_followup_date && s.next_followup_date < today && (!uid || bidById[s.bid_id]?.salesperson_id === uid || bidById[s.bid_id]?.apm_id === uid));
   const overdueCos = myCos.filter(c => c.stage === 'submitted_co' && !c.superseded && c.next_followup_date && c.next_followup_date < today);
   const dueSoon = myBids.filter(b => ['active_bid', 'submitted'].includes(b.stage) && !b.superseded && b.due_date && b.due_date >= today && b.due_date <= ahead(14)).sort((a, b) => (a.due_date || '').localeCompare(b.due_date || ''));
 
@@ -2862,7 +3026,7 @@ async function getMyPendingJobs(userId) {
   const bidById = {}; bids.forEach(b => bidById[b._id] = b);
   const pName = {}; projects.forEach(p => pName[p._id] = p.name);
   const jobOwner = (j) => j.pm_id || bidById[j.winning_bid_id]?.estimator_id || bidById[j.winning_bid_id]?.salesperson_id || null;
-  return jobs.filter(j => jobOwner(j) === uid).map(j => ({
+  return jobs.filter(j => jobOwner(j) === uid || j.apm_id === uid).map(j => ({
     id: j._id, project_id: j.project_id, project: pName[j.project_id] || '—',
     bid_number: bidById[j.winning_bid_id]?.bid_number || null, created_at: j.created_at,
   })).sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
@@ -3615,6 +3779,7 @@ module.exports = {
   getMyPendingJobs, getAllPendingJobs,
   getGateTasksForBid, addGateTaskUpdate,
   getContacts, getContactDetail, createContact, updateContact, deleteContact, getContactBids, getCompanyBids,
+  getCompanyCommunications, getContactCommunications,
   addBidCustomerContact, removeBidCustomerContact,
   awardSubmission, notAwardSubmission, closeBid, approveToBid, unapproveToBid, logFollowupV2, updateFollowup,
   createLegacyJob, updateJob,

@@ -67,6 +67,10 @@ const BidSchema = new mongoose.Schema({
   // routinely land with no PM assigned. Job.pm_id (set at award) defaults
   // to this if the award form doesn't override it — see awardSubmission.
   pm_id:          { type: Number, default: null },               // FK → TeamMember
+  // Assistant PM — an additional assignment alongside salesperson_id, not a
+  // replacement. Counted in "mine" dashboard filtering same as salesperson_id
+  // so an APM sees their assigned bids' follow-ups too. See apmOpts() in v2.html.
+  apm_id:         { type: Number, default: null },               // FK → TeamMember
   sub_estimators: { type: [{ estimator_id: Number, scope: String }], default: [] },
 
   date_received:  { type: String, default: null },
@@ -175,6 +179,7 @@ const JobSchema = new mongoose.Schema({
   job_number:         { type: String, default: null },           // NULLABLE until accounting assigns
   awarded_company_id: { type: Number, default: null },           // FK → Company
   pm_id:              { type: Number, default: null },           // FK → TeamMember — gets CO follow-up notifications
+  apm_id:             { type: Number, default: null },           // FK → TeamMember — additional assignment, see Bid.apm_id
   award_date:         { type: String, default: null },
   created_at: { type: String, default: ts },
   updated_at: { type: String, default: ts },
@@ -290,12 +295,22 @@ const ContactSchema = new mongoose.Schema({
 
 const FollowupSchema = new mongoose.Schema({
   _id:              Number,
-  parent_type:      { type: String, enum: ['bid', 'bid_submission', 'change_order'], required: true },
+  // 'company' (added 2026-08) is a standalone check-in with no bid/CO behind
+  // it at all — parent_id is a Company _id directly. Everything else is
+  // unchanged: no next_followup_date rollup target exists for it (there's no
+  // bid/CO to carry a timer), so logFollowupV2 skips that step for this type.
+  parent_type:      { type: String, enum: ['bid', 'bid_submission', 'change_order', 'company'], required: true },
   parent_id:        { type: Number, required: true },
   followup_date:    { type: String, required: true },
   contacted_by:     { type: Number, default: null },             // FK → TeamMember
   contact_method:   { type: String, enum: ['phone', 'email', 'in_person', 'other'], default: 'phone' },
-  customer_contact: { type: String, default: null },             // who they spoke to
+  // contact_id (added 2026-08) is the real link used by the company/contact
+  // communications timeline — customer_contact is kept as a free-text
+  // fallback for entries logged before contact_id existed (those show up on
+  // a company's timeline but not a specific contact's, since there's no FK
+  // to resolve). New entries should always set contact_id.
+  contact_id:       { type: Number, default: null },             // FK → Contact
+  customer_contact: { type: String, default: null },             // legacy free text — who they spoke to
   notes:            { type: String, default: null },
   outcome:          { type: String, enum: ['no_decision', 'awarded', 'not_awarded', 'approved', 'not_approved', 'other'], default: 'no_decision' },
   next_followup_date: { type: String, default: null },
