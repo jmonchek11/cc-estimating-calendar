@@ -963,13 +963,14 @@ async function renderSettings() {
   } catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
 
   const isAdmin = !!CURRENT_USER?.is_admin;
-  const roleLabel = { estimator: 'Estimator', sales: 'Salesperson', oversight: 'Admin / Oversight' };
+  const roleLabel = { estimator: 'Estimator', sales: 'Salesperson', oversight: 'Admin / Oversight', apm: 'APM' };
 
   const teamRows = team.map(m => `
     <div class="proj-row" style="${m.active ? '' : 'opacity:.5'}">
       <div style="flex:1;min-width:0">
         <div class="proj-name">${esc(m.name)} <span class="initials-pill${m.role === 'sales' ? ' initials-pill-sales' : ''}">${esc(m.initials)}</span>
           ${m.is_admin ? '<span class="badge" style="background:#ede9fe;color:#5b21b6">ADMIN</span>' : ''}
+          ${m.is_apm ? '<span class="badge" style="background:#dbeafe;color:#1e40af">APM</span>' : ''}
           ${!m.active ? '<span class="badge" style="background:#e2e8f0;color:#64748b">INACTIVE</span>' : ''}
           ${m.has_password === false ? '<span class="badge" style="background:#fef3c7;color:#b45309">NO PASSWORD SET</span>' : ''}</div>
         <div class="proj-meta">${roleLabel[m.role] || esc(m.role)}${m.email ? ` · ${esc(m.email)}` : ''}</div>
@@ -1043,7 +1044,7 @@ function actNewTeamMember() {
   showForm('+ Add Team Member', [
     { id: 'name', label: 'Name', type: 'text', required: true },
     { id: 'initials', label: 'Initials', type: 'text', required: true, placeholder: 'JD' },
-    { id: 'role', label: 'Role', type: 'select', required: true, options: [{ value: 'estimator', label: 'Estimator' }, { value: 'sales', label: 'Salesperson' }, { value: 'oversight', label: 'Admin / Oversight (no bids — sees global view by default)' }] },
+    { id: 'role', label: 'Role', type: 'select', required: true, options: [{ value: 'estimator', label: 'Estimator' }, { value: 'sales', label: 'Salesperson' }, { value: 'apm', label: 'APM (not a salesperson/estimator)' }, { value: 'oversight', label: 'Admin / Oversight (no bids — sees global view by default)' }] },
     { id: 'email', label: 'Email', type: 'text', required: true, placeholder: 'Needed for login + notifications' },
     { id: 'temp_password', label: 'Temporary Password', type: 'text', placeholder: 'They\'ll be asked to change it on first login' },
   ], data => api('POST', '/api/v2/team', data), 'Create', 'green');
@@ -1053,7 +1054,7 @@ function actEditTeamMember(id) {
   showForm('✏️ Edit Team Member', [
     { id: 'name', label: 'Name', type: 'text', required: true, value: m?.name },
     { id: 'initials', label: 'Initials', type: 'text', required: true, value: m?.initials },
-    { id: 'role', label: 'Role', type: 'select', required: true, value: m?.role, options: [{ value: 'estimator', label: 'Estimator' }, { value: 'sales', label: 'Salesperson' }, { value: 'oversight', label: 'Admin / Oversight (no bids — sees global view by default)' }] },
+    { id: 'role', label: 'Role', type: 'select', required: true, value: m?.role, options: [{ value: 'estimator', label: 'Estimator' }, { value: 'sales', label: 'Salesperson' }, { value: 'apm', label: 'APM (not a salesperson/estimator)' }, { value: 'oversight', label: 'Admin / Oversight (no bids — sees global view by default)' }] },
     { id: 'email', label: 'Email', type: 'text', value: m?.email },
     { id: 'active', label: 'Active', type: 'select', required: true, value: m?.active ? '1' : '0', options: [{ value: '1', label: 'Active' }, { value: '0', label: 'Inactive' }] },
     { id: 'is_admin', label: 'Admin', type: 'select', required: true, value: m?.is_admin ? '1' : '0', options: [{ value: '1', label: 'Yes — full access incl. Data Health merges' }, { value: '0', label: 'No' }] },
@@ -1585,8 +1586,13 @@ function defaultMine() { return !!CURRENT_USER && CURRENT_USER.role !== 'oversig
 function filterState(key) { return (FILTER_STATE[key] = FILTER_STATE[key] || { q: '', person: '', mine: defaultMine(), sort: 'due' }); }
 
 function personOpts() {
+  // Only a real salesperson/estimator gets the base entry — used to fall
+  // through to 'est' for ANY other role (oversight, apm, …), which meant
+  // someone whose role wasn't actually estimator or sales still got a
+  // mislabeled base entry, plus a second "— APM" entry if they were also
+  // is_apm-flagged (visibly duplicated, e.g. "Dillon Dosenbach" twice).
   return [
-    ...META.team.map(t => [`${t.role === 'sales' ? 'sal' : 'est'}:${t.id}`, `${t.name} (${t.initials})`]),
+    ...META.team.filter(t => t.role === 'sales' || t.role === 'estimator').map(t => [`${t.role === 'sales' ? 'sal' : 'est'}:${t.id}`, `${t.name} (${t.initials})`]),
     ...META.team.filter(t => t.is_apm).map(t => [`apm:${t.id}`, `${t.name} (${t.initials}) — APM`]),
   ];
 }
