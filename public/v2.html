@@ -831,6 +831,7 @@ async function renderSearchResults() {
             <div class="proj-name">${esc(b.project)}${b.bid_number ? ` <span style="color:var(--text-muted);font-weight:400;font-size:12px">#${esc(b.bid_number)}</span>` : ''}</div>
             <div class="proj-meta">
               ${b.customers.length ? esc(b.customers.join(', ')) : '<span style="color:#dc2626">no customer</span>'}
+              ${b.job_number ? `<span class="proj-meta-sep">·</span> Job ${esc(b.job_number)}` : ''}
               ${b.salesperson ? `<span class="proj-meta-sep">·</span> Sales ${ini(b.salesperson)}` : ''}
               ${b.estimator ? ` Est ${ini(b.estimator)}` : ''}
             </div>

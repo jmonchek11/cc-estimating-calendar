@@ -2527,15 +2527,19 @@ async function getSearchResults(q) {
   const pName = {}; projects.forEach(p => pName[p._id] = p.name);
   const coName = {}; companies.forEach(c => coName[c._id] = c.name);
   const jobById = {}; jobs.forEach(j => jobById[j._id] = j);
+  const jobByBid = {}; jobs.forEach(j => { if (j.winning_bid_id) jobByBid[j.winning_bid_id] = j; });
   const tm = teamMap(members);
   const custByBid = {}; bidCustomers.forEach(bc => (custByBid[bc.bid_id] = custByBid[bc.bid_id] || []).push(coName[bc.company_id]));
   const hit = (...fields) => fields.some(f => f && String(f).toLowerCase().includes(needle));
 
   const matchedBids = bids
-    .filter(b => hit(pName[b.project_id], b.bid_number, ...(custByBid[b._id] || [])))
+    .filter(b => hit(pName[b.project_id], b.bid_number, jobByBid[b._id]?.job_number, ...(custByBid[b._id] || [])))
     .map(b => ({
       id: b._id, project_id: b.project_id, project: pName[b.project_id] || '—',
       bid_number: b.bid_number, stage: b.stage,
+      // Not every bid has a Job yet (only once awarded) — null until then,
+      // same as everywhere else a job # shows up before/after award.
+      job_number: jobByBid[b._id]?.job_number || null,
       estimator: tm[b.estimator_id] || null, salesperson: tm[b.salesperson_id] || null,
       customers: [...new Set((custByBid[b._id] || []).filter(Boolean))],
       estimate_amount: b.estimate_amount, due_date: b.due_date, next_followup_date: b.next_followup_date,
