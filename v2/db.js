@@ -1176,6 +1176,7 @@ async function updateOpportunity(id, data) {
   if ('source' in data) upd.source = data.source || null;
   if ('estimator_id' in data) upd.estimator_id = data.estimator_id ? Number(data.estimator_id) : null;
   if ('salesperson_id' in data) upd.salesperson_id = data.salesperson_id ? Number(data.salesperson_id) : null;
+  if ('apm_id' in data) upd.apm_id = data.apm_id ? Number(data.apm_id) : null;
   if ('pm_id' in data) upd.pm_id = data.pm_id ? Number(data.pm_id) : null;
   await M.Bid.updateOne({ _id: bid._id }, { $set: upd });
   return { bid_id: bid._id };

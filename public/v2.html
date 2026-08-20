@@ -3720,14 +3720,21 @@ function actEditBid(bidId) {
   // via a 'custom' placeholder field rather than always at the very bottom.
   const showSubEst = !b.superseded && ['opportunity', 'active_bid', 'submitted'].includes(b.stage);
   const fields = [];
+  if (b.stage !== 'opportunity') fields.push({ id: 'bid_number', label: 'Bid #', type: 'text', required: true, value: b.bid_number });
+  // Who's assigned is editable here at every stage, including Opportunity —
+  // it used to only show up once a bid # existed, which meant this form had
+  // no way to set a salesperson at all pre-Start Bid even though every other
+  // field-editing action was available (confusing: the field just silently
+  // wasn't there). "Assign" (from Queue/the flyout menu) still covers the
+  // same ground at the Opportunity stage — this isn't replacing it, just no
+  // longer leaving Edit Bid itself inconsistent about it.
+  fields.push(
+    { id: 'estimator_id', label: 'Estimator', type: 'select', emptyLabel: 'TBD', options: teamOpts(['estimator']), value: b.estimator?.id },
+    { id: 'salesperson_id', label: 'Salesperson', type: 'select', emptyLabel: 'TBD', options: teamOpts(['sales']), value: b.salesperson?.id },
+    { id: 'apm_id', label: 'APM', type: 'select', emptyLabel: 'None', options: apmOpts(), value: b.apm?.id },
+  );
+  if (showSubEst) fields.push({ id: 'sub_est_section', type: 'custom' });
   if (b.stage !== 'opportunity') {
-    fields.push({ id: 'bid_number', label: 'Bid #', type: 'text', required: true, value: b.bid_number });
-    fields.push(
-      { id: 'estimator_id', label: 'Estimator', type: 'select', emptyLabel: 'TBD', options: teamOpts(['estimator']), value: b.estimator?.id },
-      { id: 'salesperson_id', label: 'Salesperson', type: 'select', emptyLabel: 'TBD', options: teamOpts(['sales']), value: b.salesperson?.id },
-      { id: 'apm_id', label: 'APM', type: 'select', emptyLabel: 'None', options: apmOpts(), value: b.apm?.id },
-    );
-    if (showSubEst) fields.push({ id: 'sub_est_section', type: 'custom' });
     fields.push(
       { id: 'date_received', label: 'Date Received', type: 'date', value: b.date_received },
       { id: 'due_date', label: 'Due Date', type: 'date', value: b.due_date },
@@ -3747,10 +3754,6 @@ function actEditBid(bidId) {
     // Walk-through has its own dedicated action (🚶 button in the actions row,
     // plus a visible line on the bid card) rather than living buried in here —
     // it's easy to miss as just another field in a long edit form.
-  } else if (showSubEst) {
-    // Opportunity stage has no estimator/salesperson fields in this form at
-    // all (nothing's been assigned yet) — sub-estimators just go first.
-    fields.push({ id: 'sub_est_section', type: 'custom' });
   }
   fields.push({ id: 'notes', label: 'Notes', type: 'textarea', value: b.notes });
   if (b.stage === 'submitted') {
@@ -4137,6 +4140,7 @@ function actEditOpportunityDetails(bidId) {
     { id: 'source', label: 'Source (where did this come from?)', type: 'text', value: b.source, placeholder: 'iSqFt, BuildingConnected, email invite, referral, phone call…' },
     { id: 'estimator_id', label: 'Estimator (if known)', type: 'select', emptyLabel: 'TBD', options: teamOpts(['estimator']), value: b.estimator?.id },
     { id: 'salesperson_id', label: 'Salesperson', type: 'select', emptyLabel: 'TBD', options: teamOpts(['sales']), value: b.salesperson?.id },
+    { id: 'apm_id', label: 'APM', type: 'select', emptyLabel: 'None', options: apmOpts(), value: b.apm?.id },
     { id: 'pm_id', label: 'PM (if known)', type: 'select', emptyLabel: 'TBD', options: teamOpts(['pm', 'sales', 'estimator']), value: b.pm?.id },
   ], data => api('PATCH', `/api/v2/bids/${bidId}/opportunity`, data), 'Save');
 }
