@@ -1580,10 +1580,17 @@ async function reconcileBidOutcome(bidId, actorId) {
     M.BidSubmission.find({ bid_id: bidId, is_current: 1 }).lean(),
   ]);
   if (!customers.length || currentSubs.some(s => s.outcome === 'awarded')) return;
-  const subByCompany = {}; currentSubs.forEach(s => subByCompany[s.company_id] = s);
+  // is_current should be unique per (bid, company) — a double-submit race in
+  // Add Submission has produced duplicates in practice (confirmed on
+  // B25-0375: two "current" rows for one customer, one decided and one still
+  // pending). Group ALL current rows per company rather than keeping just
+  // one, so a lingering duplicate pending row can't silently make this
+  // function think nothing's been decided yet.
+  const subsByCompany = {};
+  currentSubs.forEach(s => (subsByCompany[s.company_id] = subsByCompany[s.company_id] || []).push(s));
   const everyoneDecided = customers.every(c => {
-    const s = subByCompany[c.company_id];
-    return s && s.outcome !== 'pending';
+    const subs = subsByCompany[c.company_id];
+    return subs?.length && subs.every(s => s.outcome !== 'pending');
   });
   if (!everyoneDecided) return;
   const latestNotAwarded = currentSubs.filter(s => s.outcome === 'not_awarded')
