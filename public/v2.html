@@ -4154,14 +4154,25 @@ function actEditOpportunityDetails(bidId) {
 async function resolveFollowupContactContext(parentType, parentId) {
   const b = DETAIL_CACHE[OPEN_PROJECT]?.bids.find(x =>
     parentType === 'bid' ? x.id === parentId : parentType === 'bid_submission' ? (x.submissions || []).some(s => s.id === parentId) : false);
+  // Every contact at the relevant company, not just whichever ones happen to
+  // already be tagged as this bid's POC — the picker is for "who did you
+  // actually talk to," which is often someone else at the same company.
   if (parentType === 'bid' && b) {
-    const contacts = (b.customers || []).flatMap(c => (c.contacts || []).map(ct => ({ ...ct, companyId: c.id })));
-    return { contacts, companyId: b.customers?.[0]?.id || null };
+    const companyIds = (b.customers || []).map(c => c.id);
+    if (!companyIds.length) return { contacts: [], companyId: null };
+    try {
+      const lists = await Promise.all(companyIds.map(cid => api('GET', `/api/v2/contacts?company_id=${cid}`).then(cs => cs.map(ct => ({ ...ct, companyId: cid })))));
+      return { contacts: lists.flat(), companyId: companyIds[0] };
+    } catch { return { contacts: [], companyId: companyIds[0] }; }
   }
   if (parentType === 'bid_submission' && b) {
     const sub = (b.submissions || []).find(s => s.id === parentId);
-    const co = b.customers?.find(c => c.id === sub?.company?.id);
-    return { contacts: (co?.contacts || []).map(ct => ({ ...ct, companyId: co.id })), companyId: co?.id || null };
+    const companyId = sub?.company?.id || null;
+    if (!companyId) return { contacts: [], companyId: null };
+    try {
+      const contacts = (await api('GET', `/api/v2/contacts?company_id=${companyId}`)).map(ct => ({ ...ct, companyId }));
+      return { contacts, companyId };
+    } catch { return { contacts: [], companyId }; }
   }
   if (parentType === 'change_order') {
     const job = DETAIL_CACHE[OPEN_PROJECT]?.jobs.find(j => (j.change_orders || []).some(c => c.id === parentId));
