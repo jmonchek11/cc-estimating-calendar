@@ -741,10 +741,21 @@ async function createOpportunity({ project_id, project_name, notes, description,
   if (!pid) {
     require_({ project_name }, ['project_name']);
     pid = await nextId('projects');
-    // description/location/size_bucket/type_of_work only apply when creating
-    // a brand-new project — attaching to an existing one leaves its own data alone.
     await M.Project.create({ _id: pid, name: project_name.trim(), description: description || null, location: location || null, size_bucket: size_bucket || null, type_of_work: type_of_work || null, created_by: created_by || null });
     isNewProject = true;
+  } else {
+    // Attaching to an existing project: the form still requires
+    // description/location/type_of_work (real info the user just typed),
+    // but an existing project may already have its own — never overwrite
+    // real data, only fill in whatever's still blank so what the user
+    // entered isn't silently thrown away.
+    const existing = await M.Project.findById(pid).lean();
+    const fill = {};
+    if (existing && !existing.description && description) fill.description = description;
+    if (existing && !existing.location && location) fill.location = location;
+    if (existing && !existing.size_bucket && size_bucket) fill.size_bucket = size_bucket;
+    if (existing && !existing.type_of_work && type_of_work) fill.type_of_work = type_of_work;
+    if (Object.keys(fill).length) await M.Project.updateOne({ _id: pid }, { $set: fill });
   }
   const bidId = await nextId('bids');
   const ownerId = owner_id ? Number(owner_id) : (created_by ? Number(created_by) : null);
