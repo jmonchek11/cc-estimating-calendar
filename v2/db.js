@@ -253,6 +253,14 @@ async function getProjectDetail(projectId) {
   const bidFollowups = allFollowups.filter(f => f.parent_type === 'bid');
   const subFollowups = allFollowups.filter(f => f.parent_type === 'bid_submission');
   const coFollowups  = allFollowups.filter(f => f.parent_type === 'change_order');
+  // A follow-up's contact isn't necessarily one of the bid's tagged POCs
+  // (the picker offers every contact at the company, not just those) — pull
+  // in whichever ones the contactById map above doesn't already have, so
+  // fmtFollowup can resolve a real name instead of falling back to "?".
+  const followupContactIds = [...new Set(allFollowups.map(f => f.contact_id).filter(id => id && !contactById[id]))];
+  if (followupContactIds.length) {
+    (await M.Contact.find({ _id: { $in: followupContactIds } }).lean()).forEach(c => { contactById[c._id] = fmtContactBrief(c); });
+  }
 
   const tm = teamMap(members);
   const companyById = {}; companies.forEach(c => { companyById[c._id] = { id: c._id, name: c.name }; });
@@ -321,7 +329,7 @@ async function getProjectDetail(projectId) {
         followups: subFollowups
           .filter(f => f.parent_id === sub._id)
           .sort((a, c) => (c.followup_date || '').localeCompare(a.followup_date || ''))
-          .map(f => fmtFollowup(f, tm)),
+          .map(f => fmtFollowup(f, tm, contactById)),
       })),
     award_date: b.award_date,
     awarded_company: b.awarded_company_id ? companyById[b.awarded_company_id] : null,
@@ -338,7 +346,7 @@ async function getProjectDetail(projectId) {
     // (submissions[].followups) instead.
     followups: bidFollowups.filter(f => f.parent_id === b._id)
       .sort((a, c) => (c.followup_date || '').localeCompare(a.followup_date || ''))
-      .map(f => fmtFollowup(f, tm)),
+      .map(f => fmtFollowup(f, tm, contactById)),
     reminders: remindersFor('bid', b._id),
     notes_log: notesFor('bid', b._id),
   });
@@ -363,7 +371,7 @@ async function getProjectDetail(projectId) {
     followups: coFollowups
       .filter(f => f.parent_id === co._id)
       .sort((a, c) => (c.followup_date || '').localeCompare(a.followup_date || ''))
-      .map(f => fmtFollowup(f, tm)),
+      .map(f => fmtFollowup(f, tm, contactById)),
     reminders: remindersFor('change_order', co._id),
     notes_log: notesFor('change_order', co._id),
   });
@@ -402,12 +410,18 @@ async function getProjectDetail(projectId) {
   };
 }
 
-function fmtFollowup(f, tm) {
+function fmtFollowup(f, tm, contactById) {
+  // contact_name resolves the real Contact (contact_id) when the follow-up
+  // has one — customer_contact is the legacy free-text fallback for entries
+  // logged before contact_id existed. Compact "at a glance" views should
+  // prefer contact_name; it used to be missing here entirely, so they fell
+  // straight to customer_contact (often null for new entries) and showed "?".
   return {
     id: f._id,
     followup_date: f.followup_date,
     contacted_by: tm[f.contacted_by] || null,
     contact_method: f.contact_method,
+    contact_name: f.contact_id ? (contactById?.[f.contact_id]?.full_name || null) : null,
     customer_contact: f.customer_contact,
     notes: f.notes,
     outcome: f.outcome,
@@ -1287,11 +1301,11 @@ async function submitBid(id, data, actorId) {
   const M = getModels();
   const bid = await loadBid(id);
   if (bid.stage !== 'active_bid') throw new Error(`Cannot submit from stage '${bid.stage}'`);
-  // certified_payroll/tax_exempt can be left TBD while a bid is being set up
-  // (whoever starts it often doesn't know yet) but must be a real Yes/No by
-  // the time it's actually submitted — same "force an answer here" pattern
-  // as jurisdiction, which has never had a value before this point either.
-  require_(data, ['amount', 'jurisdiction', 'date_submitted', 'approved_by', 'certified_payroll', 'tax_exempt', 'prevailing_wage']);
+  // certified_payroll/tax_exempt/prevailing_wage are no longer forced here —
+  // they only actually matter once a bid wins, so the forced answer now
+  // happens at Award instead (see awardSubmission). Still settable early via
+  // Start Bid/Edit Bid if already known; left alone (not cleared) otherwise.
+  require_(data, ['amount', 'jurisdiction', 'date_submitted', 'approved_by']);
   requireNonZeroAmount(data.amount);
   const companyIds = await resolveCompanyIds(data.company_ids, data.new_companies);
   if (!companyIds.length) throw new Error('Pick at least one customer to submit to');
@@ -1308,13 +1322,14 @@ async function submitBid(id, data, actorId) {
     });
   }
 
-  const upd = {
-    jurisdiction: String(data.jurisdiction),
-    certified_payroll: Number(data.certified_payroll) === 1,
-    tax_exempt: Number(data.tax_exempt) === 1,
-    prevailing_wage: Number(data.prevailing_wage) === 1,
-    updated_at: ts(),
-  };
+  const upd = { jurisdiction: String(data.jurisdiction), updated_at: ts() };
+  // Only touch these if this particular call actually sent them (e.g. an
+  // older/admin path that still includes them) — omitted entirely is the
+  // normal case now, and must NOT be read as "no", or every submit would
+  // silently clear whatever Start Bid already set.
+  if ('certified_payroll' in data) upd.certified_payroll = Number(data.certified_payroll) === 1;
+  if ('tax_exempt' in data) upd.tax_exempt = Number(data.tax_exempt) === 1;
+  if ('prevailing_wage' in data) upd.prevailing_wage = Number(data.prevailing_wage) === 1;
   const [allCustomers, currentSubs] = await Promise.all([
     M.BidCustomer.find({ bid_id: bid._id }).lean(),
     M.BidSubmission.find({ bid_id: bid._id, is_current: 1 }).lean(),
@@ -1512,13 +1527,23 @@ async function awardSubmission(submissionId, data, actorId) {
   const bid = await loadBid(sub.bid_id);
   if (bid.stage !== 'submitted') throw new Error(`Bid must be 'submitted' to award (stage is '${bid.stage}')`);
   if (sub.outcome !== 'pending') throw new Error(`This submission is already '${sub.outcome}'`);
-  require_(data, ['award_date']);
+  // Certified Payroll/Tax Exempt/Prevailing Wage are forced here rather than
+  // at submission — they only actually matter once a bid wins (each notifies
+  // a different back-office team on award), so requiring them on every
+  // submission — decided or not — was pure friction. May already be answered
+  // from Start Bid/Edit Bid; the frontend pre-fills those, but still sends a
+  // real answer either way.
+  require_(data, ['award_date', 'certified_payroll', 'tax_exempt', 'prevailing_wage']);
 
   await M.BidSubmission.updateOne({ _id: sub._id }, { $set: {
     outcome: 'awarded', award_date: data.award_date, next_followup_date: null, updated_at: ts(),
   }});
   await M.Bid.updateOne({ _id: bid._id }, { $set: {
-    stage: 'awarded', award_date: data.award_date, awarded_company_id: sub.company_id, updated_at: ts(),
+    stage: 'awarded', award_date: data.award_date, awarded_company_id: sub.company_id,
+    certified_payroll: Number(data.certified_payroll) === 1,
+    tax_exempt: Number(data.tax_exempt) === 1,
+    prevailing_wage: Number(data.prevailing_wage) === 1,
+    updated_at: ts(),
   }});
   await recomputeBidHeadline(bid._id);   // headline now reflects the winning submission
   await recomputeBidFollowup(bid._id);   // siblings stay pending; bid f/u rolls up from them

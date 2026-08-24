@@ -478,7 +478,10 @@ function pageIcon(key, size) {
   return `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0">${PAGE_ICONS[key] || ''}</svg>`;
 }
 
-const fmt$ = n => n == null ? '' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
+// Cents only show when the amount actually has them — most bids are round
+// dollars and stay clean, but an exact RFC/CO price (customers often need
+// to see the cents) displays correctly instead of getting silently rounded.
+const fmt$ = n => n == null ? '' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(n);
 const fmtD = d => { if (!d) return ''; const [y,m,dd] = d.split('-'); return `${Number(m)}/${Number(dd)}/${String(y).slice(2)}`; };
 // Generic cloud glyph (not a reproduction of Microsoft's OneDrive artwork),
 // tinted OneDrive blue — reused everywhere a folder_url shows up so the
@@ -2882,7 +2885,7 @@ function fuRow(f) {
   const canEdit = CURRENT_USER?.is_admin || (CURRENT_USER?.id && CURRENT_USER.id === f.contacted_by?.id);
   return `<div class="v2-fu-row">
     ${fmtD(f.followup_date)} — ${ini(f.contacted_by)}
-    ${METHOD[f.contact_method] || ''} w/ <strong>${esc(f.customer_contact || '?')}</strong>:
+    ${METHOD[f.contact_method] || ''} w/ <strong>${esc(f.contact_name || f.customer_contact || '?')}</strong>:
     ${esc(f.notes || '')}
     ${f.outcome === 'no_decision' && f.next_followup_date ? `→ next ${fmtD(f.next_followup_date)}` : ''}
     ${f.outcome === 'awarded' ? '<span style="color:#166534;font-weight:700">→ AWARDED</span>' : ''}
@@ -3013,17 +3016,29 @@ function initCombos(ov, fields) {
   }
 }
 
+// Cents are optional — a plain whole-dollar amount still displays without a
+// trailing ".00" (most bid amounts are round numbers), but a value with real
+// cents (RFCs/COs often need exact pricing customers can check) keeps them.
 function fmtCurrencyInput(n) {
   const num = Number(n);
   if (isNaN(num) || n === '' || n == null) return '';
-  return (num < 0 ? '-$' : '$') + Math.round(Math.abs(num)).toLocaleString('en-US');
+  const abs = Math.round(Math.abs(num) * 100) / 100; // avoid float noise (e.g. 19.999999999998)
+  const [whole, frac] = abs.toFixed(2).split('.');
+  const wholeFmt = Number(whole).toLocaleString('en-US');
+  return (num < 0 ? '-$' : '$') + (frac === '00' ? wholeFmt : `${wholeFmt}.${frac}`);
 }
-// Allows a single leading '-' (change-order credits are negative amounts) —
-// everything else strips down to digits, same as before.
+// Allows a single leading '-' (change-order credits are negative amounts)
+// and a single '.' with up to 2 digits after it — everything else strips
+// down to digits, same as before.
 function formatCurrencyField(el) {
   const negative = el.value.trim().startsWith('-');
-  const digits = el.value.replace(/[^\d]/g, '');
-  el.value = digits ? (negative ? '-$' : '$') + Number(digits).toLocaleString('en-US') : (negative ? '-' : '');
+  let cleaned = el.value.replace(/[^\d.]/g, '');
+  const dot = cleaned.indexOf('.');
+  if (dot !== -1) cleaned = cleaned.slice(0, dot + 1) + cleaned.slice(dot + 1).replace(/\./g, '').slice(0, 2);
+  if (!cleaned) { el.value = negative ? '-' : ''; return; }
+  const [wholePart, fracPart] = cleaned.split('.');
+  const wholeFmt = wholePart ? Number(wholePart).toLocaleString('en-US') : '0';
+  el.value = (negative ? '-$' : '$') + (fracPart !== undefined ? `${wholeFmt}.${fracPart}` : wholeFmt);
 }
 // US 10-digit phone → xxx-xxx-xxxx as you type. Anything past 10 digits
 // (an extension, a typo) is left alone rather than truncated, so it's
@@ -3142,9 +3157,9 @@ function showForm(title, fields, onSubmit, submitLabel = 'Save', submitClass = '
       } else if (f.type === 'currency') {
         const raw = document.getElementById('vf-' + f.id)?.value || '';
         const negative = raw.trim().startsWith('-');
-        const digits = raw.replace(/[^\d]/g, '');
-        data[f.id] = digits ? (negative ? -1 : 1) * Number(digits) : null;
-        if (f.required && !digits) missing.push(f.label);
+        const cleaned = raw.replace(/[^\d.]/g, '');
+        data[f.id] = cleaned ? (negative ? -1 : 1) * parseFloat(cleaned) : null;
+        if (f.required && !cleaned) missing.push(f.label);
       } else if (f.type === 'custom') {
         // Nothing to collect — the caller reads its own hand-built section's
         // inputs directly in its onSubmit callback.
@@ -3616,19 +3631,10 @@ function actSubmitBid(bidId) {
     { id: 'jurisdiction', label: 'IBEW Local Jurisdiction', type: 'text', required: true, placeholder: '98' },
     { id: 'date_submitted', label: 'Date Estimate Sent', type: 'date', required: true, value: today },
     { id: 'approved_by', label: 'Estimate Approved By', type: 'select', required: true, options: nameOpts(['estimator', 'sales']) },
-    // A real answer is required by this point — the backend rejects a
-    // missing value here — but if it was already answered earlier (Start
-    // Bid / Edit Bid), it's pre-filled so nobody has to re-enter it; only a
-    // still-TBD bid actually forces a fresh choice.
-    { id: 'certified_payroll', label: 'Certified Payroll Job?', type: 'select', required: true,
-      value: b.certified_payroll == null ? '' : (b.certified_payroll ? 1 : 0),
-      options: submitYesNoOptions('Yes — notifies Accounting on award', b.certified_payroll != null) },
-    { id: 'tax_exempt', label: 'Tax Exempt Job?', type: 'select', required: true,
-      value: b.tax_exempt == null ? '' : (b.tax_exempt ? 1 : 0),
-      options: submitYesNoOptions('Yes — notifies Purchasing on award', b.tax_exempt != null) },
-    { id: 'prevailing_wage', label: 'Prevailing Wage Job?', type: 'select', required: true,
-      value: b.prevailing_wage == null ? '' : (b.prevailing_wage ? 1 : 0),
-      options: submitYesNoOptions('Yes', b.prevailing_wage != null) },
+    // Certified Payroll / Tax Exempt / Prevailing Wage moved to Award time
+    // (see actAwardSubmission) — they only actually matter once a bid wins,
+    // and requiring them here just added friction to every submission,
+    // decided or not.
     { id: 'notes', label: 'Notes', type: 'textarea' },
   ], async data => {
     const r = await api('POST', `/api/v2/bids/${bidId}/submit`, data);
@@ -3962,6 +3968,11 @@ function findSubmission(subId) {
   for (const b of d.bids) { const s = (b.submissions || []).find(x => x.id === subId); if (s) return s; }
   return null;
 }
+function findBidForSubmission(subId) {
+  const d = DETAIL_CACHE[OPEN_PROJECT];
+  if (!d) return null;
+  return d.bids.find(b => (b.submissions || []).some(x => x.id === subId)) || null;
+}
 
 function actEditSubmission(subId) {
   const s = findSubmission(subId) || {};
@@ -4086,9 +4097,23 @@ async function maybeBatchNotAwardSiblings(awardedSubmissionId, winnerName) {
 // company is implied by the submission, so no customer picker is needed.
 function actAwardSubmission(submissionId) {
   const s = findSubmission(submissionId);
+  const b = findBidForSubmission(submissionId) || {};
   showForm(`🎉 Awarded — ${esc(s?.company?.name || 'customer')}`, [
     { id: 'award_date', label: 'Award Date', type: 'date', required: true, value: today },
     { id: 'pm_id', label: 'Assign PM (can be set later)', type: 'select', emptyLabel: 'TBD', options: teamOpts(['pm', 'sales', 'estimator']) },
+    // Forced here, not at submission — each only actually matters once a
+    // bid wins (notifies a different back-office team on award). Pre-filled
+    // if already answered earlier (Start Bid/Edit Bid); still a real
+    // required choice if not.
+    { id: 'certified_payroll', label: 'Certified Payroll Job?', type: 'select', required: true,
+      value: b.certified_payroll == null ? '' : (b.certified_payroll ? 1 : 0),
+      options: submitYesNoOptions('Yes — notifies Accounting', b.certified_payroll != null) },
+    { id: 'tax_exempt', label: 'Tax Exempt Job?', type: 'select', required: true,
+      value: b.tax_exempt == null ? '' : (b.tax_exempt ? 1 : 0),
+      options: submitYesNoOptions('Yes — notifies Purchasing', b.tax_exempt != null) },
+    { id: 'prevailing_wage', label: 'Prevailing Wage Job?', type: 'select', required: true,
+      value: b.prevailing_wage == null ? '' : (b.prevailing_wage ? 1 : 0),
+      options: submitYesNoOptions('Yes', b.prevailing_wage != null) },
   ], async data => {
     await api('POST', `/api/v2/submissions/${submissionId}/award`, data);
     await maybeBatchNotAwardSiblings(submissionId, s?.company?.name);
@@ -4113,8 +4138,22 @@ function actApproveToBid(bidId) {
   const b = (DETAIL_CACHE[OPEN_PROJECT]?.bids || (VIEW.name === 'bidlist' ? LIST_STATE[VIEW.arg] : null) || []).find(x => x.id === bidId) || {};
   showForm('✓ Approve to Bid', [
     { id: 'estimator_id', label: 'Estimator (if known)', type: 'select', emptyLabel: 'TBD', options: teamOpts(['estimator']), value: b.estimator?.id },
+    { id: 'sub_estimator_id', label: 'Sub-Estimator (optional)', type: 'select', emptyLabel: 'None', options: teamOpts(['estimator']) },
+    { id: 'sub_estimator_scope', label: 'Sub-Estimator Scope', type: 'text', placeholder: 'e.g. Fire Alarm, Lighting Controls…' },
     { id: 'pm_id', label: 'PM (if known)', type: 'select', emptyLabel: 'TBD', options: teamOpts(['pm', 'sales', 'estimator']), value: b.pm?.id },
-  ], data => api('POST', `/api/v2/bids/${bidId}/approve-to-bid`, data), 'Approve to Bid', 'green');
+  ], async data => {
+    if (data.sub_estimator_id && !data.sub_estimator_scope) throw new Error('Required: Sub-Estimator Scope (or leave Sub-Estimator blank)');
+    const r = await api('POST', `/api/v2/bids/${bidId}/approve-to-bid`, data);
+    // Sub-estimators are their own array (Bid.sub_estimators, added via a
+    // dedicated endpoint) rather than a plain field on the bid — folding one
+    // in here just means a second call once the approval itself succeeds,
+    // same "chain a follow-up call" pattern as New Opportunity's new-contact
+    // details prompt.
+    if (data.sub_estimator_id && data.sub_estimator_scope) {
+      await api('POST', `/api/v2/bids/${bidId}/sub-estimators`, { estimator_id: data.sub_estimator_id, scope: data.sub_estimator_scope });
+    }
+    return r;
+  }, 'Approve to Bid', 'green');
 }
 async function actUnapproveToBid(bidId) {
   if (!confirm('Move this back to Opportunities? It will leave the Queue.')) return;
