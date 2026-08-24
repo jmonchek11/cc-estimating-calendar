@@ -25,30 +25,41 @@ function getClient() {
   return _cca;
 }
 
-function getRedirectUri() {
-  return process.env.MS_REDIRECT_URI ||
-    (process.env.NODE_ENV === 'production'
-      ? 'https://lis-estimating-calendar.onrender.com/auth/callback'
-      : 'http://localhost:3000/auth/callback');
+// The app is reachable at more than one domain (the onrender.com URL and
+// estimating.libertyintegrated.com), and the SSO round-trip must return to
+// whichever one the user actually started from — the login session cookie
+// that stores the CSRF state is host-scoped, so a mismatch here reads as
+// "Invalid state" even though the code and Azure app registration are both
+// fine. Compute it per-request from the incoming host by default; only fall
+// back to a fixed value if MS_REDIRECT_URI is explicitly set (e.g. behind a
+// proxy setup where the request host isn't trustworthy) or there's no
+// request to read (there never is for this app, but keeps the function safe
+// to call without one).
+function getRedirectUri(req) {
+  if (process.env.MS_REDIRECT_URI) return process.env.MS_REDIRECT_URI;
+  if (req) return `${req.protocol}://${req.get('host')}/auth/callback`;
+  return process.env.NODE_ENV === 'production'
+    ? 'https://lis-estimating-calendar.onrender.com/auth/callback'
+    : 'http://localhost:3000/auth/callback';
 }
 
-async function getAuthCodeUrl(state) {
+async function getAuthCodeUrl(state, req) {
   const cca = getClient();
   if (!cca) throw new Error('Microsoft sign-in is not configured');
   return cca.getAuthCodeUrl({
     scopes: ['user.read'],
-    redirectUri: getRedirectUri(),
+    redirectUri: getRedirectUri(req),
     state,
   });
 }
 
-async function acquireTokenByCode(code) {
+async function acquireTokenByCode(code, req) {
   const cca = getClient();
   if (!cca) throw new Error('Microsoft sign-in is not configured');
   return cca.acquireTokenByCode({
     code,
     scopes: ['user.read'],
-    redirectUri: getRedirectUri(),
+    redirectUri: getRedirectUri(req),
   });
 }
 

@@ -13,6 +13,10 @@ const v2db = require('./v2/db');
 const v2notify = require('./v2/notify');
 
 const app = express();
+// Render terminates TLS at its edge and forwards plain HTTP internally —
+// without this, req.protocol always reads 'http', which breaks the
+// dynamic SSO redirect URI below (Azure only accepts the https one).
+app.set('trust proxy', 1);
 app.use(express.json({ limit: '25mb' }));
 
 // ── Session ───────────────────────────────────────────────────────────────────
@@ -192,7 +196,7 @@ app.get('/auth/login', async (req, res) => {
   try {
     const state = crypto.randomBytes(16).toString('hex');
     req.session.msAuthState = state;
-    const url = await msauth.getAuthCodeUrl(state);
+    const url = await msauth.getAuthCodeUrl(state, req);
     res.redirect(url);
   } catch (e) {
     console.error('MS auth login error:', e);
@@ -207,7 +211,7 @@ app.get('/auth/callback', async (req, res) => {
     delete req.session.msAuthState;
     if (!req.query.state || req.query.state !== expectedState) return res.status(403).send('Invalid state');
 
-    const response = await msauth.acquireTokenByCode(req.query.code);
+    const response = await msauth.acquireTokenByCode(req.query.code, req);
     const claims = response.idTokenClaims || {};
     const oid = claims.oid;
     const email = claims.preferred_username || claims.email;

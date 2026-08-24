@@ -160,5 +160,8 @@ EMAIL_PASS=...
 AZURE_TENANT_ID=...                    # Microsoft Entra SSO — msauth.js no-ops if any of these three are unset
 AZURE_CLIENT_ID=...
 AZURE_CLIENT_SECRET=...
-MS_REDIRECT_URI=...                    # optional override; defaults per NODE_ENV (prod vs localhost:3000)
+MS_REDIRECT_URI=...                    # NOT SET in normal use — SSO redirect URI is computed per-request from the
+                                        #   incoming host (msauth.js getRedirectUri), so both onrender.com and any
+                                        #   custom domain work simultaneously. Only set this to force a single fixed
+                                        #   value; doing so breaks SSO on every other domain the app is reachable at.
 ```
