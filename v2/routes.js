@@ -209,15 +209,17 @@ async function actorOf(req) {
   try { return await maindb.getMember(req.session.userId); } catch { return null; }
 }
 
-// Fire assignment emails for whichever of estimator_id/salesperson_id actually
-// changed to a new, non-null person (never for the person making the change).
-// Fire-and-forget — called after the response is already sent, same pattern
-// as the award-email flow below.
+// Fire assignment emails for whichever of estimator_id/salesperson_id/pm_id
+// actually changed to a new, non-null person (never for the person making
+// the change). Fire-and-forget — called after the response is already sent,
+// same pattern as the award-email flow below.
 function notifyAssignmentDiff(bidId, oldBid, newData, actorId) {
   const newEstId = newData.estimator_id != null ? Number(newData.estimator_id) : undefined;
   if (newEstId && newEstId !== oldBid?.estimator_id) notify.notifyAssigned(bidId, newEstId, actorId, 'estimator');
   const newSpId = newData.salesperson_id != null ? Number(newData.salesperson_id) : undefined;
   if (newSpId && newSpId !== oldBid?.salesperson_id) notify.notifyAssigned(bidId, newSpId, actorId, 'salesperson');
+  const newPmId = newData.pm_id != null ? Number(newData.pm_id) : undefined;
+  if (newPmId && newPmId !== oldBid?.pm_id) notify.notifyAssigned(bidId, newPmId, actorId, 'pm');
 }
 
 // Audit trail — admin-only, same gate as Data Health merges (visibility
@@ -319,7 +321,9 @@ router.delete('/api/v2/admin/change-order/:id', requireAdmin, t(req => v2db.dele
 router.delete('/api/v2/admin/override/:id',    requireAdmin, t(req => v2db.removeOverride(req.params.id)));
 router.post('/api/v2/bids/:id/approve-to-bid', t(async req => {
     const actor = await actorOf(req);
+    const oldBid = await v2db.loadBid(req.params.id).catch(() => null);
     const r = await v2db.approveToBid(req.params.id, actor, { estimator_id: req.body?.estimator_id, pm_id: req.body?.pm_id });
+    notifyAssignmentDiff(Number(req.params.id), oldBid, req.body || {}, req.session.userId);
     notify.notifyApprovedToBid(Number(req.params.id), actor?.name);
     notify.notifyOwnerToForwardInvite(Number(req.params.id), actor?.name);
     return r;

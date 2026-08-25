@@ -255,7 +255,7 @@ function bidTable(bid) {
 // ── Email builders ─────────────────────────────────────────────────────────────
 
 function emailAssigned(bid, recipientName, actorName, role, scope) {
-  const roleText = role === 'salesperson' ? 'the salesperson' : role === 'sub_estimator' ? 'a sub-estimator' : 'an estimator';
+  const roleText = role === 'salesperson' ? 'the salesperson' : role === 'pm' ? 'the PM' : role === 'sub_estimator' ? 'a sub-estimator' : 'an estimator';
   // Deep-links straight to the bid's flyout when the caller's shape includes
   // ids (v2's bidEmailShape does); older/v1-shaped bid objects just don't
   // have these fields and fall back to the bare app URL.
