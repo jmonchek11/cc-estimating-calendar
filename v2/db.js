@@ -179,7 +179,11 @@ async function getProjects() {
                     + activeCos.reduce((s, c) => s + (c.estimate_amount || 0), 0),
       won_value: pBids.filter(b => b.stage === 'awarded').reduce((s, b) => s + (b.estimate_amount || 0), 0)
                + pCos.filter(c => c.stage === 'approved').reduce((s, c) => s + (c.estimate_amount || 0), 0),
-      customers: [...new Set(pBids.flatMap(b => customersByBid[b._id] || []))],
+      // .filter(Boolean) guards against a BidCustomer whose company_id no
+      // longer resolves (company deleted without checking for references) —
+      // an undefined slipping through here used to crash the frontend's
+      // client-side project search with no visible error.
+      customers: [...new Set(pBids.flatMap(b => customersByBid[b._id] || []))].filter(Boolean),
     };
   }).sort((a, b) => a.name.localeCompare(b.name));
 }

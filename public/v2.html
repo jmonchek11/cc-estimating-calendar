@@ -1923,7 +1923,7 @@ function onProjFilterChange() {
 function renderProjectsBody() {
   const q = PROJ_FILTER.q.trim().toLowerCase();
   let projects = !q ? PROJECTS_RAW : PROJECTS_RAW.filter(p =>
-    p.name.toLowerCase().includes(q) || p.customers.some(c => c.toLowerCase().includes(q)) || p.job_numbers.some(j => j.toLowerCase().includes(q)));
+    p.name.toLowerCase().includes(q) || p.customers.some(c => c && c.toLowerCase().includes(q)) || p.job_numbers.some(j => j && j.toLowerCase().includes(q)));
   const sorters = {
     name: (a, b) => a.name.localeCompare(b.name),
     bids: (a, b) => b.bid_count - a.bid_count,
