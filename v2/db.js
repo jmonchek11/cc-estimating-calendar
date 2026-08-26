@@ -3026,6 +3026,59 @@ function bucketLabel(key, granularity) {
   return `${MONTHS[Number(m) - 1]} ${y}`;
 }
 
+// Cleanup queue for backfilling gc_awarded on old Not Awarded submissions —
+// mainly the ~100 already-logged follow-up calls where a note already says
+// whether the GC won, but nobody's gone back to record that as data. Surfaces
+// the actual follow-up notes right alongside each submission so answering
+// doesn't require opening the bid at all, and never touches the follow-up
+// log itself — this only ever sets one field on the submission.
+async function getGcAwardReviewQueue() {
+  const M = getModels();
+  const [subs, followups] = await Promise.all([
+    M.BidSubmission.find({ outcome: 'not_awarded', gc_awarded: null }).lean(),
+    M.Followup.find({ parent_type: 'bid_submission' }).lean(),
+  ]);
+  if (!subs.length) return [];
+  const bidIds = [...new Set(subs.map(s => s.bid_id))];
+  const [bids, companies, members] = await Promise.all([
+    M.Bid.find({ _id: { $in: bidIds } }).lean(),
+    M.Company.find().lean(),
+    M.TeamMember.find().lean(),
+  ]);
+  const bidById = {}; bids.forEach(b => bidById[b._id] = b);
+  const projects = await M.Project.find({ _id: { $in: [...new Set(bids.map(b => b.project_id))] } }).lean();
+  const pName = {}; projects.forEach(p => pName[p._id] = p.name);
+  const coName = {}; companies.forEach(c => coName[c._id] = c.name);
+  const tm = teamMap(members);
+  const fuBySub = {}; followups.forEach(f => (fuBySub[f.parent_id] = fuBySub[f.parent_id] || []).push(f));
+
+  return subs
+    .filter(s => bidById[s.bid_id])
+    .map(s => {
+      const bid = bidById[s.bid_id];
+      return {
+        submission_id: s._id, bid_id: bid._id, project_id: bid.project_id,
+        project: pName[bid.project_id] || '—', bid_number: bid.bid_number,
+        company: coName[s.company_id] || '—',
+        amount: s.amount, date_not_awarded: s.date_not_awarded, not_awarded_notes: s.not_awarded_notes,
+        followups: (fuBySub[s._id] || [])
+          .sort((a, b) => (b.followup_date || '').localeCompare(a.followup_date || ''))
+          .map(f => ({ date: f.followup_date, notes: f.notes, contacted_by: tm[f.contacted_by]?.name || null })),
+      };
+    })
+    .sort((a, b) => (b.date_not_awarded || '').localeCompare(a.date_not_awarded || ''));
+}
+async function setSubmissionGcAwarded(submissionId, gc_awarded) {
+  const M = getModels();
+  const sub = await loadSubmission(submissionId);
+  if (sub.outcome !== 'not_awarded') throw new Error('Only meaningful once a submission is Not Awarded');
+  await M.BidSubmission.updateOne({ _id: sub._id }, { $set: {
+    gc_awarded: gc_awarded === '' || gc_awarded == null ? null : (Number(gc_awarded) === 1),
+    updated_at: ts(),
+  }});
+  return { submission_id: sub._id };
+}
+
 // personId matches a bid via estimator/salesperson/sub-estimator, a job via
 // PM (falling back to the winning bid's estimator/salesperson, same
 // fallback getDashboard's mineOnly filter uses), and a CO via its own
@@ -4079,6 +4132,6 @@ module.exports = {
   logActivity, getActivityLog, undoActivity, bidLabel, coLabel, loadBid, loadCO, loadSubmission,
   mergeContacts, deleteCompany, deleteChangeOrder,
   getVendors, VENDOR_CATEGORIES,
-  getReports,
+  getReports, getGcAwardReviewQueue, setSubmissionGcAwarded,
   getOrCreateCalendarToken, resetCalendarToken, getTeamMemberIdByCalendarToken, buildIcsFeed, getEstimatorAvailability,
 };

@@ -471,6 +471,11 @@ router.get('/api/v2/vendors', async (req, res) => { try { res.json(await v2db.ge
 
 router.get('/api/v2/reports', async (req, res) => { try { res.json(await v2db.getReports(req.query)); } catch (e) { res.status(500).json({ error: e.message }); } });
 
+// Data-cleanup queue for backfilling gc_awarded on old Not Awarded
+// submissions — admin-only, same as the other cleanup/Data Health tools.
+router.get('/api/v2/gc-award-review', requireAdmin, async (req, res) => { try { res.json(await v2db.getGcAwardReviewQueue()); } catch (e) { res.status(500).json({ error: e.message }); } });
+router.post('/api/v2/submissions/:id/gc-awarded', requireAdmin, t(req => v2db.setSubmissionGcAwarded(req.params.id, req.body.gc_awarded)));
+
 router.get('/api/v2/companies/:id/bids', async (req, res) => { try { res.json(await v2db.getCompanyBids(req.params.id)); } catch (e) { res.status(500).json({ error: e.message }); } });
 router.get('/api/v2/companies/:id/communications', async (req, res) => { try { res.json(await v2db.getCompanyCommunications(req.params.id)); } catch (e) { res.status(500).json({ error: e.message }); } });
 router.get('/api/v2/communications', async (req, res) => { try { res.json(await v2db.getAllCommunications(req.query)); } catch (e) { res.status(500).json({ error: e.message }); } });

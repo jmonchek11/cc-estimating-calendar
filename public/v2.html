@@ -719,6 +719,7 @@ function navigate(page) {
   if (page === 'submitted-bids') { VIEW = { name: 'bidlist', arg: 'submitted' }; return renderBidList('submitted'); }
   if (page === 'awarded-bids') { VIEW = { name: 'bidlist', arg: 'awarded' }; return renderBidList('awarded'); }
   if (page === 'not-awarded-bids') { VIEW = { name: 'bidlist', arg: 'not_awarded' }; return renderBidList('not_awarded'); }
+  if (page === 'gc-award-review') { VIEW = { name: 'gc-award-review' }; return renderGcAwardReview(); }
   if (page === 'active-cos') { VIEW = { name: 'colist', arg: 'active_co' }; return renderCoList('active_co'); }
   if (page === 'submitted-cos') { VIEW = { name: 'colist', arg: 'submitted_co' }; return renderCoList('submitted_co'); }
   if (page === 'approved-cos') { VIEW = { name: 'colist', arg: 'approved' }; return renderCoList('approved'); }
@@ -745,6 +746,7 @@ async function rerenderView() {
     case 'projects':  return load();
     case 'project':   return renderProjectPage(VIEW.arg);
     case 'bidlist':   return renderBidList(VIEW.arg);
+    case 'gc-award-review': return renderGcAwardReview();
     case 'colist':    return renderCoList(VIEW.arg);
     case 'dashboard': return renderDashboard();
     case 'health':    return showHealth();
@@ -1689,6 +1691,9 @@ async function renderBidList(stage) {
       </div>` : stage === 'lead' ? `
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="v2-btn blue" style="padding:8px 14px;font-size:12px" onclick="actNewLead()">+ New Lead</button>
+      </div>` : stage === 'not_awarded' && CURRENT_USER?.is_admin ? `
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="v2-btn outline" style="padding:8px 14px;font-size:12px" onclick="navigate('gc-award-review')">🔍 Review GC Outcomes</button>
       </div>` : '';
 
   main.innerHTML = `
@@ -1809,6 +1814,53 @@ function renderBidListBody(stage) {
           <div style="text-align:right;min-width:108px">${right(b)}</div>
         </div>
       </div>`).join('') : '<div style="padding:24px;text-align:center;color:var(--text-muted)">No matches</div>';
+}
+
+// ── GC Award Review — backfill queue for the ~100 already-logged Not
+// Awarded submissions from before gc_awarded existed. Shows the follow-up
+// notes already on file right next to each one so answering the question
+// never requires opening the bid itself, and never touches the follow-up
+// log — it only ever sets one field.
+async function renderGcAwardReview() {
+  setActiveNav('not-awarded-bids');
+  const main = document.getElementById('main');
+  main.innerHTML = '<div style="padding:30px;color:var(--text-muted)">Loading…</div>';
+  let rows;
+  try { rows = await api('GET', '/api/v2/gc-award-review'); }
+  catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
+
+  main.innerHTML = `
+    <div class="page-header">
+      <div><div class="page-title">🔍 Review GC Outcomes</div><div class="page-subtitle">${rows.length} not-awarded submission${rows.length === 1 ? '' : 's'} still missing this — answer from the notes below, no need to open each bid</div></div>
+      <a href="#" onclick="event.preventDefault();navigate('not-awarded-bids')" style="font-size:12px;color:#2563eb">← Back to Not Awarded Bids</a>
+    </div>
+    <div id="gcr-body"></div>`;
+  renderGcAwardReviewBody(rows);
+}
+function renderGcAwardReviewBody(rows) {
+  document.getElementById('gcr-body').innerHTML = rows.length ? rows.map(r => `
+    <div class="card" style="padding:14px;margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <div style="min-width:0">
+          <div class="proj-name" onclick="closeFlyout();openBidFlyout(${r.project_id},${r.bid_id})" style="cursor:pointer">${esc(r.project)} ${r.bid_number ? `<span style="color:var(--text-muted);font-weight:400;font-size:12px">#${esc(r.bid_number)}</span>` : ''}</div>
+          <div class="proj-meta">${esc(r.company)}${r.amount ? ` · ${fmt$(r.amount)}` : ''}${r.date_not_awarded ? ` · Not Awarded ${fmtD(r.date_not_awarded)}` : ''}</div>
+          ${r.not_awarded_notes ? `<div style="font-size:12px;color:#991b1b;margin-top:4px">${esc(r.not_awarded_notes)}</div>` : ''}
+          ${r.followups.length ? `<div style="margin-top:6px">${r.followups.map(f => `<div style="font-size:12px;color:var(--text-muted)">${fmtD(f.date)}${f.contacted_by ? ` — ${esc(f.contacted_by)}` : ''}: ${esc(f.notes || '')}</div>`).join('')}</div>` : '<div style="font-size:12px;color:var(--text-muted);margin-top:6px;font-style:italic">No follow-up notes logged on this one</div>'}
+        </div>
+        <div style="display:flex;gap:6px;flex-shrink:0;align-items:flex-start">
+          <button class="v2-btn outline" style="padding:5px 10px;font-size:11px" onclick="actSetGcAwarded(${r.submission_id},1,this)">GC Won It</button>
+          <button class="v2-btn outline" style="padding:5px 10px;font-size:11px" onclick="actSetGcAwarded(${r.submission_id},0,this)">GC Never Won It</button>
+        </div>
+      </div>
+    </div>`).join('') : '<div class="card" style="padding:24px;text-align:center;color:var(--text-muted)">All caught up — nothing left to review.</div>';
+}
+async function actSetGcAwarded(submissionId, gcAwarded, btn) {
+  const card = btn.closest('.card');
+  try {
+    await api('POST', `/api/v2/submissions/${submissionId}/gc-awarded`, { gc_awarded: gcAwarded });
+    card.style.opacity = '0.4';
+    card.style.pointerEvents = 'none';
+  } catch (e) { alert('Failed: ' + e.message); }
 }
 
 async function renderCoList(stage) {
@@ -2403,6 +2455,12 @@ function customerRowHtml(b, cust) {
     if ((current.followups || []).length) followupsHtml = `<div style="margin-top:6px">${current.followups.map(fuRow).join('')}</div>`;
     if (current.notes) subMetaExtra += ` · ${esc(current.notes)}`;
     if (current.not_awarded_notes) subMetaExtra += ` · <span style="color:#991b1b">${esc(current.not_awarded_notes)}</span>`;
+    if (current.outcome === 'not_awarded') {
+      subMetaExtra += current.gc_awarded === true ? ` · <span style="color:#92400e">GC won it, picked someone else</span>`
+        : current.gc_awarded === false ? ` · <span style="color:#6b7280">GC never won the job</span>`
+        : canEditSub ? ` · <a href="#" onclick="event.preventDefault();actEditSubmission(${current.id})" style="color:#2563eb">Did the GC win it? — set</a>`
+        : ` · <span style="color:var(--text-muted)">GC outcome unknown</span>`;
+    }
   } else if (b.stage === 'active_bid') {
     right = `<div class="bc-co-fu" style="color:#92400e;font-weight:700">awaiting submission</div>`;
   }
@@ -4030,6 +4088,9 @@ function actEditSubmission(subId) {
   // only this generic Notes field was, which people kept mistaking for it.
   if (s.outcome === 'not_awarded') {
     fields.push({ id: 'not_awarded_notes', label: 'Customer Feedback (shown in red on the card)', type: 'textarea', value: s.not_awarded_notes });
+    fields.push({ id: 'gc_awarded', label: 'Did the GC still win this job?', type: 'select', emptyLabel: "Don't know yet",
+      value: s.gc_awarded == null ? '' : (s.gc_awarded ? 1 : 0),
+      options: [{ value: '1', label: 'Yes — they won it, picked someone else' }, { value: '0', label: 'No — they didn\'t win it either' }] });
   }
   showForm('✏️ Edit Submission (admin)', fields, data => api('PATCH', `/api/v2/admin/bid_submission/${subId}`, data), 'Save Changes');
 }

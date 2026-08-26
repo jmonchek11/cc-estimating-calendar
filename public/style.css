@@ -128,11 +128,11 @@ body {
 .switcher-pop-foot { font-size: 10.5px; color: #5b6b85; padding: 7px 9px 5px; display: flex; align-items: center; gap: 5px; }
 
 .nav-section-label {
-  padding: 18px 16px 6px;
-  font-size: 11px;
+  padding: 18px 16px 7px;
+  font-size: 12.5px;
   font-weight: 800;
-  letter-spacing: 0.09em;
-  color: #8698b8;
+  letter-spacing: 0.06em;
+  color: #c3cee2;
   text-transform: uppercase;
 }
 
