@@ -188,7 +188,11 @@ async function updateTeamMember(id, { name, initials, role, active, pin, email, 
 }
 
 async function loginUser(email, password) {
-  const member = await TeamMember.findOne({ email: email.toLowerCase().trim(), active: 1 });
+  // 'foreman' is a notification-only role (walk-through assignment emails)
+  // — it needs a real work email to be reachable, but must never be able to
+  // actually sign into the site, so it's excluded from every login path
+  // rather than relying on it just happening to have no password set.
+  const member = await TeamMember.findOne({ email: email.toLowerCase().trim(), active: 1, role: { $ne: 'foreman' } });
   if (!member) return null;
   if (!member.password_hash) return null;
   const match = await bcrypt.compare(password, member.password_hash);
@@ -202,12 +206,12 @@ async function loginUser(email, password) {
 // as password login, which also only ever matches existing records).
 async function loginWithMicrosoft({ oid, email, name }) {
   // Durable link first — survives the member's email changing later.
-  let member = await TeamMember.findOne({ ms_oid: oid, active: 1 });
+  let member = await TeamMember.findOne({ ms_oid: oid, active: 1, role: { $ne: 'foreman' } });
   if (member) return formatMember(member);
 
   const normalizedEmail = (email || '').toLowerCase().trim();
   if (!normalizedEmail) return null;
-  member = await TeamMember.findOne({ email: normalizedEmail, active: 1 });
+  member = await TeamMember.findOne({ email: normalizedEmail, active: 1, role: { $ne: 'foreman' } });
   if (!member) return null;
 
   member.ms_oid = oid;

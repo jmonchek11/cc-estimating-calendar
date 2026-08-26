@@ -969,7 +969,7 @@ async function renderSettings() {
   } catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
 
   const isAdmin = !!CURRENT_USER?.is_admin;
-  const roleLabel = { estimator: 'Estimator', sales: 'Salesperson', oversight: 'Admin / Oversight', apm: 'APM' };
+  const roleLabel = { estimator: 'Estimator', sales: 'Salesperson', oversight: 'Admin / Oversight', apm: 'APM', foreman: 'Foreman (notification-only)' };
 
   const teamRows = team.map(m => `
     <div class="proj-row" style="${m.active ? '' : 'opacity:.5'}">
@@ -1050,9 +1050,9 @@ function actNewTeamMember() {
   showForm('+ Add Team Member', [
     { id: 'name', label: 'Name', type: 'text', required: true },
     { id: 'initials', label: 'Initials', type: 'text', required: true, placeholder: 'JD' },
-    { id: 'role', label: 'Role', type: 'select', required: true, options: [{ value: 'estimator', label: 'Estimator' }, { value: 'sales', label: 'Salesperson' }, { value: 'apm', label: 'APM (not a salesperson/estimator)' }, { value: 'oversight', label: 'Admin / Oversight (no bids — sees global view by default)' }] },
+    { id: 'role', label: 'Role', type: 'select', required: true, options: TEAM_ROLE_OPTIONS },
     { id: 'email', label: 'Email', type: 'text', required: true, placeholder: 'Needed for login + notifications' },
-    { id: 'temp_password', label: 'Temporary Password', type: 'text', placeholder: 'They\'ll be asked to change it on first login' },
+    { id: 'temp_password', label: 'Temporary Password', type: 'text', placeholder: 'Foreman: leave blank — they never log in, only get emailed' },
   ], data => api('POST', '/api/v2/team', data), 'Create', 'green');
 }
 function actEditTeamMember(id) {
@@ -1060,7 +1060,7 @@ function actEditTeamMember(id) {
   showForm('✏️ Edit Team Member', [
     { id: 'name', label: 'Name', type: 'text', required: true, value: m?.name },
     { id: 'initials', label: 'Initials', type: 'text', required: true, value: m?.initials },
-    { id: 'role', label: 'Role', type: 'select', required: true, value: m?.role, options: [{ value: 'estimator', label: 'Estimator' }, { value: 'sales', label: 'Salesperson' }, { value: 'apm', label: 'APM (not a salesperson/estimator)' }, { value: 'oversight', label: 'Admin / Oversight (no bids — sees global view by default)' }] },
+    { id: 'role', label: 'Role', type: 'select', required: true, value: m?.role, options: TEAM_ROLE_OPTIONS },
     { id: 'email', label: 'Email', type: 'text', value: m?.email },
     { id: 'active', label: 'Active', type: 'select', required: true, value: m?.active ? '1' : '0', options: [{ value: '1', label: 'Active' }, { value: '0', label: 'Inactive' }] },
     { id: 'is_admin', label: 'Admin', type: 'select', required: true, value: m?.is_admin ? '1' : '0', options: [{ value: '1', label: 'Yes — full access incl. Data Health merges' }, { value: '0', label: 'No' }] },
@@ -3281,6 +3281,15 @@ function showForm(title, fields, onSubmit, submitLabel = 'Save', submitClass = '
   };
 }
 
+// 'foreman' is notification-only (walk-through assignment emails) — no
+// login capability at all, enforced server-side in loginUser/loginWithMicrosoft
+// regardless of whether a password/temp_password was ever set for one.
+const TEAM_ROLE_OPTIONS = [
+  { value: 'estimator', label: 'Estimator' }, { value: 'sales', label: 'Salesperson' },
+  { value: 'apm', label: 'APM (not a salesperson/estimator)' },
+  { value: 'oversight', label: 'Admin / Oversight (no bids — sees global view by default)' },
+  { value: 'foreman', label: 'Foreman (notification-only — no site login, just walk-through emails)' },
+];
 const teamOpts = (roleFilter) => META.team
   .filter(t => !roleFilter || roleFilter.includes(t.role))
   .map(t => ({ value: t.id, label: `${t.name} (${t.initials})` }));
