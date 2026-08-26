@@ -66,6 +66,11 @@ async function bidLabel(id) {
   if (!b) return `bid #${id}`;
   return [b.bid_number, b.project_name].filter(Boolean).join(' ') || `bid #${id}`;
 }
+async function projectLabel(id) {
+  const M = getModels();
+  const p = await M.Project.findById(Number(id)).lean();
+  return p?.name || `project #${id}`;
+}
 async function coLabel(id) {
   const M = getModels();
   const c = await M.ChangeOrder.findById(Number(id)).lean();
@@ -167,6 +172,7 @@ async function getProjects() {
     return {
       id: p._id,
       name: p.name,
+      on_hold: !!p.on_hold,
       bid_count: pBids.length,
       job_count: pJobs.length,
       co_count: pCos.length,
@@ -239,7 +245,7 @@ async function getProjectDetail(projectId) {
   const contacts = allContactIds.length ? await M.Contact.find({ _id: { $in: allContactIds } }).lean() : [];
   const contactById = {}; contacts.forEach(c => { contactById[c._id] = fmtContactBrief(c); });
   const allReminders = await M.Reminder.find({
-    $or: [{ parent_type: 'bid', parent_id: { $in: bidIds } }, { parent_type: 'change_order', parent_id: { $in: cos.map(c => c._id) } }],
+    $or: [{ parent_type: 'bid', parent_id: { $in: bidIds } }, { parent_type: 'change_order', parent_id: { $in: cos.map(c => c._id) } }, { parent_type: 'project', parent_id: pid }],
   }).sort({ remind_on: 1 }).lean();
   const remindersFor = (type, id) => allReminders.filter(r => r.parent_type === type && r.parent_id === id);
   const allNotes = await M.Note.find({
@@ -273,6 +279,7 @@ async function getProjectDetail(projectId) {
     id: b._id,
     bid_number: b.bid_number,
     stage: b.stage,
+    project_on_hold: !!project.on_hold,
     superseded: !!b.superseded,
     drawing_stage: b.drawing_stage,
     estimator: tm[b.estimator_id] || null,
@@ -361,6 +368,7 @@ async function getProjectDetail(projectId) {
     co_number: co.co_number,
     name: co.name,
     stage: co.stage,
+    project_on_hold: !!project.on_hold,
     approved_to_co: !!co.approved_to_co,
     approved_to_co_at: co.approved_to_co_at,
     superseded: !!co.superseded,
@@ -394,6 +402,8 @@ async function getProjectDetail(projectId) {
     // v2/jis.js), distinct from `location` (freeform, captured at
     // opportunity intake before a JIS exists). Both can be present.
     street: project.street, city: project.city, state: project.state, zip: project.zip,
+    on_hold: !!project.on_hold,
+    on_hold_reminders: remindersFor('project', project._id),
     bids: bids
       .map(fmtBid)
       .sort((a, b) => stageRank(a.stage) - stageRank(b.stage)),
@@ -2058,14 +2068,49 @@ async function addReminder(parentType, parentId, { note, remind_on }) {
 }
 async function dismissReminder(id) {
   const M = getModels();
+  const reminder = await M.Reminder.findById(Number(id)).lean();
   const r = await M.Reminder.updateOne({ _id: Number(id) }, { $set: { dismissed: 1 } });
   if (!r.matchedCount) throw new Error('Reminder not found');
+  // On-Hold's 60-day check-in is recurring for as long as the project stays
+  // held — dismissing one queues the next, so nobody has to remember to.
+  if (reminder?.parent_type === 'project') {
+    const proj = await M.Project.findById(reminder.parent_id).lean();
+    if (proj?.on_hold) {
+      await M.Reminder.create({
+        _id: await nextId('reminders'), parent_type: 'project', parent_id: proj._id,
+        note: 'On-Hold check-in', remind_on: addDays(today(), 60), dismissed: 0, emailed: 0,
+      });
+    }
+  }
   return { ok: true };
 }
 async function deleteReminder(id) {
   const M = getModels();
   await M.Reminder.deleteOne({ _id: Number(id) });
   return { ok: true };
+}
+// On-Hold — a project-level pause distinct from a Lead just waiting on
+// info: it holds every bid stage and job under the project at once, badged
+// wherever any of those already show up, rather than the previous
+// workaround of demoting a held opportunity back to 'lead'. Turning it on
+// schedules the first 60-day check-in Reminder; turning it off clears any
+// pending one so it doesn't keep pinging after the hold is lifted.
+async function setProjectOnHold(projectId, onHold, actorId) {
+  const M = getModels();
+  const pid = Number(projectId);
+  const proj = await M.Project.findById(pid).lean();
+  if (!proj) throw new Error('Project not found');
+  const on = !!onHold;
+  await M.Project.updateOne({ _id: pid }, { $set: { on_hold: on ? 1 : 0, updated_at: ts() } });
+  if (on) {
+    await M.Reminder.create({
+      _id: await nextId('reminders'), parent_type: 'project', parent_id: pid,
+      note: 'On-Hold check-in', remind_on: addDays(today(), 60), dismissed: 0, emailed: 0, created_by: actorId || null,
+    });
+  } else {
+    await M.Reminder.updateMany({ parent_type: 'project', parent_id: pid, dismissed: { $ne: 1 } }, { $set: { dismissed: 1 } });
+  }
+  return { project_id: pid, on_hold: on };
 }
 async function getRemindersFor(parentType, parentId) {
   const M = getModels();
@@ -2087,6 +2132,9 @@ async function getDueReminders() {
     } else if (r.parent_type === 'change_order') {
       const co = await M.ChangeOrder.findById(r.parent_id).lean();
       if (co) recipientIds = [co.estimator_id].filter(Boolean);
+    } else if (r.parent_type === 'project') {
+      const proj = await M.Project.findById(r.parent_id).lean();
+      if (proj) recipientIds = [proj.created_by].filter(Boolean);
     }
     out.push({ reminder: r, recipientIds: [...new Set(recipientIds)] });
   }
@@ -2744,7 +2792,8 @@ async function getBidList(stage) {
     M.Project.find().lean(), M.Company.find().lean(), M.TeamMember.find().lean(), M.BidCustomer.find({ bid_id: { $in: ids } }).lean(),
     stage === 'awarded' ? M.Job.find({ winning_bid_id: { $in: ids } }).lean() : Promise.resolve([]),
   ]);
-  const pName = {}; const pSize = {}; const pType = {}; projects.forEach(p => { pName[p._id] = p.name; pSize[p._id] = p.size_bucket; pType[p._id] = p.type_of_work; });
+  const pName = {}; const pSize = {}; const pType = {}; const pOnHold = {};
+  projects.forEach(p => { pName[p._id] = p.name; pSize[p._id] = p.size_bucket; pType[p._id] = p.type_of_work; pOnHold[p._id] = !!p.on_hold; });
   const coName = {}; companies.forEach(c => coName[c._id] = c.name);
   const tm = teamMap(members);
   const custByBid = {}; bidCustomers.forEach(bc => (custByBid[bc.bid_id] = custByBid[bc.bid_id] || []).push(coName[bc.company_id]));
@@ -2754,7 +2803,7 @@ async function getBidList(stage) {
     return {
       type: 'bid',
       id: b._id, project_id: b.project_id, project: pName[b.project_id] || '—', size_bucket: pSize[b.project_id] || null,
-      type_of_work: pType[b.project_id] || null,
+      type_of_work: pType[b.project_id] || null, project_on_hold: !!pOnHold[b.project_id],
       bid_number: b.bid_number, stage: b.stage, drawing_stage: b.drawing_stage,
       estimator: tm[b.estimator_id] || null, salesperson: tm[b.salesperson_id] || null, apm: tm[b.apm_id] || null,
       owner: tm[b.owner_id] || null, source: b.source,
@@ -2796,6 +2845,7 @@ async function getBidList(stage) {
         rows.push({
           type: 'co',
           id: c._id, project_id: job?.project_id || null, project: job ? (pName[job.project_id] || '—') : '—',
+          project_on_hold: job ? !!pOnHold[job.project_id] : false,
           size_bucket: null, type_of_work: null, drawing_stage: null,
           co_number: c.co_number, name: c.name, stage: c.stage,
           job_number: job?.job_number || null,
@@ -2822,13 +2872,14 @@ async function getCoList(stage) {
   const cos = await M.ChangeOrder.find(filter).sort({ due_date: 1, _id: 1 }).lean();
   const [jobs, projects, members] = await Promise.all([M.Job.find().lean(), M.Project.find().lean(), M.TeamMember.find().lean()]);
   const jobById = {}; jobs.forEach(j => jobById[j._id] = j);
-  const pName = {}; projects.forEach(p => pName[p._id] = p.name);
+  const pName = {}; const pOnHold = {}; projects.forEach(p => { pName[p._id] = p.name; pOnHold[p._id] = !!p.on_hold; });
   const tm = teamMap(members);
   return cos.map(c => {
     const job = jobById[c.job_id];
     return {
       id: c._id, co_number: c.co_number, name: c.name, stage: c.stage,
       project: job ? (pName[job.project_id] || '—') : '—', project_id: job ? job.project_id : null,
+      project_on_hold: job ? !!pOnHold[job.project_id] : false,
       job_number: job ? job.job_number : null,
       estimator: tm[c.estimator_id] || null,
       // The job's PM owns CO follow-up (same role a bid's salesperson plays
@@ -4122,7 +4173,7 @@ module.exports = {
   createChangeOrder, submitCO, approveCO, notApproveCO, voidCO, reopenCO, reviseCO,
   createCoRequest, approveCoRequest, unapproveCoRequest, startCoRequest,
   _norm, resolveCompanyByName, ensureBidCustomer, teamMap,
-  addReminder, dismissReminder, deleteReminder, getRemindersFor, getDueReminders, markReminderEmailed,
+  addReminder, dismissReminder, deleteReminder, getRemindersFor, getDueReminders, markReminderEmailed, setProjectOnHold,
   addWalkthrough, updateWalkthrough, removeWalkthrough, getBidsNeedingWalkthroughReminder, markWalkthroughReminderSent, setWalkthroughRsvp,
   addNote, updateNote, deleteNote, getNotesFor,
   getDigest,
@@ -4132,6 +4183,6 @@ module.exports = {
   logActivity, getActivityLog, undoActivity, bidLabel, coLabel, loadBid, loadCO, loadSubmission,
   mergeContacts, deleteCompany, deleteChangeOrder,
   getVendors, VENDOR_CATEGORIES,
-  getReports, getGcAwardReviewQueue, setSubmissionGcAwarded,
+  getReports, getGcAwardReviewQueue, setSubmissionGcAwarded, projectLabel,
   getOrCreateCalendarToken, resetCalendarToken, getTeamMemberIdByCalendarToken, buildIcsFeed, getEstimatorAvailability,
 };

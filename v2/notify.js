@@ -245,7 +245,21 @@ async function coEmailShape(coId) {
   };
 }
 
+// Minimal — reuses the generic bidTable/emailReminder template (its "Bid
+// Name" row just reads as the project name here) rather than a dedicated
+// project template, since On-Hold's 60-day check-in is the only thing that
+// needs it right now. Bid/Project ids come from independent counters, so
+// this must be its own explicit branch — falling through to bidEmailShape
+// with a project's id could coincidentally match an unrelated bid and email
+// the wrong project's info entirely.
+async function projectEmailShape(projectId) {
+  const M = getModels();
+  const proj = await M.Project.findById(Number(projectId)).lean();
+  if (!proj) return null;
+  return { project_name: proj.name, project_id: proj._id };
+}
 async function emailShapeForReminder(reminder) {
+  if (reminder.parent_type === 'project') return projectEmailShape(reminder.parent_id);
   return reminder.parent_type === 'change_order' ? coEmailShape(reminder.parent_id) : bidEmailShape(reminder.parent_id);
 }
 

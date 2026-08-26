@@ -47,6 +47,13 @@ const ProjectSchema = new mongoose.Schema({
   city:       { type: String, default: null },
   state:      { type: String, default: null },
   zip:        { type: String, default: null },
+  // On-Hold (2026-08) — deliberately project-level, not per-bid/per-job:
+  // holding a project pauses everything under it (every bid stage, every
+  // job) as one unit, distinct from a Lead that's just an early-stage
+  // opportunity nobody's touched yet. Turning it on schedules a recurring
+  // 60-day check-in Reminder (parent_type 'project') — see
+  // setProjectOnHold/dismissReminder in v2/db.js.
+  on_hold:    { type: Number, default: 0 },
   created_by: { type: Number, default: null },
   created_at: { type: String, default: ts },
   updated_at: { type: String, default: ts },
@@ -341,7 +348,7 @@ const FollowupSchema = new mongoose.Schema({
 
 const ReminderSchema = new mongoose.Schema({
   _id:         Number,
-  parent_type: { type: String, enum: ['bid', 'job', 'change_order'], required: true },
+  parent_type: { type: String, enum: ['bid', 'job', 'change_order', 'project'], required: true },
   parent_id:   { type: Number, required: true },
   note:        { type: String, default: null },
   remind_on:   { type: String, required: true },

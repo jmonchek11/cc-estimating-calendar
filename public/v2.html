@@ -1727,7 +1727,7 @@ function renderBidListBody(stage) {
         ${b.award_date ? `<div style="font-size:11px;color:var(--text-muted)">Awarded ${fmtD(b.award_date)}</div>` : ''}`;
     }
     if (stage === 'submitted') {
-      const overdue = b.next_followup_date && b.next_followup_date < today;
+      const overdue = !b.project_on_hold && b.next_followup_date && b.next_followup_date < today;
       return `${b.estimate_amount ? `<span class="amount" style="font-size:13px">${fmt$(b.estimate_amount)}</span>` : ''}
         ${b.date_submitted ? `<div style="font-size:11px;color:var(--text-muted)">Sent ${fmtD(b.date_submitted)}</div>` : ''}
         ${b.next_followup_date ? `<div style="font-size:11px;${overdue ? 'color:#dc2626;font-weight:700' : 'color:var(--text-muted)'}">F/U ${fmtD(b.next_followup_date)}${overdue ? ' • OVERDUE' : ''}</div>` : ''}`;
@@ -1749,7 +1749,8 @@ function renderBidListBody(stage) {
         </div>`;
     }
     if (stage === 'opportunity') {
-      return `${b.due_date ? `<div style="font-size:12px;font-weight:700;color:${b.due_date < today ? '#dc2626' : 'var(--text-muted)'};margin-bottom:6px">Due ${fmtD(b.due_date)}${b.due_time ? ' · ' + fmtTimeShort(b.due_time) : ''}</div>` : ''}
+      const dueOverdue = !b.project_on_hold && b.due_date && b.due_date < today;
+      return `${b.due_date ? `<div style="font-size:12px;font-weight:700;color:${dueOverdue ? '#dc2626' : 'var(--text-muted)'};margin-bottom:6px">Due ${fmtD(b.due_date)}${b.due_time ? ' · ' + fmtTimeShort(b.due_time) : ''}</div>` : ''}
         <div style="display:flex;gap:6px;justify-content:flex-end" onclick="event.stopPropagation()">
           <button class="v2-btn green" style="padding:4px 10px;font-size:11px" onclick="actApproveToBid(${b.id})">✓ Approve to Bid</button>
           <button class="v2-btn outline" style="padding:4px 10px;font-size:11px" onclick="actDemoteToLead(${b.id})">↩ Move to Lead</button>
@@ -1777,14 +1778,15 @@ function renderBidListBody(stage) {
           <button class="v2-btn outline" style="padding:4px 10px;font-size:11px" onclick="actUnapproveToBid(${b.id})">↩ Back to Opportunities</button>
         </div>`;
     }
-    return b.due_date ? `<span style="font-size:12px;font-weight:700;color:${b.due_date < today ? '#dc2626' : 'var(--text-muted)'}">Due ${fmtD(b.due_date)}${b.due_time ? ' · ' + fmtTimeShort(b.due_time) : ''}</span>` : '';
+    const dueOverdue = !b.project_on_hold && b.due_date && b.due_date < today;
+    return b.due_date ? `<span style="font-size:12px;font-weight:700;color:${dueOverdue ? '#dc2626' : 'var(--text-muted)'}">Due ${fmtD(b.due_date)}${b.due_time ? ' · ' + fmtTimeShort(b.due_time) : ''}</span>` : '';
   };
 
   document.getElementById('bl-count-' + stage).textContent = `${rows.length} of ${LIST_STATE[stage].length} ${meta.sub}`;
   document.getElementById('bl-body-' + stage).innerHTML = rows.length ? rows.map(b => b.type === 'co' ? `
       <div class="proj-row" onclick="openCoFlyout(${b.project_id},${b.id})">
         <div style="flex:1;min-width:0">
-          <div class="proj-name"><span class="badge" style="background:#ede9fe;color:#5b21b6;font-size:10px">🔧 CO</span> ${esc(b.project)} <span style="color:var(--text-muted);font-weight:400;font-size:12px">${esc(b.co_number)}</span></div>
+          <div class="proj-name"><span class="badge" style="background:#ede9fe;color:#5b21b6;font-size:10px">🔧 CO</span> ${esc(b.project)} <span style="color:var(--text-muted);font-weight:400;font-size:12px">${esc(b.co_number)}</span> ${b.project_on_hold ? '<span class="badge" style="background:#fef3c7;color:#92400e">⏸ ON HOLD</span>' : ''}</div>
           <div class="proj-meta">${esc(b.name)}${b.job_number ? `<span class="proj-meta-sep">·</span> Job ${esc(b.job_number)}` : ''}</div>
         </div>
         <div style="display:flex;align-items:center;gap:12px;flex-shrink:0;align-self:center">
@@ -1795,6 +1797,7 @@ function renderBidListBody(stage) {
       <div class="proj-row" onclick="openBidFlyout(${b.project_id},${b.id})">
         <div style="flex:1;min-width:0">
           <div class="proj-name">${esc(b.project)}${b.bid_number ? ` <span style="color:var(--text-muted);font-weight:400;font-size:12px">#${esc(b.bid_number)}</span>` : ''}
+            ${b.project_on_hold ? '<span class="badge" style="background:#fef3c7;color:#92400e">⏸ ON HOLD</span>' : ''}
             ${b.drawing_stage ? `<span class="badge" style="background:#ede9fe;color:#5b21b6;font-size:10px">${esc(b.drawing_stage)}</span>` : ''}
             ${b.size_bucket ? `<span class="badge" style="background:#e0f2fe;color:#075985;font-size:10px">${esc(b.size_bucket)}</span>` : ''}
             ${b.type_of_work ? `<span class="badge" style="background:#f0fdf4;color:#166534;font-size:10px">${esc(b.type_of_work)}</span>` : ''}</div>
@@ -1915,7 +1918,7 @@ function renderCoListBody(stage) {
   // meta text on some pages and the right column on others.
   const right = (c) => {
     if (stage === 'submitted_co') {
-      const overdue = c.next_followup_date && c.next_followup_date < today;
+      const overdue = !c.project_on_hold && c.next_followup_date && c.next_followup_date < today;
       return `${c.estimate_amount ? `<span class="amount" style="font-size:13px">${fmt$(c.estimate_amount)}</span>` : ''}
         ${c.date_submitted ? `<div style="font-size:11px;color:var(--text-muted)">Sent ${fmtD(c.date_submitted)}</div>` : ''}
         ${c.next_followup_date ? `<div style="font-size:11px;${overdue ? 'color:#dc2626;font-weight:700' : 'color:var(--text-muted)'}">F/U ${fmtD(c.next_followup_date)}${overdue ? ' • OVERDUE' : ''}</div>` : ''}`;
@@ -1928,14 +1931,15 @@ function renderCoListBody(stage) {
       return `${c.void_reason ? `<div style="font-size:11px;color:var(--text-muted);max-width:220px">${esc(c.void_reason)}</div>` : ''}
         ${c.not_approved_notes ? `<div style="font-size:11px;color:var(--text-muted);max-width:220px">${esc(c.not_approved_notes)}</div>` : ''}`;
     }
-    return c.due_date ? `<span style="font-size:12px;font-weight:700;color:${c.due_date < today ? '#dc2626' : 'var(--text-muted)'}">Due ${fmtD(c.due_date)}</span>` : '';
+    const dueOverdue = !c.project_on_hold && c.due_date && c.due_date < today;
+    return c.due_date ? `<span style="font-size:12px;font-weight:700;color:${dueOverdue ? '#dc2626' : 'var(--text-muted)'}">Due ${fmtD(c.due_date)}</span>` : '';
   };
 
   document.getElementById('cl-count-' + stage).textContent = `${rows.length} of ${LIST_STATE[stage].length} ${meta.sub}`;
   document.getElementById('cl-body-' + stage).innerHTML = rows.length ? rows.map(c => {
       return `<div class="proj-row" onclick="openCoFlyout(${c.project_id},${c.id})">
         <div style="flex:1;min-width:0">
-          <div class="proj-name"><span style="color:#92400e">${esc(c.co_number)}</span> ${esc(c.name)} ${stageBadge(c.stage)}</div>
+          <div class="proj-name"><span style="color:#92400e">${esc(c.co_number)}</span> ${esc(c.name)} ${stageBadge(c.stage)} ${c.project_on_hold ? '<span class="badge" style="background:#fef3c7;color:#92400e">⏸ ON HOLD</span>' : ''}</div>
           <div class="proj-meta">
             ${esc(c.project)}${c.job_number ? ` <span class="proj-meta-sep">·</span> Job ${esc(c.job_number)}` : ''}
             ${c.salesperson ? `<span class="proj-meta-sep">·</span> PM ${ini(c.salesperson)}` : '<span class="proj-meta-sep">·</span> <span style="color:#dc2626">no PM assigned</span>'}
@@ -2012,7 +2016,7 @@ function renderProjectsBody() {
   document.getElementById('proj-body').innerHTML = projects.length ? projects.map(p => `
       <div class="proj-row" onclick="renderProjectPage(${p.id})">
         <div style="flex:1;min-width:0">
-          <div class="proj-name">${esc(p.name)}</div>
+          <div class="proj-name">${esc(p.name)} ${p.on_hold ? '<span class="badge" style="background:#fef3c7;color:#92400e">⏸ ON HOLD</span>' : ''}</div>
           <div class="proj-meta">
             ${p.bid_count} bid${p.bid_count!==1?'s':''}
             <span class="proj-meta-sep">·</span> ${p.job_count} job${p.job_count!==1?'s':''}
@@ -2392,9 +2396,22 @@ async function renderFlyout(fresh) {
 function renderHierarchy(d) {
   let html = `<div class="v2-actions" style="margin:0 0 4px">
     <button class="v2-btn green" onclick="actAddBidToProject(${d.id})">+ Add Bid to this Project</button>
+    ${d.on_hold ? `<button class="v2-btn outline" onclick="actToggleProjectOnHold(${d.id},false)">▶ Take Off Hold</button>`
+      : `<button class="v2-btn outline" onclick="actToggleProjectOnHold(${d.id},true)">⏸ Put On Hold</button>`}
     ${CURRENT_USER?.is_admin ? `<button class="v2-btn outline" onclick="actEditProject(${d.id})">✏️ Edit Project</button>
     <button class="v2-btn outline" style="color:#dc2626;border-color:#dc2626" onclick="actAdminDelete('project',${d.id},'${escJs(d.name)}')">🗑 Delete Project</button>` : ''}
   </div>`;
+
+  // On-Hold pauses everything under the project at once — every bid stage
+  // and every job — distinct from a Lead that's just early-stage and
+  // hasn't been touched yet. The recurring 60-day check-in reminder shows
+  // here since it's a project-level thing, not tied to any one bid/job.
+  if (d.on_hold) {
+    const nextCheckIn = (d.on_hold_reminders || []).filter(r => !r.dismissed).sort((a, b) => (a.remind_on || '').localeCompare(b.remind_on || ''))[0];
+    html = `<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:9px 12px;margin-bottom:10px;font-size:12.5px;color:#92400e">
+      ⏸ <strong>This project is on hold.</strong>${nextCheckIn ? ` Next check-in ${fmtD(nextCheckIn.remind_on)}.` : ''} Every bid and job here is paused — overdue follow-up flags won't fire until it's taken off hold.
+    </div>` + html;
+  }
 
   // Duplicate-jobs warning: same job # on more than one job here (legacy + bid-backed
   // artifact from an older import). One click merges the COs onto the real job.
@@ -2440,7 +2457,7 @@ function customerRowHtml(b, cust) {
   if (current) {
     if (current.outcome === 'awarded') outcomeBadge = ` <span class="awarded-pill">✓ AWARDED ${fmtD(current.award_date)}</span>`;
     else if (current.outcome === 'not_awarded') outcomeBadge = ` <span class="badge" style="background:#fee2e2;color:#991b1b">✗ NOT AWARDED ${fmtD(current.date_not_awarded)}</span>`;
-    const overdue = current.next_followup_date && current.next_followup_date < today && current.outcome === 'pending';
+    const overdue = !b.project_on_hold && current.next_followup_date && current.next_followup_date < today && current.outcome === 'pending';
     right = `<div class="bc-co-amt">${fmt$(current.amount)}</div>
       ${current.outcome === 'pending' && current.next_followup_date ? `<div class="bc-co-fu ${overdue ? 'overdue-txt' : ''}">${overdue ? 'OVERDUE ' : 'Next F/U '}${fmtD(current.next_followup_date)}</div>` : ''}`;
     const live = current.is_current && current.outcome === 'pending';
@@ -2629,7 +2646,7 @@ function actUpdateGateTask(bidId, taskId) {
 // project page.
 function bidNode(b, proj) {
   const isAwarded = b.stage === 'awarded';
-  const dueOverdue = ['opportunity', 'active_bid'].includes(b.stage) && b.due_date && b.due_date < today;
+  const dueOverdue = !proj?.on_hold && ['opportunity', 'active_bid'].includes(b.stage) && b.due_date && b.due_date < today;
   const metaBits = [];
   if (!b.customers.length) metaBits.push('<span style="color:#dc2626">no customer</span>');
   if (b.owner) metaBits.push(`Added by ${ini(b.owner)}`);
@@ -2640,7 +2657,8 @@ function bidNode(b, proj) {
   if (b.salesperson) metaBits.push(`Sales ${ini(b.salesperson)}`);
   if (b.apm) metaBits.push(`APM ${ini(b.apm)}`);
   if (b.jurisdiction) metaBits.push(`Local ${esc(b.jurisdiction)}`);
-  if (b.next_followup_date) metaBits.push(`Next F/U <span class="${b.next_followup_date < today ? 'overdue-txt' : ''}">${fmtD(b.next_followup_date)}${b.next_followup_date < today ? ' — OVERDUE' : ''}</span>`);
+  const fuOverdue = !proj?.on_hold && b.next_followup_date && b.next_followup_date < today;
+  if (b.next_followup_date) metaBits.push(`Next F/U <span class="${fuOverdue ? 'overdue-txt' : ''}">${fmtD(b.next_followup_date)}${fuOverdue ? ' — OVERDUE' : ''}</span>`);
   if (b.close_reason) metaBits.push(`Closed ${fmtD(b.closed_date)} by ${esc(b.closed_approved_by)} — ${esc(b.close_reason)}`);
   if (b.not_awarded_notes) metaBits.push(`<span style="color:#dc2626">Not awarded ${fmtD(b.date_not_awarded)}:</span> ${esc(b.not_awarded_notes)}`);
   if (b.notes) metaBits.push(`📝 ${esc(b.notes)}`);
@@ -2899,7 +2917,7 @@ function jobNode(j, legacy = false) {
 }
 
 function coNode(co) {
-  const fuOverdue = co.next_followup_date && co.next_followup_date < today;
+  const fuOverdue = !co.project_on_hold && co.next_followup_date && co.next_followup_date < today;
   return `
     <div class="v2-co" ${co.superseded ? 'style="opacity:.6"' : ''}>
       <span class="badge badge-co" style="flex-shrink:0">CO</span>
@@ -2907,9 +2925,10 @@ function coNode(co) {
         <div style="font-weight:600;font-size:13px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           <span style="color:#92400e">${esc(co.co_number)}</span> ${esc(co.name)}
           ${stageBadge(co.stage)}
+          ${co.project_on_hold ? '<span class="badge" style="background:#fef3c7;color:#92400e">⏸ ON HOLD</span>' : ''}
           ${co.superseded ? '<span class="badge" style="background:#e2e8f0;color:#64748b">REVISED</span>' : ''}
           ${co.estimate_amount ? `<span class="amount">${fmt$(co.estimate_amount)}</span>` : ''}
-          ${co.due_date ? `<span style="margin-left:auto;font-weight:700;font-size:12px;color:${co.stage === 'active_co' && co.due_date < today ? '#dc2626' : 'var(--text-muted)'}">Due ${fmtD(co.due_date)}</span>` : ''}
+          ${co.due_date ? `<span style="margin-left:auto;font-weight:700;font-size:12px;color:${!co.project_on_hold && co.stage === 'active_co' && co.due_date < today ? '#dc2626' : 'var(--text-muted)'}">Due ${fmtD(co.due_date)}</span>` : ''}
         </div>
         <div style="font-size:12px;color:var(--text-muted);margin-top:2px">
           ${co.estimator ? `Est: ${ini(co.estimator)}` : ''}
@@ -3816,6 +3835,13 @@ function actEditProject(projectId) {
     { id: 'state', label: 'State', type: 'text', value: d.state, placeholder: 'PA' },
     { id: 'zip', label: 'ZIP', type: 'text', value: d.zip },
   ], data => api('PATCH', `/api/v2/admin/project/${projectId}`, data), 'Save Changes');
+}
+async function actToggleProjectOnHold(projectId, onHold) {
+  if (onHold && !confirm('Put this project on hold? Every bid and job under it will show as on-hold, and a 60-day check-in reminder will be scheduled.')) return;
+  try {
+    await api('POST', `/api/v2/projects/${projectId}/on-hold`, { on_hold: onHold });
+    await renderProjectPage(projectId);
+  } catch (e) { alert('Failed: ' + e.message); }
 }
 
 function actEditBid(bidId) {
