@@ -270,6 +270,13 @@ const BidSubmissionSchema = new mongoose.Schema({
   award_date:         { type: String, default: null },
   date_not_awarded:   { type: String, default: null },
   not_awarded_notes:  { type: String, default: null },
+  // Independent of our own outcome — did the GC/customer itself actually
+  // win the job from the owner at all? A 'not_awarded' outcome alone
+  // conflates two very different situations: the GC won and picked someone
+  // else (worth knowing — are we losing to them repeatedly?) vs. the GC
+  // never won the job in the first place (not a reflection on us). null =
+  // not yet known (the normal case right after marking not_awarded).
+  gc_awarded:         { type: Boolean, default: null },
   next_followup_date: { type: String, default: null },
 
   created_at:      { type: String, default: ts },

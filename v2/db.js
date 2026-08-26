@@ -329,6 +329,7 @@ async function getProjectDetail(projectId) {
         award_date: sub.award_date,
         date_not_awarded: sub.date_not_awarded,
         not_awarded_notes: sub.not_awarded_notes,
+        gc_awarded: sub.gc_awarded == null ? null : !!sub.gc_awarded,
         next_followup_date: sub.next_followup_date,
         followups: subFollowups
           .filter(f => f.parent_id === sub._id)
@@ -1134,11 +1135,37 @@ async function getContactBids(contactId) {
   const bids = await bidSummaries([...new Set(bcRows.map(bc => bc.bid_id))]);
   return { bids, stats: calcBidStats(bids) };
 }
+// Whether this GC actually wins the jobs we bid to them, and — separately —
+// whether they pick us when they do. A submission's own outcome only ever
+// tells you our result; gc_awarded is the independent fact of whether the
+// GC won the job at all. Winning our own submission implies the GC won too
+// (we can't be awarded a subcontract on a job the GC never got), so that
+// case counts as a GC win without needing gc_awarded set.
+function calcGcStats(subs) {
+  const decided = subs.filter(s => s.outcome !== 'pending');
+  const gcWon = decided.filter(s => s.outcome === 'awarded' || s.gc_awarded === true);
+  const gcWonPickedSomeoneElse = decided.filter(s => s.outcome === 'not_awarded' && s.gc_awarded === true);
+  const gcNeverWon = decided.filter(s => s.outcome === 'not_awarded' && s.gc_awarded === false);
+  const unknown = decided.filter(s => s.outcome === 'not_awarded' && s.gc_awarded == null);
+  return {
+    submissionsToGc: subs.length,
+    decided: decided.length,
+    weWon: decided.filter(s => s.outcome === 'awarded').length,
+    gcWon: gcWon.length,
+    gcWonPickedSomeoneElse: gcWonPickedSomeoneElse.length,
+    gcNeverWon: gcNeverWon.length,
+    unknown: unknown.length,
+  };
+}
 async function getCompanyBids(companyId) {
   const M = getModels();
-  const bcRows = await M.BidCustomer.find({ company_id: Number(companyId) }).lean();
+  const cid = Number(companyId);
+  const [bcRows, subs] = await Promise.all([
+    M.BidCustomer.find({ company_id: cid }).lean(),
+    M.BidSubmission.find({ company_id: cid, is_current: 1 }).lean(),
+  ]);
   const bids = await bidSummaries([...new Set(bcRows.map(bc => bc.bid_id))]);
-  return { bids, stats: calcBidStats(bids) };
+  return { bids, stats: calcBidStats(bids), gcStats: calcGcStats(subs) };
 }
 
 // Add/remove a contact from a specific bid-customer row (bid flyout's per-customer contact list).
@@ -1488,7 +1515,7 @@ const ADMIN_EDITABLE = {
   job:            ['job_number', 'pm_id', 'apm_id', 'awarded_company_id', 'award_date', 'folder_url'],
   change_order:   ['co_number', 'name', 'due_date', 'start_date', 'estimator_id', 'notes',
                    'estimate_amount', 'date_submitted', 'approved_by', 'approval_date'],
-  bid_submission: ['company_id', 'amount', 'date_submitted', 'approved_by', 'submission_type', 'notes', 'is_current', 'not_awarded_notes'],
+  bid_submission: ['company_id', 'amount', 'date_submitted', 'approved_by', 'submission_type', 'notes', 'is_current', 'not_awarded_notes', 'gc_awarded'],
 };
 const NUMERIC_FK = new Set(['estimator_id', 'salesperson_id', 'apm_id', 'pm_id', 'awarded_company_id', 'company_id', 'owner_id']);
 
@@ -1515,7 +1542,7 @@ async function adminUpdate(entity, id, data) {
     else if (f === 'superseded' || f === 'is_current') v = Number(v) === 1 ? 1 : 0;
     // Three-state — '' (TBD) already became null above and stays null;
     // anything else is a real Yes/No answer.
-    else if (f === 'certified_payroll' || f === 'tax_exempt' || f === 'prevailing_wage') v = (v == null) ? null : (Number(v) === 1 || v === true);
+    else if (f === 'certified_payroll' || f === 'tax_exempt' || f === 'prevailing_wage' || f === 'gc_awarded') v = (v == null) ? null : (Number(v) === 1 || v === true);
     upd[f] = v;
   }
   const r = await Model.updateOne({ _id: Number(id) }, { $set: upd });
@@ -1662,10 +1689,16 @@ async function notAwardSubmission(submissionId, data, actorId) {
   const bid = await loadBid(sub.bid_id);
   if (sub.outcome !== 'pending') throw new Error(`This submission is already '${sub.outcome}'`);
   require_(data, ['date_not_awarded']);
+  // gc_awarded is a real tri-state (Yes/No/Don't know yet) — '' is itself a
+  // legitimate, deliberate answer here, not a missing field, so it's never
+  // passed through require_.
 
   await M.BidSubmission.updateOne({ _id: sub._id }, { $set: {
     outcome: 'not_awarded', date_not_awarded: data.date_not_awarded,
-    not_awarded_notes: data.not_awarded_notes || null, next_followup_date: null, updated_at: ts(),
+    not_awarded_notes: data.not_awarded_notes || null,
+    // '' means "don't know yet" — stays null, not a real answer either way.
+    gc_awarded: data.gc_awarded === '' ? null : Number(data.gc_awarded) === 1,
+    next_followup_date: null, updated_at: ts(),
   }});
   await recomputeBidFollowup(bid._id);
   await reconcileBidOutcome(bid._id, actorId);

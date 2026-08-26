@@ -4131,6 +4131,12 @@ function actNotAwardSubmission(submissionId) {
   showForm(`✗ Not Awarded — ${esc(s?.company?.name || 'customer')}`, [
     { id: 'date_not_awarded', label: 'Date Notified', type: 'date', required: true, value: today },
     { id: 'not_awarded_notes', label: 'Customer Feedback', type: 'textarea', placeholder: 'Price too high, went with incumbent…' },
+    // Independent of our own result — did the GC still win the job, just
+    // from someone else? Tracked separately so a GC that keeps winning but
+    // never picking us shows up distinctly from one that just isn't
+    // winning work at all (see the Company profile's GC stats).
+    { id: 'gc_awarded', label: 'Did the GC still win this job?', type: 'select', emptyLabel: "Don't know yet",
+      options: [{ value: '1', label: 'Yes — they won it, picked someone else' }, { value: '0', label: 'No — they didn\'t win it either' }] },
   ], data => api('POST', `/api/v2/submissions/${submissionId}/not-awarded`, data), 'Confirm Not Awarded', 'red');
 }
 
@@ -5454,6 +5460,24 @@ async function actDeleteContact(id) {
 
 function closeProfileModal() { document.getElementById('v2-profile-overlay')?.remove(); }
 
+// GC-level read on whether this company is worth continuing to bid to —
+// separate from our own win rate above. gcNeverWon vs. gcWonPickedSomeoneElse
+// is the actual signal: a GC that keeps winning jobs but never picks us is a
+// very different problem than one that just isn't winning work at all.
+const gcStatsHtml = (s) => {
+  if (!s || !s.decided) return '';
+  const gcWinRate = s.decided > 0 ? Math.round(s.gcWon / s.decided * 100) : null;
+  return `
+  <div style="font-weight:700;font-size:13px;margin:12px 0 4px">GC Award Record</div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin:0 0 10px">
+    <div class="stat-card" style="flex:1;min-width:90px"><div style="font-size:20px;font-weight:800">${gcWinRate == null ? '—' : gcWinRate + '%'}</div><div style="font-size:11px;color:var(--text-muted)">GC Win Rate (jobs they won, of ones we bid)</div></div>
+    <div class="stat-card" style="flex:1;min-width:90px"><div style="font-size:20px;font-weight:800;color:#166534">${s.weWon}</div><div style="font-size:11px;color:var(--text-muted)">They Picked Us</div></div>
+    <div class="stat-card" style="flex:1;min-width:90px"><div style="font-size:20px;font-weight:800;color:#dc2626">${s.gcWonPickedSomeoneElse}</div><div style="font-size:11px;color:var(--text-muted)">Won It, Picked Someone Else</div></div>
+    <div class="stat-card" style="flex:1;min-width:90px"><div style="font-size:20px;font-weight:800;color:var(--text-muted)">${s.gcNeverWon}</div><div style="font-size:11px;color:var(--text-muted)">Never Won The Job</div></div>
+    ${s.unknown ? `<div class="stat-card" style="flex:1;min-width:90px"><div style="font-size:20px;font-weight:800;color:var(--text-muted)">${s.unknown}</div><div style="font-size:11px;color:var(--text-muted)">Unknown</div></div>` : ''}
+  </div>`;
+};
+
 const bidStatsHtml = (stats) => `
   <div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0">
     <div class="stat-card" style="flex:1;min-width:80px"><div style="font-size:20px;font-weight:800">${stats.total}</div><div style="font-size:11px;color:var(--text-muted)">Total Bids</div></div>
@@ -5599,6 +5623,7 @@ async function openCompanyProfile(companyId) {
 
   const body = `
     ${bidStatsHtml(hist.stats)}
+    ${gcStatsHtml(hist.gcStats)}
     <div style="font-weight:700;font-size:13px;margin:12px 0 4px">Contacts</div>
     <div class="card" style="padding:0;margin-bottom:12px">${contacts.length ? contacts.map(c => `
       <div class="proj-row" onclick="closeProfileModal();openContactProfile(${c.id})">
