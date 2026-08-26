@@ -1315,7 +1315,13 @@ async function recomputeBidFollowup(bidId) {
 async function submitBid(id, data, actorId) {
   const M = getModels();
   const bid = await loadBid(id);
-  if (bid.stage !== 'active_bid') throw new Error(`Cannot submit from stage '${bid.stage}'`);
+  // Also reachable from 'submitted' — a customer added to the roster after
+  // the bid already reached 'submitted' (whether via addBidCustomers' own
+  // demote-to-active_bid, which doesn't fire for a customer that already
+  // existed on the roster before ever having a submission — e.g. bulk-
+  // imported historical data) still needs its own first submission, per
+  // bidNeedsFirstSubmission()'s logic in the frontend.
+  if (!['active_bid', 'submitted'].includes(bid.stage)) throw new Error(`Cannot submit from stage '${bid.stage}'`);
   // certified_payroll/tax_exempt/prevailing_wage are no longer forced here —
   // they only actually matter once a bid wins, so the forced answer now
   // happens at Award instead (see awardSubmission). Still settable early via
@@ -1351,11 +1357,12 @@ async function submitBid(id, data, actorId) {
   ]);
   const submittedCompanyIds = new Set(currentSubs.map(s => s.company_id));
   const allSubmitted = allCustomers.length > 0 && allCustomers.every(bc => submittedCompanyIds.has(bc.company_id));
+  const isNewTransition = allSubmitted && bid.stage !== 'submitted';
   if (allSubmitted) upd.stage = 'submitted';
   await M.Bid.updateOne({ _id: bid._id }, { $set: upd });
   await recomputeBidHeadline(bid._id);
   await recomputeBidFollowup(bid._id);
-  if (allSubmitted) {
+  if (isNewTransition) {
     const proj = await M.Project.findById(bid.project_id).lean();
     await events.safeEmit('bid.stage_changed', {
       project_id: bid.project_id, bid_id: bid._id, actor_id: actorId || null,
