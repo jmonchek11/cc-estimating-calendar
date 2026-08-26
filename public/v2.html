@@ -3745,6 +3745,12 @@ function actEditBid(bidId) {
     { id: 'estimator_id', label: 'Estimator', type: 'select', emptyLabel: 'TBD', options: teamOpts(['estimator']), value: b.estimator?.id },
     { id: 'salesperson_id', label: 'Salesperson', type: 'select', emptyLabel: 'TBD', options: teamOpts(['sales']), value: b.salesperson?.id },
     { id: 'apm_id', label: 'APM', type: 'select', emptyLabel: 'None', options: apmOpts(), value: b.apm?.id },
+    // pm_id already exists on Bid (set at Approve to Bid, editable at Award)
+    // but was missing here — the one place people actually manage
+    // assignments day-to-day — so there was no way to set or correct a PM
+    // once a bid was already past those two moments. PM won't always equal
+    // Salesperson, so this needs its own field rather than reusing that one.
+    { id: 'pm_id', label: 'PM', type: 'select', emptyLabel: 'TBD', options: teamOpts(['pm', 'sales', 'estimator']), value: b.pm?.id },
   );
   if (showSubEst) fields.push({ id: 'sub_est_section', type: 'custom' });
   if (b.stage !== 'opportunity') {
@@ -4910,6 +4916,7 @@ function renderVendorsBody() {
         <th style="padding:8px 8px 8px 16px"><input type="checkbox" ${allVisibleSelected ? 'checked' : ''} onchange="toggleVendorSelectAll(this.checked, ${JSON.stringify(visibleIds)})" title="Select all filtered"></th>
         <th style="text-align:left;padding:8px 16px;color:var(--text-muted);font-weight:600;font-size:11px">Company</th>
         <th style="text-align:left;padding:8px 16px;color:var(--text-muted);font-weight:600;font-size:11px">Name</th>
+        <th style="text-align:left;padding:8px 16px;color:var(--text-muted);font-weight:600;font-size:11px">Notes</th>
         <th style="text-align:left;padding:8px 16px;color:var(--text-muted);font-weight:600;font-size:11px">Categories</th>
         <th style="text-align:left;padding:8px 16px;color:var(--text-muted);font-weight:600;font-size:11px">Brands</th>
         <th style="text-align:left;padding:8px 16px;color:var(--text-muted);font-weight:600;font-size:11px">Phone</th>
@@ -4920,6 +4927,7 @@ function renderVendorsBody() {
           <td style="padding:8px 8px 8px 16px"><input type="checkbox" ${selected.has(c.id) ? 'checked' : ''} ${c.email ? '' : 'disabled title="No email on file"'} onchange="toggleVendorSelected(${c.id}, this.checked)"></td>
           <td style="padding:8px 16px">${c.company ? `<a href="#" onclick="event.preventDefault();openCompanyProfile(${c.company.id})" style="color:#2563eb;text-decoration:none;font-weight:600">${esc(c.company.name)}</a>` : '<span style="color:var(--text-muted)">—</span>'}</td>
           <td style="padding:8px 16px"><a href="#" onclick="event.preventDefault();openContactProfile(${c.id})" style="color:inherit;text-decoration:none">${esc(c.full_name)}</a>${c.title ? `<div style="font-size:11px;color:var(--text-muted)">${esc(c.title)}</div>` : ''}</td>
+          <td style="padding:8px 16px;max-width:220px;color:var(--text-muted);font-size:12px">${c.notes ? esc(c.notes) : '—'}</td>
           <td style="padding:8px 16px">${c.vendor_categories.map(v => tagPill(v, '#e0e7ff', '#3730a3')).join(' ')}</td>
           <td style="padding:8px 16px">${c.brands.length ? c.brands.map(b => tagPill(b, '#dcfce7', '#166534')).join(' ') : '<span style="color:var(--text-muted)">—</span>'}</td>
           <td style="padding:8px 16px">${c.phone ? esc(c.phone) : '<span style="color:var(--text-muted)">—</span>'}</td>
