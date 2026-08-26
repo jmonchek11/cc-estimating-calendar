@@ -3516,20 +3516,17 @@ async function actNewOpportunity() {
     const new_contacts_by_company = {};
     const selected = COMBO_STATE['company_ids'] || [];
     const existingCompanies = selected.filter(s => s.id);
-    let pocCount = 0;
+    // POC is deliberately optional — a customer is often known before anyone
+    // has a specific point of contact yet, and requiring one here (even just
+    // for existing companies) has twice now blocked people from creating a
+    // real opportunity over a field that was never marked required in the UI.
     existingCompanies.forEach(s => {
       const picks = COMBO_STATE['opp_contact_' + s.id] || [];
       const existingIds = picks.filter(p => p.id).map(p => p.id);
       const newNames = picks.filter(p => !p.id).map(p => p.name);
       if (existingIds.length) contact_ids_by_company[s.id] = existingIds;
       if (newNames.length) new_contacts_by_company[s.id] = newNames;
-      pocCount += existingIds.length + newNames.length;
     });
-    // Brand-new (not-yet-in-system) companies have no contact picker at all —
-    // the form tells the user to add contacts after creating the opportunity,
-    // so only require a POC when at least one *existing* company was picked
-    // and could actually have had one selected.
-    if (existingCompanies.length && !pocCount) return Promise.reject(new Error('Required: POC (add at least one point of contact for a customer)'));
     return api('POST', '/api/v2/opportunities', { ...data, contact_ids_by_company, new_contacts_by_company }).then(result => {
       // Brand-new contacts typed into the POC picker only ever get a name —
       // no email/phone/position field there — so without this follow-up
@@ -3639,16 +3636,14 @@ async function actPromoteLead(bidId) {
     const new_contacts_by_company = {};
     const selected = COMBO_STATE['company_ids'] || [];
     const existingCompanies = selected.filter(s => s.id);
-    let pocCount = 0;
+    // POC is deliberately optional — see the matching note in actNewOpportunity.
     existingCompanies.forEach(s => {
       const picks = COMBO_STATE['opp_contact_' + s.id] || [];
       const existingIds = picks.filter(p => p.id).map(p => p.id);
       const newNames = picks.filter(p => !p.id).map(p => p.name);
       if (existingIds.length) contact_ids_by_company[s.id] = existingIds;
       if (newNames.length) new_contacts_by_company[s.id] = newNames;
-      pocCount += existingIds.length + newNames.length;
     });
-    if (existingCompanies.length && !pocCount) return Promise.reject(new Error('Required: POC (add at least one point of contact for a customer)'));
     return api('POST', `/api/v2/bids/${bidId}/promote-to-opportunity`, { ...data, contact_ids_by_company, new_contacts_by_company }).then(result => {
       if (result.new_contacts?.length) openNewContactFollowup(result.new_contacts);
       return result;
