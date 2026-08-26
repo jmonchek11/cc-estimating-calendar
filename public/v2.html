@@ -569,12 +569,12 @@ const today = new Date().toISOString().split('T')[0];
 const STAGE = {
   lead:'Lead', opportunity:'Opportunity', active_bid:'Active Bid', submitted:'Submitted', awarded:'Awarded',
   not_awarded:'Not Awarded', closed:'Closed',
-  active_co:'Active CO', submitted_co:'Submitted CO', approved:'Approved', not_approved:'Not Approved', voided:'Voided',
+  co_request:'CO Request', active_co:'Active CO', submitted_co:'Submitted CO', approved:'Approved', not_approved:'Not Approved', voided:'Voided',
 };
 const STAGE_COLOR = {
   lead:'#7c3aed', opportunity:'#64748b', active_bid:'#92400e', submitted:'#2563eb', awarded:'#166534',
   not_awarded:'#dc2626', closed:'#64748b',
-  active_co:'#92400e', submitted_co:'#2563eb', approved:'#166534', not_approved:'#dc2626', voided:'#64748b',
+  co_request:'#7c3aed', active_co:'#92400e', submitted_co:'#2563eb', approved:'#166534', not_approved:'#dc2626', voided:'#64748b',
 };
 const METHOD = { phone:'📞 phone', email:'✉️ email', in_person:'🤝 in person', other:'other' };
 
@@ -1685,6 +1685,7 @@ async function renderBidList(stage) {
       </div>` : stage === 'opportunity' ? `
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="v2-btn blue" style="padding:8px 14px;font-size:12px" onclick="actNewOpportunity()">+ New Opportunity</button>
+        <button class="v2-btn outline" style="padding:8px 14px;font-size:12px" onclick="actNewCoRequest()">🔧 New Change Order</button>
       </div>` : stage === 'lead' ? `
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="v2-btn blue" style="padding:8px 14px;font-size:12px" onclick="actNewLead()">+ New Lead</button>
@@ -1700,7 +1701,7 @@ function renderBidListBody(stage) {
   const meta = BID_LIST_META[stage];
   const s = filterState(stage);
   let rows = LIST_STATE[stage] || [];
-  rows = applyTextSearch(rows, s.q, b => [b.project, b.bid_number, ...b.customers]);
+  rows = applyTextSearch(rows, s.q, b => [b.project, b.bid_number, b.co_number, b.name, ...b.customers]);
   rows = applyPersonMine(rows, s);
   const sorters = {
     due: (a, b) => (a.due_date || '9999').localeCompare(b.due_date || '9999'),
@@ -1735,6 +1736,13 @@ function renderBidListBody(stage) {
       return `${b.closed_date ? `<div style="font-size:11px;color:var(--text-muted)">Closed ${fmtD(b.closed_date)}</div>` : ''}
         ${b.close_reason ? `<div style="font-size:11px;color:var(--text-muted);max-width:220px">${esc(b.close_reason)}</div>` : ''}`;
     }
+    if (stage === 'opportunity' && b.type === 'co') {
+      return `${b.due_date ? `<div style="font-size:12px;font-weight:700;color:${b.due_date < today ? '#dc2626' : 'var(--text-muted)'};margin-bottom:6px">Due ${fmtD(b.due_date)}</div>` : ''}
+        <div style="display:flex;gap:6px;justify-content:flex-end" onclick="event.stopPropagation()">
+          <button class="v2-btn green" style="padding:4px 10px;font-size:11px" onclick="actApproveCoRequest(${b.id})">✓ Approve</button>
+          <button class="v2-btn gray" style="padding:4px 10px;font-size:11px" onclick="actCancelCoRequest(${b.id})">✗ Cancel</button>
+        </div>`;
+    }
     if (stage === 'opportunity') {
       return `${b.due_date ? `<div style="font-size:12px;font-weight:700;color:${b.due_date < today ? '#dc2626' : 'var(--text-muted)'};margin-bottom:6px">Due ${fmtD(b.due_date)}${b.due_time ? ' · ' + fmtTimeShort(b.due_time) : ''}</div>` : ''}
         <div style="display:flex;gap:6px;justify-content:flex-end" onclick="event.stopPropagation()">
@@ -1749,6 +1757,13 @@ function renderBidListBody(stage) {
           <button class="v2-btn gray" style="padding:4px 10px;font-size:11px" onclick="actCloseBid(${b.id})">✗ Dismiss</button>
         </div>`;
     }
+    if (stage === 'queue' && b.type === 'co') {
+      return `${b.approved_to_co_at ? `<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">Approved ${fmtD(b.approved_to_co_at)}</div>` : ''}
+        <div style="display:flex;gap:6px;justify-content:flex-end" onclick="event.stopPropagation()">
+          <button class="v2-btn blue" style="padding:4px 10px;font-size:11px" onclick="actStartCoRequest(${b.id})">→ Start CO</button>
+          <button class="v2-btn outline" style="padding:4px 10px;font-size:11px" onclick="actUnapproveCoRequest(${b.id})">↩ Back to Requests</button>
+        </div>`;
+    }
     if (stage === 'queue') {
       return `${b.approved_to_bid_at ? `<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">Approved ${fmtD(b.approved_to_bid_at)}</div>` : ''}
         <div style="display:flex;gap:6px;justify-content:flex-end" onclick="event.stopPropagation()">
@@ -1761,7 +1776,17 @@ function renderBidListBody(stage) {
   };
 
   document.getElementById('bl-count-' + stage).textContent = `${rows.length} of ${LIST_STATE[stage].length} ${meta.sub}`;
-  document.getElementById('bl-body-' + stage).innerHTML = rows.length ? rows.map(b => `
+  document.getElementById('bl-body-' + stage).innerHTML = rows.length ? rows.map(b => b.type === 'co' ? `
+      <div class="proj-row" onclick="openCoFlyout(${b.project_id},${b.id})">
+        <div style="flex:1;min-width:0">
+          <div class="proj-name"><span class="badge" style="background:#ede9fe;color:#5b21b6;font-size:10px">🔧 CO</span> ${esc(b.project)} <span style="color:var(--text-muted);font-weight:400;font-size:12px">${esc(b.co_number)}</span></div>
+          <div class="proj-meta">${esc(b.name)}${b.job_number ? `<span class="proj-meta-sep">·</span> Job ${esc(b.job_number)}` : ''}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;flex-shrink:0;align-self:center">
+          ${adminDeleteIconHtml('change_order', b.id, `${b.co_number} — ${b.project}`)}
+          <div style="text-align:right;min-width:108px">${right(b)}</div>
+        </div>
+      </div>` : `
       <div class="proj-row" onclick="openBidFlyout(${b.project_id},${b.id})">
         <div style="flex:1;min-width:0">
           <div class="proj-name">${esc(b.project)}${b.bid_number ? ` <span style="color:var(--text-muted);font-weight:400;font-size:12px">#${esc(b.bid_number)}</span>` : ''}
@@ -2852,6 +2877,12 @@ function coActions(co) {
   let workflow = '';
   if (co.superseded) {
     // Historical record only — no workflow buttons, same treatment as a superseded bid.
+  } else if (co.stage === 'co_request') {
+    workflow = co.approved_to_co
+      ? `<button class="v2-btn blue" onclick="actStartCoRequest(${co.id})">→ Start CO</button>
+         <button class="v2-btn outline" onclick="actUnapproveCoRequest(${co.id})">↩ Back to Requests</button>`
+      : `<button class="v2-btn green" onclick="actApproveCoRequest(${co.id})">✓ Approve</button>
+         <button class="v2-btn gray" onclick="actCancelCoRequest(${co.id})">✗ Cancel</button>`;
   } else if (co.stage === 'active_co') {
     workflow = `<button class="v2-btn green" onclick="actSubmitCO(${co.id})">Submit CO</button>
                 <button class="v2-btn outline" onclick="actReviseCO(${co.id})">↻ Revise</button>
@@ -4414,6 +4445,79 @@ async function actNewChangeOrder() {
 function ncoPickJob(jobId) {
   document.getElementById('v2-form-overlay')?.remove();
   actAddCO(jobId);
+}
+
+// Same job-search overlay as "+ New Change Order" above, but leads into the
+// lightweight request pipeline (co_request → approve → Queue → Start) that
+// lives mixed into Bid Opportunities/Queue, instead of creating a full
+// active_co directly.
+async function actNewCoRequest() {
+  NCO_JOBS = await api('GET', '/api/v2/jobs-picker');
+  document.getElementById('v2-form-overlay')?.remove();
+  const ov = document.createElement('div');
+  ov.className = 'v2-overlay'; ov.id = 'v2-form-overlay';
+  ov.innerHTML = `
+    <div class="v2-modal" style="max-width:460px">
+      <div class="v2-modal-hd">🔧 New Change Order Request<button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">✕</button></div>
+      <div class="v2-modal-bd">
+        <div class="v2-field"><label>Job # / Name</label>
+          <div class="v2-combo">
+            <div class="v2-combo-box">
+              <input id="vf-ncoreq-jobsearch" class="v2-combo-input" type="text" autocomplete="off" placeholder="Type whatever the PM called it — name or job #…">
+            </div>
+            <div class="v2-combo-menu" id="cc-ncoreq-jobsearch-menu"></div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+
+  const input = document.getElementById('vf-ncoreq-jobsearch');
+  const menu = document.getElementById('cc-ncoreq-jobsearch-menu');
+  const renderMenu = () => {
+    const raw = input.value.trim();
+    if (!raw) { menu.style.display = 'none'; return; }
+    const scored = NCO_JOBS.map(j => {
+      const scores = [_projMatchScore(raw, j.project_name), j.job_number ? _projMatchScore(raw, j.job_number) : null].filter(s => s !== null);
+      return scores.length ? { j, score: Math.min(...scores) } : null;
+    }).filter(Boolean).sort((a, b) => a.score - b.score).slice(0, 8);
+    menu.innerHTML = scored.length
+      ? scored.map(({ j }) => `<div class="v2-combo-opt" onmousedown="event.preventDefault();ncoreqPickJob(${j.id})">${esc(j.project_name)} ${j.job_number ? `<span style="color:var(--text-muted)">— Job ${esc(j.job_number)}</span>` : `<span style="color:#92400e">— Job # pending</span>`}</div>`).join('')
+      : `<div class="v2-combo-empty">No matching project or job # — a change order needs an existing job (created at bid award, or via "+ Legacy Job")</div>`;
+    const box = input.closest('.v2-combo-box');
+    const rect = box.getBoundingClientRect();
+    menu.style.left = rect.left + 'px'; menu.style.width = rect.width + 'px'; menu.style.top = (rect.bottom + 3) + 'px';
+    menu.style.display = 'block';
+  };
+  input.addEventListener('input', renderMenu);
+  input.addEventListener('focus', renderMenu);
+  input.addEventListener('blur', () => setTimeout(() => { menu.style.display = 'none'; }, 150));
+  setTimeout(() => input.focus(), 30);
+}
+function ncoreqPickJob(jobId) {
+  document.getElementById('v2-form-overlay')?.remove();
+  showForm('🔧 New Change Order Request', [
+    { id: 'co_number', label: 'RFC / COR / CO #', type: 'text', required: true, placeholder: 'RFC-01' },
+    { id: 'name', label: 'Description of Work', type: 'text', required: true },
+    { id: 'due_date', label: 'Due Date', type: 'date', required: true },
+  ], data => api('POST', '/api/v2/co-requests', { ...data, job_id: jobId }), 'Request Change Order', 'blue');
+}
+function actApproveCoRequest(id) {
+  api('POST', `/api/v2/change-orders/${id}/approve-request`).then(refresh).catch(e => alert('Failed: ' + e.message));
+}
+function actUnapproveCoRequest(id) {
+  api('POST', `/api/v2/change-orders/${id}/unapprove-request`).then(refresh).catch(e => alert('Failed: ' + e.message));
+}
+function actCancelCoRequest(id) {
+  showForm('✗ Cancel Change Order Request', [
+    { id: 'void_reason', label: 'Reason', type: 'text', required: true, placeholder: 'No longer needed, duplicate, etc.' },
+  ], data => api('POST', `/api/v2/change-orders/${id}/void`, data), 'Cancel Request', 'red');
+}
+function actStartCoRequest(id) {
+  showForm('→ Start Change Order', [
+    { id: 'start_date', label: 'Start Date', type: 'date', required: true, value: today },
+    { id: 'estimator_id', label: 'Estimator', type: 'select', emptyLabel: 'TBD', options: teamOpts(['estimator']) },
+  ], data => api('POST', `/api/v2/change-orders/${id}/start`, data), 'Start CO', 'blue');
 }
 
 function actAddCO(jobId) {

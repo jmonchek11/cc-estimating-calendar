@@ -14,7 +14,7 @@ const events = require('./events');
 const ics = require('./ics');
 
 const BID_ACTIVE_STAGES = ['lead', 'opportunity', 'active_bid', 'submitted'];
-const CO_ACTIVE_STAGES  = ['active_co', 'submitted_co'];
+const CO_ACTIVE_STAGES  = ['co_request', 'active_co', 'submitted_co'];
 
 // Company "type" — who they ARE on a job, distinct from vendor category
 // (which is what THEY sell). Fixed list per the estimating team's request.
@@ -361,6 +361,8 @@ async function getProjectDetail(projectId) {
     co_number: co.co_number,
     name: co.name,
     stage: co.stage,
+    approved_to_co: !!co.approved_to_co,
+    approved_to_co_at: co.approved_to_co_at,
     superseded: !!co.superseded,
     estimator: tm[co.estimator_id] || null,
     due_date: co.due_date,
@@ -2387,6 +2389,68 @@ async function _coEventContext(M, co) {
   return { project_id: job.project_id, project_name: proj?.name || null, job_number: job.job_number || null };
 }
 
+// ── CO request pipeline — mirrors the Bid Opportunity → Queue → Start flow ──
+// A CO request starts life exactly like a lightweight opportunity: just the
+// 4 fields someone actually knows up front (Job, CO #, description, due
+// date). It shows up mixed into the Bid Opportunities and Queue pages
+// (getBidList) rather than its own dedicated page, per how the team
+// actually wants to work this — approve it, it moves to the Queue, then
+// "Start" collects the rest (estimator, start date) and promotes it to a
+// real 'active_co', identical in every way to one created directly via
+// createChangeOrder.
+async function createCoRequest(data, actorId) {
+  const M = getModels();
+  const job = await M.Job.findById(Number(data.job_id)).lean();
+  if (!job) throw new Error('A change order cannot exist without a Job');
+  require_(data, ['co_number', 'name', 'due_date']);
+  const coId = await nextId('change_orders');
+  await M.ChangeOrder.create({
+    _id: coId, job_id: job._id, stage: 'co_request',
+    co_number: data.co_number, name: data.name, due_date: data.due_date,
+  });
+  const proj = await M.Project.findById(job.project_id).lean();
+  await events.safeEmit('co.created', {
+    project_id: job.project_id, job_id: job._id, co_id: coId, actor_id: actorId || null,
+    payload: { co_number: data.co_number, name: data.name, project_name: proj?.name || null, job_number: job.job_number || null },
+  });
+  return { co_id: coId };
+}
+async function approveCoRequest(id, actorId) {
+  const M = getModels();
+  const co = await loadCO(id);
+  if (co.stage !== 'co_request') throw new Error(`Cannot approve from stage '${co.stage}'`);
+  if (co.approved_to_co) throw new Error('Already approved');
+  await M.ChangeOrder.updateOne({ _id: co._id }, { $set: { approved_to_co: 1, approved_to_co_at: today(), updated_at: ts() } });
+  return { co_id: co._id };
+}
+async function unapproveCoRequest(id) {
+  const M = getModels();
+  const co = await loadCO(id);
+  if (!co.approved_to_co) throw new Error('Not currently approved');
+  await M.ChangeOrder.updateOne({ _id: co._id }, { $set: { approved_to_co: 0, approved_to_co_at: null, updated_at: ts() } });
+  return { co_id: co._id };
+}
+// Mirrors startBid: reachable regardless of approved_to_co (the frontend
+// only surfaces the button once approved, same as Start Bid only showing
+// from the Queue page — but nothing here hard-requires it, matching Bid).
+async function startCoRequest(id, data, actorId) {
+  const M = getModels();
+  const co = await loadCO(id);
+  if (co.stage !== 'co_request') throw new Error(`Cannot start from stage '${co.stage}'`);
+  require_(data, ['start_date']);
+  await M.ChangeOrder.updateOne({ _id: co._id }, { $set: {
+    stage: 'active_co', start_date: data.start_date,
+    estimator_id: data.estimator_id ? Number(data.estimator_id) : null,
+    notes: data.notes || null, updated_at: ts(),
+  }});
+  const ctx = await _coEventContext(M, co);
+  await events.safeEmit('co.stage_changed', {
+    project_id: ctx.project_id, job_id: co.job_id, co_id: co._id, actor_id: actorId || null,
+    payload: { co_number: co.co_number, from: 'co_request', to: 'active_co', project_name: ctx.project_name, job_number: ctx.job_number },
+  });
+  return { co_id: co._id };
+}
+
 async function createChangeOrder(jobId, data, actorId) {
   const M = getModels();
   const job = await M.Job.findById(Number(jobId)).lean();
@@ -2468,7 +2532,7 @@ async function notApproveCO(id, data, actorId) {
 async function voidCO(id, data, actorId) {
   const M = getModels();
   const co = await loadCO(id);
-  if (!['active_co', 'submitted_co'].includes(co.stage)) throw new Error(`Cannot void CO from stage '${co.stage}'`);
+  if (!['co_request', 'active_co', 'submitted_co'].includes(co.stage)) throw new Error(`Cannot void CO from stage '${co.stage}'`);
   require_(data, ['void_reason']);
   const fromStage = co.stage;
   await M.ChangeOrder.updateOne({ _id: co._id }, { $set: {
@@ -2685,9 +2749,10 @@ async function getBidList(stage) {
   const tm = teamMap(members);
   const custByBid = {}; bidCustomers.forEach(bc => (custByBid[bc.bid_id] = custByBid[bc.bid_id] || []).push(coName[bc.company_id]));
   const jobByBid = {}; jobs.forEach(j => { if (j.winning_bid_id) jobByBid[j.winning_bid_id] = j; });
-  return bids.map(b => {
+  const rows = bids.map(b => {
     const job = jobByBid[b._id];
     return {
+      type: 'bid',
       id: b._id, project_id: b.project_id, project: pName[b.project_id] || '—', size_bucket: pSize[b.project_id] || null,
       type_of_work: pType[b.project_id] || null,
       bid_number: b.bid_number, stage: b.stage, drawing_stage: b.drawing_stage,
@@ -2714,6 +2779,36 @@ async function getBidList(stage) {
       date_not_awarded: b.date_not_awarded, not_awarded_notes: b.not_awarded_notes,
     };
   });
+
+  // CO requests live mixed into the same Bid Opportunities/Queue pages, per
+  // how the team actually wants to work them — not a real Bid, just shown
+  // alongside with a 🔧 tag so it isn't confused for one. Only relevant to
+  // these two stages; every other bid-list stage is untouched.
+  if (stage === 'opportunity' || stage === 'queue') {
+    const coFilter = stage === 'queue' ? { stage: 'co_request', approved_to_co: true, superseded: { $ne: 1 } }
+      : { stage: 'co_request', approved_to_co: { $ne: true }, superseded: { $ne: 1 } };
+    const coRequests = await M.ChangeOrder.find(coFilter).sort({ due_date: 1, _id: 1 }).lean();
+    if (coRequests.length) {
+      const jobs2 = await M.Job.find({ _id: { $in: [...new Set(coRequests.map(c => c.job_id))] } }).lean();
+      const jobById2 = {}; jobs2.forEach(j => jobById2[j._id] = j);
+      coRequests.forEach(c => {
+        const job = jobById2[c.job_id];
+        rows.push({
+          type: 'co',
+          id: c._id, project_id: job?.project_id || null, project: job ? (pName[job.project_id] || '—') : '—',
+          size_bucket: null, type_of_work: null, drawing_stage: null,
+          co_number: c.co_number, name: c.name, stage: c.stage,
+          job_number: job?.job_number || null,
+          estimator: null, salesperson: null, apm: null, pm: null,
+          customers: [], sub_estimators: [], walkthroughs: [],
+          due_date: c.due_date, due_time: null,
+          approved_to_co: !!c.approved_to_co, approved_to_co_at: c.approved_to_co_at,
+        });
+      });
+      rows.sort((a, b) => (a.due_date || '9999').localeCompare(b.due_date || '9999') || a.id - b.id);
+    }
+  }
+  return rows;
 }
 
 // ── Change order list for a stage ─────────────────────────────────────────────
@@ -3972,6 +4067,7 @@ module.exports = {
   awardSubmission, notAwardSubmission, closeBid, approveToBid, unapproveToBid, logFollowupV2, updateFollowup,
   createLegacyJob, updateJob,
   createChangeOrder, submitCO, approveCO, notApproveCO, voidCO, reopenCO, reviseCO,
+  createCoRequest, approveCoRequest, unapproveCoRequest, startCoRequest,
   _norm, resolveCompanyByName, ensureBidCustomer, teamMap,
   addReminder, dismissReminder, deleteReminder, getRemindersFor, getDueReminders, markReminderEmailed,
   addWalkthrough, updateWalkthrough, removeWalkthrough, getBidsNeedingWalkthroughReminder, markWalkthroughReminderSent, setWalkthroughRsvp,

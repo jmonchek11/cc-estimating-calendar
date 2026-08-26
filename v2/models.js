@@ -190,7 +190,14 @@ const JobSchema = new mongoose.Schema({
   updated_at: { type: String, default: ts },
 }, opts);
 
-const CO_STAGES = ['active_co', 'submitted_co', 'approved', 'not_approved', 'voided'];
+// 'co_request' is a real, separate stage (unlike Bid's 'opportunity' +
+// approved_to_bid flag) since it's the very first stage a CO can be in —
+// there's no equivalent to Bid's 'lead' stage before it to reuse the same
+// pattern from. approved_to_co plays the same role approved_to_bid does:
+// the request sits in the same stage while it moves from "just requested"
+// to "approved, queued for setup," only leaving 'co_request' entirely once
+// Start fills in the rest and promotes it to 'active_co'.
+const CO_STAGES = ['co_request', 'active_co', 'submitted_co', 'approved', 'not_approved', 'voided'];
 
 const ChangeOrderSchema = new mongoose.Schema({
   _id:            Number,
@@ -198,6 +205,8 @@ const ChangeOrderSchema = new mongoose.Schema({
   co_number:      { type: String, required: true },              // RFC-001 / COR-12 / CO-7
   name:           { type: String, required: true },              // description of the work
   stage:          { type: String, enum: CO_STAGES, required: true, default: 'active_co' },
+  approved_to_co:    { type: Number, default: 0 },                // set at co_request stage — moves it into the Queue view
+  approved_to_co_at: { type: String, default: null },
   was_submitted:  { type: Number, default: 0 },                  // drives Reopen target (submitted_co vs active_co)
   superseded:     { type: Number, default: 0 },                  // 1 = replaced by a revision (same idea as Bid.superseded)
 
