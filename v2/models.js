@@ -284,6 +284,11 @@ const BidSubmissionSchema = new mongoose.Schema({
   // Per-submission win/loss + follow-up (each customer is tracked independently)
   outcome:            { type: String, enum: ['pending', 'awarded', 'not_awarded'], default: 'pending' },
   award_date:         { type: String, default: null },
+  // The actual award/contract/PO price, captured at award time — often
+  // different from `amount` (the originally-submitted bid) after
+  // negotiation. null until awarded; `amount` itself is left untouched as
+  // the historical record of what was actually bid.
+  award_amount:       { type: Number, default: null },
   date_not_awarded:   { type: String, default: null },
   not_awarded_notes:  { type: String, default: null },
   // Independent of our own outcome — did the GC/customer itself actually

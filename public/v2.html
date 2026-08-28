@@ -2458,7 +2458,12 @@ function customerRowHtml(b, cust) {
     if (current.outcome === 'awarded') outcomeBadge = ` <span class="awarded-pill">✓ AWARDED ${fmtD(current.award_date)}</span>`;
     else if (current.outcome === 'not_awarded') outcomeBadge = ` <span class="badge" style="background:#fee2e2;color:#991b1b">✗ NOT AWARDED ${fmtD(current.date_not_awarded)}</span>`;
     const overdue = !b.project_on_hold && current.next_followup_date && current.next_followup_date < today && current.outcome === 'pending';
-    right = `<div class="bc-co-amt">${fmt$(current.amount)}</div>
+    // Once awarded, the negotiated award_amount is the number that matters —
+    // the originally-submitted amount stays visible underneath it as context
+    // only when the two actually differ (deal/negotiation changed the price).
+    const showAward = current.outcome === 'awarded' && current.award_amount != null;
+    right = `<div class="bc-co-amt">${fmt$(showAward ? current.award_amount : current.amount)}</div>
+      ${showAward && current.award_amount !== current.amount ? `<div style="font-size:11px;color:var(--text-muted)">bid ${fmt$(current.amount)}</div>` : ''}
       ${current.outcome === 'pending' && current.next_followup_date ? `<div class="bc-co-fu ${overdue ? 'overdue-txt' : ''}">${overdue ? 'OVERDUE ' : 'Next F/U '}${fmtD(current.next_followup_date)}</div>` : ''}`;
     const live = current.is_current && current.outcome === 'pending';
     if (live && ['submitted', 'awarded'].includes(b.stage)) {
@@ -4228,6 +4233,11 @@ function actAwardSubmission(submissionId) {
   const b = findBidForSubmission(submissionId) || {};
   showForm(`🎉 Awarded — ${esc(s?.company?.name || 'customer')}`, [
     { id: 'award_date', label: 'Award Date', type: 'date', required: true, value: today },
+    // Prefilled with the submitted bid amount, but editable — the actual
+    // award/contract/PO price often differs after negotiation, and this is
+    // what drives the bid's displayed value from here on (the original
+    // submitted amount stays on the submission as its own historical record).
+    { id: 'award_amount', label: 'Award / Contract / PO Price $', type: 'currency', required: true, value: s?.amount },
     { id: 'pm_id', label: 'Assign PM (can be set later)', type: 'select', emptyLabel: 'TBD', options: teamOpts(['pm', 'sales', 'estimator']) },
     // Forced here, not at submission — each only actually matters once a
     // bid wins (notifies a different back-office team on award). Pre-filled
@@ -4274,6 +4284,11 @@ function actApproveToBid(bidId) {
     { id: 'estimator_id', label: 'Estimator (if known)', type: 'select', emptyLabel: 'TBD', options: teamOpts(['estimator']), value: b.estimator?.id },
     { id: 'sub_estimator_id', label: 'Sub-Estimator (optional)', type: 'select', emptyLabel: 'None', options: teamOpts(['estimator']) },
     { id: 'sub_estimator_scope', label: 'Sub-Estimator Scope', type: 'text', placeholder: 'e.g. Fire Alarm, Lighting Controls…' },
+    // Salesperson and PM are separate fields (PM won't always = Salesperson)
+    // — this was the one place assignment happens where Salesperson was
+    // missing, so a bid could get a PM here and never show a salesperson at
+    // all even though the intent was always to assign both.
+    { id: 'salesperson_id', label: 'Salesperson (if known)', type: 'select', emptyLabel: 'TBD', options: teamOpts(['sales']), value: b.salesperson?.id },
     { id: 'pm_id', label: 'PM (if known)', type: 'select', emptyLabel: 'TBD', options: teamOpts(['pm', 'sales', 'estimator']), value: b.pm?.id },
   ], async data => {
     if (data.sub_estimator_id && !data.sub_estimator_scope) throw new Error('Required: Sub-Estimator Scope (or leave Sub-Estimator blank)');

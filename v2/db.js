@@ -350,6 +350,7 @@ async function getProjectDetail(projectId) {
         is_current: !!sub.is_current,
         outcome: sub.outcome || 'pending',
         award_date: sub.award_date,
+        award_amount: sub.award_amount,
         date_not_awarded: sub.date_not_awarded,
         not_awarded_notes: sub.not_awarded_notes,
         gc_awarded: sub.gc_awarded == null ? null : !!sub.gc_awarded,
@@ -963,7 +964,9 @@ async function recomputeBidHeadline(bidId) {
       .sort({ date_submitted: -1, _id: -1 }).limit(1).lean())[0];
   }
   await M.Bid.updateOne({ _id: bidId }, { $set: {
-    estimate_amount: chosen ? chosen.amount : null,
+    // Once awarded, the negotiated award_amount (if set) is the real number —
+    // amount stays the historical record of what was originally bid.
+    estimate_amount: chosen ? (chosen.award_amount ?? chosen.amount) : null,
     date_submitted:  chosen ? chosen.date_submitted : null,
     approved_by:     chosen ? chosen.approved_by : null,
     updated_at: ts(),
@@ -1543,7 +1546,7 @@ const ADMIN_EDITABLE = {
   job:            ['job_number', 'pm_id', 'apm_id', 'awarded_company_id', 'award_date', 'folder_url'],
   change_order:   ['co_number', 'name', 'due_date', 'start_date', 'estimator_id', 'notes',
                    'estimate_amount', 'date_submitted', 'approved_by', 'approval_date'],
-  bid_submission: ['company_id', 'amount', 'date_submitted', 'approved_by', 'submission_type', 'notes', 'is_current', 'not_awarded_notes', 'gc_awarded'],
+  bid_submission: ['company_id', 'amount', 'award_amount', 'date_submitted', 'approved_by', 'submission_type', 'notes', 'is_current', 'not_awarded_notes', 'gc_awarded'],
 };
 const NUMERIC_FK = new Set(['estimator_id', 'salesperson_id', 'apm_id', 'pm_id', 'awarded_company_id', 'company_id', 'owner_id']);
 
@@ -1559,7 +1562,7 @@ async function adminUpdate(entity, id, data) {
     if (!(f in data)) continue;
     let v = data[f] === '' ? null : data[f];
     if (NUMERIC_FK.has(f)) v = v ? Number(v) : null;
-    else if (f === 'amount' || f === 'estimate_amount') {
+    else if (f === 'amount' || f === 'estimate_amount' || f === 'award_amount') {
       v = (v == null) ? null : Number(v);
       if (v != null) requireNonZeroAmount(v);
     }
@@ -1610,10 +1613,11 @@ async function awardSubmission(submissionId, data, actorId) {
   // submission — decided or not — was pure friction. May already be answered
   // from Start Bid/Edit Bid; the frontend pre-fills those, but still sends a
   // real answer either way.
-  require_(data, ['award_date', 'certified_payroll', 'tax_exempt', 'prevailing_wage']);
+  require_(data, ['award_date', 'award_amount', 'certified_payroll', 'tax_exempt', 'prevailing_wage']);
+  requireNonZeroAmount(data.award_amount);
 
   await M.BidSubmission.updateOne({ _id: sub._id }, { $set: {
-    outcome: 'awarded', award_date: data.award_date, next_followup_date: null, updated_at: ts(),
+    outcome: 'awarded', award_date: data.award_date, award_amount: Number(data.award_amount), next_followup_date: null, updated_at: ts(),
   }});
   await M.Bid.updateOne({ _id: bid._id }, { $set: {
     stage: 'awarded', award_date: data.award_date, awarded_company_id: sub.company_id,
@@ -1796,6 +1800,7 @@ async function approveToBid(id, actor, assignment) {
   if (bid.approved_to_bid) throw new Error('Already approved to bid');
   const upd = { approved_to_bid: true, approved_to_bid_at: today(), updated_at: ts() };
   if (assignment?.estimator_id) upd.estimator_id = Number(assignment.estimator_id);
+  if (assignment?.salesperson_id) upd.salesperson_id = Number(assignment.salesperson_id);
   if (assignment?.pm_id) upd.pm_id = Number(assignment.pm_id);
   await M.Bid.updateOne({ _id: bid._id }, { $set: upd });
   const proj = await M.Project.findById(bid.project_id).lean();

@@ -325,7 +325,7 @@ router.delete('/api/v2/admin/override/:id',    requireAdmin, t(req => v2db.remov
 router.post('/api/v2/bids/:id/approve-to-bid', t(async req => {
     const actor = await actorOf(req);
     const oldBid = await v2db.loadBid(req.params.id).catch(() => null);
-    const r = await v2db.approveToBid(req.params.id, actor, { estimator_id: req.body?.estimator_id, pm_id: req.body?.pm_id });
+    const r = await v2db.approveToBid(req.params.id, actor, { estimator_id: req.body?.estimator_id, salesperson_id: req.body?.salesperson_id, pm_id: req.body?.pm_id });
     notifyAssignmentDiff(Number(req.params.id), oldBid, req.body || {}, req.session.userId);
     notify.notifyApprovedToBid(Number(req.params.id), actor?.name);
     notify.notifyOwnerToForwardInvite(Number(req.params.id), actor?.name);
