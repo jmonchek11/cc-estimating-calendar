@@ -230,8 +230,24 @@ async function getProjectDetail(projectId) {
     const custCompanyIds = bidCustomers.filter(bc => bc.bid_id === b._id).map(bc => bc.company_id);
     return custCompanyIds.length > 0 && custCompanyIds.every(cid => decidedCompanyIds.has(cid)) && subCompanyIds.size === custCompanyIds.length;
   });
-  if (stuckCandidates.length) {
-    await Promise.all(stuckCandidates.map(b => reconcileBidOutcome(b._id)));
+  // Mirror image of the above, one stage earlier: an active_bid where every
+  // current customer already has a current submission should have already
+  // flipped to 'submitted' (see submitBid/addSubmission's own allSubmitted
+  // check) — but that check re-queries at call time, so near-simultaneous
+  // addSubmission calls (e.g. submitting several customers in a tight burst)
+  // can each see an incomplete picture and neither one flips it (confirmed
+  // on B26-0267: 3 submissions created within the same second, bid stuck on
+  // active_bid ever since). Same self-heal pattern as stuckCandidates above.
+  const stuckSubmitCandidates = bids.filter(b => {
+    if (b.stage !== 'active_bid') return false;
+    const bidSubs = submissions.filter(s => s.bid_id === b._id && s.is_current);
+    const subCompanyIds = new Set(bidSubs.map(s => s.company_id));
+    const custCompanyIds = bidCustomers.filter(bc => bc.bid_id === b._id).map(bc => bc.company_id);
+    return custCompanyIds.length > 0 && custCompanyIds.every(cid => subCompanyIds.has(cid));
+  });
+  if (stuckCandidates.length) await Promise.all(stuckCandidates.map(b => reconcileBidOutcome(b._id)));
+  if (stuckSubmitCandidates.length) await Promise.all(stuckSubmitCandidates.map(b => reconcileBidSubmitted(b._id)));
+  if (stuckCandidates.length || stuckSubmitCandidates.length) {
     [bids, bidCustomers, submissions] = await Promise.all([
       M.Bid.find({ project_id: pid }).lean(),
       M.BidCustomer.find({ bid_id: { $in: bidIds } }).lean(),
@@ -1691,6 +1707,36 @@ async function reconcileBidOutcome(bidId, actorId) {
     await events.safeEmit('bid.stage_changed', {
       project_id: bid.project_id, bid_id: bidId, actor_id: actorId || null,
       payload: { from: 'submitted', to: 'not_awarded', project_name: proj?.name || null },
+    });
+  }
+}
+
+// Self-heal counterpart to reconcileBidOutcome, one stage earlier: an
+// active_bid where every current customer already has a current submission
+// should already be 'submitted' (submitBid/addSubmission's own allSubmitted
+// check normally does this inline), but that check re-queries current state
+// at call time, so near-simultaneous addSubmission calls can each see an
+// incomplete picture and neither flips it. Checked from getProjectDetail's
+// self-heal step alongside reconcileBidOutcome.
+async function reconcileBidSubmitted(bidId, actorId) {
+  const M = getModels();
+  const [customers, currentSubs] = await Promise.all([
+    M.BidCustomer.find({ bid_id: bidId }).lean(),
+    M.BidSubmission.find({ bid_id: bidId, is_current: 1 }).lean(),
+  ]);
+  if (!customers.length) return;
+  const submittedCompanyIds = new Set(currentSubs.map(s => s.company_id));
+  const allSubmitted = customers.every(c => submittedCompanyIds.has(c.company_id));
+  if (!allSubmitted) return;
+  const result = await M.Bid.updateOne({ _id: bidId, stage: 'active_bid' }, { $set: { stage: 'submitted', updated_at: ts() } });
+  if (result.modifiedCount) {
+    await recomputeBidHeadline(bidId);
+    await recomputeBidFollowup(bidId);
+    const bid = await M.Bid.findById(bidId).lean();
+    const proj = await M.Project.findById(bid.project_id).lean();
+    await events.safeEmit('bid.stage_changed', {
+      project_id: bid.project_id, bid_id: bidId, actor_id: actorId || null,
+      payload: { from: 'active_bid', to: 'submitted', project_name: proj?.name || null },
     });
   }
 }
