@@ -2517,6 +2517,7 @@ async function createCoRequest(data, actorId) {
   await M.ChangeOrder.create({
     _id: coId, job_id: job._id, stage: 'co_request',
     co_number: data.co_number, name: data.name, due_date: data.due_date,
+    notes: data.notes || null,
   });
   const proj = await M.Project.findById(job.project_id).lean();
   await events.safeEmit('co.created', {
@@ -2525,12 +2526,19 @@ async function createCoRequest(data, actorId) {
   });
   return { co_id: coId };
 }
-async function approveCoRequest(id, actorId) {
+// assignment: optional { estimator_id, pm_id } — estimator lives on the CO
+// itself; PM is a per-Job concept (shared across every CO on that job, same
+// as a bid's awarded Job), so pm_id sets Job.pm_id rather than adding a
+// second PM field to ChangeOrder.
+async function approveCoRequest(id, actorId, assignment) {
   const M = getModels();
   const co = await loadCO(id);
   if (co.stage !== 'co_request') throw new Error(`Cannot approve from stage '${co.stage}'`);
   if (co.approved_to_co) throw new Error('Already approved');
-  await M.ChangeOrder.updateOne({ _id: co._id }, { $set: { approved_to_co: 1, approved_to_co_at: today(), updated_at: ts() } });
+  const upd = { approved_to_co: 1, approved_to_co_at: today(), updated_at: ts() };
+  if (assignment?.estimator_id) upd.estimator_id = Number(assignment.estimator_id);
+  await M.ChangeOrder.updateOne({ _id: co._id }, { $set: upd });
+  if (assignment?.pm_id) await M.Job.updateOne({ _id: co.job_id }, { $set: { pm_id: Number(assignment.pm_id), updated_at: ts() } });
   return { co_id: co._id };
 }
 async function unapproveCoRequest(id) {

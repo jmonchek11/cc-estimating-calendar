@@ -4646,10 +4646,15 @@ function ncoreqPickJob(jobId) {
     { id: 'co_number', label: 'RFC / COR / CO #', type: 'text', required: true, placeholder: 'RFC-01' },
     { id: 'name', label: 'Description of Work', type: 'text', required: true },
     { id: 'due_date', label: 'Due Date', type: 'date', required: true },
+    { id: 'notes', label: 'Notes', type: 'textarea', placeholder: 'Any context the PM setting this up should know…' },
   ], data => api('POST', '/api/v2/co-requests', { ...data, job_id: jobId }), 'Request Change Order', 'blue');
 }
 function actApproveCoRequest(id) {
-  api('POST', `/api/v2/change-orders/${id}/approve-request`).then(refresh).catch(e => alert('Failed: ' + e.message));
+  const co = findCO(id) || {};
+  showForm('✓ Approve Change Order', [
+    { id: 'estimator_id', label: 'Estimator (if known)', type: 'select', emptyLabel: 'TBD', options: teamOpts(['estimator']), value: co.estimator?.id },
+    { id: 'pm_id', label: 'PM (if known)', type: 'select', emptyLabel: 'TBD', options: teamOpts(['pm', 'sales', 'estimator']) },
+  ], data => api('POST', `/api/v2/change-orders/${id}/approve-request`, data), 'Approve', 'green');
 }
 function actUnapproveCoRequest(id) {
   api('POST', `/api/v2/change-orders/${id}/unapprove-request`).then(refresh).catch(e => alert('Failed: ' + e.message));

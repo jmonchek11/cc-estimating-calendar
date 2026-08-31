@@ -541,7 +541,7 @@ router.post('/api/v2/jobs/:id/change-orders', t(req => v2db.createChangeOrder(re
 // ── CO request pipeline (mirrors Bid opportunity → queue → start) ─────────────
 router.post('/api/v2/co-requests', t(req => v2db.createCoRequest({ ...req.body, created_by: req.session.userId }, req.session.userId),
   async (req, r) => ({ action: 'co.create_request', summary: `Requested CO ${await v2db.coLabel(r.co_id)}`, entity_type: 'change_order', entity_id: r.co_id })));
-router.post('/api/v2/change-orders/:id/approve-request', t(req => v2db.approveCoRequest(req.params.id, req.session.userId),
+router.post('/api/v2/change-orders/:id/approve-request', t(req => v2db.approveCoRequest(req.params.id, req.session.userId, { estimator_id: req.body?.estimator_id, pm_id: req.body?.pm_id }),
   async (req) => ({ action: 'co.approve_request', summary: `Approved CO request ${await v2db.coLabel(req.params.id)} — moved to Queue`, entity_type: 'change_order', entity_id: Number(req.params.id) })));
 router.post('/api/v2/change-orders/:id/unapprove-request', t(req => v2db.unapproveCoRequest(req.params.id),
   async (req) => ({ action: 'co.unapprove_request', summary: `Moved CO request ${await v2db.coLabel(req.params.id)} back out of the Queue`, entity_type: 'change_order', entity_id: Number(req.params.id) })));
