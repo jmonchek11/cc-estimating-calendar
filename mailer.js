@@ -346,6 +346,33 @@ function emailRoleAwardNotice(bid, actorName, reasonLabel, recipientName) {
 // recipient (e.g. Carrie) the moment an opportunity is approved to move
 // forward, so setup can start — bid #, folder, estimator assignment, etc.
 // haven't happened yet at this point, this is just the "yes, bid it" signal.
+function emailOpportunityClosed(bid, actorName, closeReason) {
+  const label = bid.project_name || bid.bid_number || 'Unnamed';
+  return {
+    subject: `✗ Opportunity Declined — ${label}`,
+    html: base(`
+      ${iconHeading(`${APP_URL}/icon-active-bids.png`, 'Opportunity Closed — No Bid')}
+      <p>The opportunity you added has been marked <strong>No Bid</strong> by <strong>${actorName}</strong>.</p>
+      ${bidTable(bid)}
+      ${closeReason ? `<div style="margin:14px 0;padding:12px 16px;background:#fef2f2;border-left:3px solid #dc2626;border-radius:4px;font-size:14px;color:#7f1d1d"><strong>Reason:</strong> ${closeReason}</div>` : ''}
+      ${buttonRow({ href: APP_URL, label: 'Open App' })}
+    `),
+  };
+}
+
+function emailNewOpportunity(bid, actorName) {
+  const label = bid.project_name || bid.bid_number || 'Unnamed';
+  return {
+    subject: `💡 New Bid Opportunity — ${label}`,
+    html: base(`
+      ${iconHeading(`${APP_URL}/icon-active-bids.png`, 'New Bid Opportunity')}
+      <p><strong>${actorName}</strong> just added a new bid opportunity — a heads-up so there's time to review before the 8am meeting.</p>
+      ${bidTable(bid)}
+      ${buttonRow({ href: APP_URL, label: 'Open App' })}
+    `),
+  };
+}
+
 function emailApprovedToBid(bid, actorName) {
   return {
     subject: `📋 Ready for Setup — ${bid.project_name || bid.bid_number || 'Unnamed'}`,

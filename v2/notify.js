@@ -191,6 +191,34 @@ async function notifyRoleAward(bidId, actorName) {
 // Recipient is whoever Settings has configured (e.g. Carrie, who begins bid
 // setup once something's approved) — no-op if nothing's configured, rather
 // than guessing at an email/role.
+// Only fires for an actual Opportunity being declined (not a Lead dismissal
+// or an active_bid closure mid-flight) — the owner who added it should
+// know it was reviewed and passed on, by whom, and why.
+async function notifyOpportunityClosed(bidId, actorName) {
+  try {
+    const M = getModels();
+    const bid = await M.Bid.findById(Number(bidId)).lean();
+    if (!bid?.owner_id) return;
+    const recipient = await emailForV2Member(bid.owner_id);
+    if (!recipient?.email || !mailer.wantsNotification(recipient, 'assigned')) return;
+    const shape = await bidEmailShape(bidId);
+    if (!shape) return;
+    const { subject, html } = mailer.emailOpportunityClosed(shape, actorName || 'A team member', bid.close_reason);
+    await mailer.sendMail({ to: recipient.email, subject, html });
+  } catch (e) { console.error('[v2 notify] opportunity-closed email failed:', e.message); }
+}
+async function notifyNewOpportunity(bidId, actorName) {
+  try {
+    const M = getModels();
+    const settings = await M.Settings.findById('company').lean();
+    const to = settings?.new_opportunity_notify_email;
+    if (!to) return;
+    const shape = await bidEmailShape(bidId);
+    if (!shape) return;
+    const { subject, html } = mailer.emailNewOpportunity(shape, actorName || 'Someone');
+    await mailer.sendMail({ to, subject, html });
+  } catch (e) { console.error('[v2 notify] new-opportunity email failed:', e.message); }
+}
 async function notifyApprovedToBid(bidId, actorName) {
   try {
     const M = getModels();
@@ -343,4 +371,4 @@ async function notifyDueDateChanged(kind, id, oldDate, newDate, actorId) {
   } catch (e) { console.error('[v2 notify] due-date-changed email failed:', e.message); }
 }
 
-module.exports = { bidEmailShape, coEmailShape, emailShapeForReminder, notifyAwarded, notifyRoleAward, notifyApprovedToBid, notifyOwnerToForwardInvite, notifyAssigned, notifyWalkthroughSet, notifyWalkthroughAssignees, notifyFollowup, notifyDueDateChanged, bidRecipients, walkthroughContactInfo, emailForV2Member };
+module.exports = { bidEmailShape, coEmailShape, emailShapeForReminder, notifyAwarded, notifyRoleAward, notifyApprovedToBid, notifyOwnerToForwardInvite, notifyAssigned, notifyWalkthroughSet, notifyWalkthroughAssignees, notifyFollowup, notifyDueDateChanged, notifyOpportunityClosed, notifyNewOpportunity, bidRecipients, walkthroughContactInfo, emailForV2Member };

@@ -254,11 +254,21 @@ router.delete('/api/v2/release-notes/:id', requireAdmin, t(req => v2db.deleteRel
   (req) => ({ action: 'release_note.delete', summary: `Removed What's New entry #${req.params.id}`, entity_type: 'release_note', entity_id: Number(req.params.id) })));
 router.post('/api/v2/release-notes/seen', t(req => v2db.markReleasesSeen(req.session.userId)));
 
-router.post('/api/v2/opportunities',          t(req => v2db.createOpportunity({ ...req.body, created_by: req.session.userId }),
+router.post('/api/v2/opportunities',          t(async req => {
+    const actor = await actorOf(req);
+    const r = await v2db.createOpportunity({ ...req.body, created_by: req.session.userId });
+    notify.notifyNewOpportunity(r.bid_id, actor?.name);
+    return r;
+  },
   async (req, r) => ({ action: 'bid.create_opportunity', summary: `Created opportunity ${await v2db.bidLabel(r.bid_id)}`, entity_type: 'bid', entity_id: r.bid_id })));
 router.post('/api/v2/leads',                  t(req => v2db.createOpportunity({ ...req.body, created_by: req.session.userId, stage: 'lead' }),
   async (req, r) => ({ action: 'bid.create_lead', summary: `Created lead ${await v2db.bidLabel(r.bid_id)}`, entity_type: 'bid', entity_id: r.bid_id })));
-router.post('/api/v2/bids/:id/promote-to-opportunity', t(async req => v2db.promoteLead(req.params.id, req.body, req.session.userId),
+router.post('/api/v2/bids/:id/promote-to-opportunity', t(async req => {
+    const actor = await actorOf(req);
+    const r = await v2db.promoteLead(req.params.id, req.body, req.session.userId);
+    notify.notifyNewOpportunity(req.params.id, actor?.name);
+    return r;
+  },
   async (req) => ({ action: 'bid.promote_lead', summary: `Promoted lead to opportunity ${await v2db.bidLabel(req.params.id)}`, entity_type: 'bid', entity_id: Number(req.params.id) })));
 router.post('/api/v2/bids/:id/demote-to-lead', t(async req => v2db.demoteToLead(req.params.id, req.session.userId),
   async (req) => ({ action: 'bid.demote_lead', summary: `Moved opportunity ${await v2db.bidLabel(req.params.id)} back to Lead`, entity_type: 'bid', entity_id: Number(req.params.id) })));
@@ -332,7 +342,12 @@ router.post('/api/v2/bids/:id/approve-to-bid', t(async req => {
     return r;
   }));
 router.post('/api/v2/bids/:id/unapprove-to-bid', t(async req => v2db.unapproveToBid(req.params.id, await actorOf(req))));
-router.post('/api/v2/bids/:id/close',         t(req => v2db.closeBid(req.params.id, req.body, req.session.userId),
+router.post('/api/v2/bids/:id/close',         t(async req => {
+    const actor = await actorOf(req);
+    const r = await v2db.closeBid(req.params.id, req.body, req.session.userId);
+    if (r.from_stage === 'opportunity') notify.notifyOpportunityClosed(r.bid_id, actor?.name);
+    return r;
+  },
   async (req) => ({ action: 'bid.close', summary: `Closed bid ${await v2db.bidLabel(req.params.id)} — ${req.body.close_reason || 'no reason given'}`, entity_type: 'bid', entity_id: Number(req.params.id) })));
 router.post('/api/v2/bids/:id/submissions',   t(req => v2db.addSubmission(req.params.id, req.body, req.session.userId),
   async (req) => ({ action: 'bid.add_submission', summary: `Added a submission to bid ${await v2db.bidLabel(req.params.id)}`, entity_type: 'bid', entity_id: Number(req.params.id) })));

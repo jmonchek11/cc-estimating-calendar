@@ -319,6 +319,7 @@ async function getProjectDetail(projectId) {
     rfi_due_date: b.rfi_due_date,
     rfi_due_time: b.rfi_due_time,
     folder_url: b.folder_url,
+    cm_portal_url: b.cm_portal_url,
     // Three-state — leave null (TBD) as null, don't collapse it to false,
     // or the edit form and badges can't tell "not yet known" from "No".
     certified_payroll: b.certified_payroll == null ? null : !!b.certified_payroll,
@@ -599,7 +600,7 @@ function etWallClockToUTCms(dateStr, timeStr) {
 
 async function getSettings() {
   const { Settings } = getModels();
-  return (await Settings.findById('company').lean()) || { fu_initial_days: 3, fu_recurring_days: 7, queue_notify_email: null };
+  return (await Settings.findById('company').lean()) || { fu_initial_days: 3, fu_recurring_days: 7, queue_notify_email: null, new_opportunity_notify_email: null };
 }
 
 function require_(data, fields) {
@@ -612,6 +613,13 @@ function require_(data, fields) {
 // value.
 function requireNonZeroAmount(amount) {
   if (Number(amount) === 0) throw new Error('Amount cannot be $0 — enter a positive or negative value');
+}
+
+// Project name is capped at 30 chars to match Foundation's own limit — the
+// frontend already enforces this via maxlength on the input, but it's
+// re-checked here too since Foundation is the real constraint, not this app.
+function requireMaxLength(label, value, max) {
+  if (value && value.length > max) throw new Error(`${label} must be ${max} characters or fewer (Foundation limit) — currently ${value.length}`);
 }
 
 async function loadBid(id) {
@@ -757,6 +765,7 @@ async function updateSettingsV2(data) {
   if ('fu_initial_days' in data) upd.fu_initial_days = Number(data.fu_initial_days);
   if ('fu_recurring_days' in data) upd.fu_recurring_days = Number(data.fu_recurring_days);
   if ('queue_notify_email' in data) upd.queue_notify_email = data.queue_notify_email ? String(data.queue_notify_email).trim() : null;
+  if ('new_opportunity_notify_email' in data) upd.new_opportunity_notify_email = data.new_opportunity_notify_email ? String(data.new_opportunity_notify_email).trim() : null;
   await M.Settings.findByIdAndUpdate('company', { $set: upd }, { upsert: true });
   return getSettings();
 }
@@ -767,13 +776,14 @@ async function updateSettingsV2(data) {
 // stage (real substance — a contact, plans, worth reviewing daily). Same
 // creation path for both since the fields captured are identical; only the
 // starting stage differs.
-async function createOpportunity({ project_id, project_name, notes, description, location, size_bucket, type_of_work, due_date, due_time, rfi_due_date, rfi_due_time, owner_id, source, company_ids, new_companies, contact_ids_by_company, new_contacts_by_company, created_by, stage }) {
+async function createOpportunity({ project_id, project_name, notes, description, location, size_bucket, type_of_work, due_date, due_time, rfi_due_date, rfi_due_time, owner_id, source, cm_portal_url, company_ids, new_companies, contact_ids_by_company, new_contacts_by_company, created_by, stage }) {
   const M = getModels();
   const startStage = stage === 'lead' ? 'lead' : 'opportunity';
   let pid = project_id ? Number(project_id) : null;
   let isNewProject = false;
   if (!pid) {
     require_({ project_name }, ['project_name']);
+    requireMaxLength('Project Title', project_name.trim(), 30);
     pid = await nextId('projects');
     await M.Project.create({ _id: pid, name: project_name.trim(), description: description || null, location: location || null, size_bucket: size_bucket || null, type_of_work: type_of_work || null, created_by: created_by || null });
     isNewProject = true;
@@ -793,7 +803,7 @@ async function createOpportunity({ project_id, project_name, notes, description,
   }
   const bidId = await nextId('bids');
   const ownerId = owner_id ? Number(owner_id) : (created_by ? Number(created_by) : null);
-  await M.Bid.create({ _id: bidId, project_id: pid, stage: startStage, notes: notes || null, due_date: due_date || null, due_time: due_time || null, rfi_due_date: rfi_due_date || null, rfi_due_time: rfi_due_time || null, owner_id: ownerId, source: source || null });
+  await M.Bid.create({ _id: bidId, project_id: pid, stage: startStage, notes: notes || null, due_date: due_date || null, due_time: due_time || null, rfi_due_date: rfi_due_date || null, rfi_due_time: rfi_due_time || null, owner_id: ownerId, source: source || null, cm_portal_url: cm_portal_url || null });
 
   const { newContacts } = await attachCustomersAndContacts(bidId, { company_ids, new_companies, contact_ids_by_company, new_contacts_by_company });
 
@@ -1541,7 +1551,7 @@ const ADMIN_EDITABLE = {
   // site company/contact (and array-entry targeting) this generic whitelist
   // path can't do.
   bid:            ['bid_number', 'estimator_id', 'salesperson_id', 'apm_id', 'pm_id', 'date_received', 'due_date', 'due_time', 'start_date',
-                   'drawing_stage', 'notes', 'jurisdiction', 'superseded', 'owner_id', 'source', 'rfi_due_date', 'rfi_due_time', 'folder_url',
+                   'drawing_stage', 'notes', 'jurisdiction', 'superseded', 'owner_id', 'source', 'rfi_due_date', 'rfi_due_time', 'folder_url', 'cm_portal_url',
                    'certified_payroll', 'tax_exempt', 'prevailing_wage'],
   job:            ['job_number', 'pm_id', 'apm_id', 'awarded_company_id', 'award_date', 'folder_url'],
   change_order:   ['co_number', 'name', 'due_date', 'start_date', 'estimator_id', 'notes',
@@ -1556,6 +1566,7 @@ async function adminUpdate(entity, id, data) {
   if (!Model) throw new Error('Unknown entity: ' + entity);
   // capture the pre-edit doc for project/company so renames can be recorded for replay
   const before = (entity === 'project' || entity === 'company') ? await Model.findById(Number(id)).lean() : null;
+  if (entity === 'project' && 'name' in data) requireMaxLength('Project Title', String(data.name || '').trim(), 30);
   const allowed = ADMIN_EDITABLE[entity];
   const upd = { updated_at: ts() };
   for (const f of allowed) {
@@ -1784,7 +1795,7 @@ async function closeBid(id, data, actorId) {
     project_id: bid.project_id, bid_id: bid._id, actor_id: actorId || null,
     payload: { from: fromStage, to: 'closed', project_name: proj?.name || null },
   });
-  return { bid_id: bid._id };
+  return { bid_id: bid._id, from_stage: fromStage };
 }
 
 // ── Sales/LE approval to move forward, ahead of full bid setup ───────────────
@@ -3354,6 +3365,7 @@ async function getDashboard(userId, mineOnly) {
   const pName = {}; projects.forEach(p => pName[p._id] = p.name);
   const coName = {}; companies.forEach(c => coName[c._id] = c.name);
   const bidById = {}; bids.forEach(b => bidById[b._id] = b);
+  const jobById = {}; jobs.forEach(j => jobById[j._id] = j);
 
   const isMyBid = (b) => !uid || b.estimator_id === uid || b.salesperson_id === uid || b.apm_id === uid || (b.sub_estimators || []).some(s => s.estimator_id === uid);
   const isMyCo = (c) => !uid || c.estimator_id === uid;
@@ -3383,6 +3395,9 @@ async function getDashboard(userId, mineOnly) {
   const overdueBids = subs.filter(s => s.is_current && s.outcome === 'pending' && s.next_followup_date && s.next_followup_date < today && (!uid || bidById[s.bid_id]?.salesperson_id === uid || bidById[s.bid_id]?.apm_id === uid));
   const overdueCos = myCos.filter(c => c.stage === 'submitted_co' && !c.superseded && c.next_followup_date && c.next_followup_date < today);
   const dueSoon = myBids.filter(b => ['active_bid', 'submitted'].includes(b.stage) && !b.superseded && b.due_date && b.due_date >= today && b.due_date <= ahead(14)).sort((a, b) => (a.due_date || '').localeCompare(b.due_date || ''));
+  // RFC/CO due dates on the same table as bids — same 14-day window, mirrors
+  // the stages dueSoon itself watches (active/submitted, not yet decided).
+  const coDueSoon = myCos.filter(c => ['active_co', 'submitted_co'].includes(c.stage) && !c.superseded && c.due_date && c.due_date >= today && c.due_date <= ahead(14));
 
   const myJobsPending = jobs.filter(j => !j.job_number).filter(isMyJob);
 
@@ -3416,7 +3431,10 @@ async function getDashboard(userId, mineOnly) {
       list: awardedYTD.slice(0, 8).sort((a,b)=>(b.award_date||'').localeCompare(a.award_date||'')).map(b => ({ id: b._id, project_id: b.project_id, bid_number: b.bid_number, project: pName[b.project_id], amount: b.estimate_amount, award_date: b.award_date, company: b.awarded_company_id ? coName[b.awarded_company_id] : null })),
       byMonth },
     overdueBidCount: overdueBids.length, overdueCoCount: overdueCos.length,
-    dueSoon: dueSoon.slice(0, 15).map(b => ({ id: b._id, project_id: b.project_id, bid_number: b.bid_number, project: pName[b.project_id], due_date: b.due_date, due_time: b.due_time, stage: b.stage })),
+    dueSoon: [
+      ...dueSoon.map(b => ({ type: 'bid', id: b._id, project_id: b.project_id, bid_number: b.bid_number, project: pName[b.project_id], due_date: b.due_date, due_time: b.due_time, stage: b.stage })),
+      ...coDueSoon.map(c => { const job = jobById[c.job_id]; return { type: 'co', id: c._id, project_id: job?.project_id || null, co_number: c.co_number, project: job ? (pName[job.project_id] || '—') : '—', due_date: c.due_date, due_time: null, stage: c.stage }; }),
+    ].sort((a, b) => (a.due_date || '').localeCompare(b.due_date || '')).slice(0, 15),
     jobsPending: myJobsPending.length,
   };
 }

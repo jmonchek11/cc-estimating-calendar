@@ -1035,6 +1035,15 @@ async function renderSettings() {
       </div>
     </div>
 
+    <div class="card" style="margin-bottom:14px">
+      <div style="padding:12px 16px;border-bottom:1px solid var(--border);font-weight:700;font-size:14px">💡 New Opportunity Notification</div>
+      <div style="padding:14px 16px">
+        <div class="v2-field"><label>Email to notify the moment a new Bid Opportunity is entered</label>
+          <input id="set-new-opp-email" type="text" placeholder="e.g. cwinters@libertyintegrated.com" value="${esc(settings.new_opportunity_notify_email || '')}" ${isAdmin ? '' : 'disabled'} style="max-width:320px"></div>
+        ${isAdmin ? `<button class="v2-btn blue" onclick="actSaveNewOppEmail()">Save</button>` : ''}
+      </div>
+    </div>
+
     ${isAdmin ? `
     <div class="card">
       <div style="padding:12px 16px;border-bottom:1px solid var(--border);font-weight:700;font-size:14px">✉️ Email Tools</div>
@@ -1085,6 +1094,12 @@ async function actSaveFollowupSettings() {
 async function actSaveQueueEmail() {
   try {
     await api('PUT', '/api/v2/settings', { queue_notify_email: document.getElementById('set-queue-email').value.trim() });
+    alert('Saved.');
+  } catch (e) { alert('Failed: ' + e.message); }
+}
+async function actSaveNewOppEmail() {
+  try {
+    await api('PUT', '/api/v2/settings', { new_opportunity_notify_email: document.getElementById('set-new-opp-email').value.trim() });
     alert('Saved.');
   } catch (e) { alert('Failed: ' + e.message); }
 }
@@ -1589,16 +1604,22 @@ let FILTER_STATE = {};  // stageKey -> { q, person, mine, sort }
 // would if they weren't logged in, while estimators/salespeople still get
 // "mine" as the default.
 function defaultMine() { return !!CURRENT_USER && CURRENT_USER.role !== 'oversight'; }
-function filterState(key) { return (FILTER_STATE[key] = FILTER_STATE[key] || { q: '', person: '', mine: defaultMine(), sort: 'due' }); }
+function filterState(key) { return (FILTER_STATE[key] = FILTER_STATE[key] || { q: '', person: '', mine: defaultMine(), sort: 'due', type: '' }); }
 
 function personOpts() {
   // Only a real salesperson/estimator gets the base entry — used to fall
   // through to 'est' for ANY other role (oversight, apm, …), which meant
   // someone whose role wasn't actually estimator or sales still got a
   // mislabeled base entry, plus a second "— APM" entry if they were also
-  // is_apm-flagged (visibly duplicated, e.g. "Dillon Dosenbach" twice).
+  // is_apm-flagged. This second entry is deliberate, not a duplicate — a
+  // dual-role person (e.g. Salesperson + APM) is filterable under either
+  // capacity separately, since a bid can list them as one without the
+  // other. Reported as looking like an accidental dupe (Keegan, Kevin
+  // Clark, Jacob Kiefer all hold both roles) — labeled the base entry
+  // with its own role too so the two rows read as distinct filters at a
+  // glance instead of the same name twice.
   return [
-    ...META.team.filter(t => t.role === 'sales' || t.role === 'estimator').map(t => [`${t.role === 'sales' ? 'sal' : 'est'}:${t.id}`, `${t.name} (${t.initials})`]),
+    ...META.team.filter(t => t.role === 'sales' || t.role === 'estimator').map(t => [`${t.role === 'sales' ? 'sal' : 'est'}:${t.id}`, `${t.name} (${t.initials}) — ${t.role === 'sales' ? 'Salesperson' : 'Estimator'}`]),
     ...META.team.filter(t => t.is_apm).map(t => [`apm:${t.id}`, `${t.name} (${t.initials}) — APM`]),
   ];
 }
@@ -1615,6 +1636,11 @@ function filterBarHtml(key, sortOpts) {
     <select id="flt-sort-${key}" onchange="onListFilterChange('${key}')">
       ${sortOpts.map(([v, l]) => `<option value="${v}" ${v === s.sort ? 'selected' : ''}>Sort: ${esc(l)}</option>`).join('')}
     </select>
+    ${(key === 'queue' || key === 'opportunity') ? `<select id="flt-type-${key}" onchange="onListFilterChange('${key}')">
+      <option value="" ${s.type === '' ? 'selected' : ''}>Bids &amp; Change Orders</option>
+      <option value="bid" ${s.type === 'bid' ? 'selected' : ''}>Bids only</option>
+      <option value="co" ${s.type === 'co' ? 'selected' : ''}>Change Orders only</option>
+    </select>` : ''}
     ${CURRENT_USER ? `<label class="mine"><input type="checkbox" id="flt-mine-${key}" ${s.mine ? 'checked' : ''} onchange="onListFilterChange('${key}')"> Mine only</label>` : ''}
     <span class="clear-link" onclick="clearListFilters('${key}')">Clear</span>
   </div>`;
@@ -1625,7 +1651,7 @@ function clearListFilters(key) {
   // upgrade that to the stage-appropriate default (recently submitted /
   // recently awarded) the moment they render, so this doesn't need to know
   // which stage-specific sort was in effect before clearing.
-  FILTER_STATE[key] = { q: '', person: '', mine: defaultMine(), sort: 'due' };
+  FILTER_STATE[key] = { q: '', person: '', mine: defaultMine(), sort: 'due', type: '' };
   if (VIEW.name === 'bidlist') renderBidList(VIEW.arg); else renderCoList(VIEW.arg);
 }
 
@@ -1635,6 +1661,7 @@ function onListFilterChange(key) {
   s.person = document.getElementById('flt-person-' + key)?.value || '';
   s.sort = document.getElementById('flt-sort-' + key)?.value || s.sort;
   s.mine = !!document.getElementById('flt-mine-' + key)?.checked;
+  s.type = document.getElementById('flt-type-' + key)?.value || '';
   if (VIEW.name === 'bidlist') renderBidListBody(key); else renderCoListBody(key);
 }
 
@@ -1706,6 +1733,8 @@ function renderBidListBody(stage) {
   const meta = BID_LIST_META[stage];
   const s = filterState(stage);
   let rows = LIST_STATE[stage] || [];
+  if (s.type === 'bid') rows = rows.filter(r => r.type !== 'co');
+  else if (s.type === 'co') rows = rows.filter(r => r.type === 'co');
   rows = applyTextSearch(rows, s.q, b => [b.project, b.bid_number, b.co_number, b.name, ...b.customers]);
   rows = applyPersonMine(rows, s);
   const sorters = {
@@ -2111,12 +2140,13 @@ async function renderDashboard() {
     </div>
     <div class="dashboard-grid">
       <div class="card">
-        <div class="section-title">📅 Upcoming Due Dates — next 14 days</div>
+        <div class="section-title">📅 Upcoming Due Dates — next 14 days (bids &amp; RFCs)</div>
         ${d.dueSoon.length ? d.dueSoon.map(b => {
           const dot = b.due_date <= today ? '#dc2626' : '#166534';
-          return `<div class="proj-row" onclick="openBidFlyout(${b.project_id},${b.id})">
+          const label = b.type === 'co' ? esc(b.co_number) : (b.bid_number ? '#'+esc(b.bid_number) : '');
+          return `<div class="proj-row" onclick="${b.type === 'co' ? `openCoFlyout(${b.project_id},${b.id})` : `openBidFlyout(${b.project_id},${b.id})`}">
             <div style="flex:1"><strong style="font-size:13px">${esc(b.project || '—')}</strong>
-              <span style="color:var(--text-muted);font-size:12px">${b.bid_number ? '#'+esc(b.bid_number) : ''} · ${STAGE[b.stage]}</span></div>
+              <span style="color:var(--text-muted);font-size:12px">${b.type === 'co' ? '🔧 ' : ''}${label} · ${STAGE[b.stage]}</span></div>
             <div style="text-align:right">
               <div style="font-size:12px;font-weight:700;color:${dot}">Due ${fmtD(b.due_date)}${b.due_time ? ' · ' + fmtTimeShort(b.due_time) : ''}</div>
               <div style="font-size:11px;color:${dot}">${daysUntilLabel(b.due_date)}</div>
@@ -2656,6 +2686,7 @@ function bidNode(b, proj) {
   if (!b.customers.length) metaBits.push('<span style="color:#dc2626">no customer</span>');
   if (b.owner) metaBits.push(`Added by ${ini(b.owner)}`);
   if (b.source) metaBits.push(`via ${esc(b.source)}`);
+  if (b.cm_portal_url) metaBits.push(`<a href="${esc(b.cm_portal_url)}" target="_blank" rel="noopener" style="color:#2563eb">🔗 CM Portal</a>`);
   if (b.awarded_company) metaBits.push(`Won by <strong style="color:#166534">${esc(b.awarded_company.name)}</strong> ${fmtD(b.award_date)}`);
   if (b.estimator) metaBits.push(`Est. ${ini(b.estimator)}`);
   b.sub_estimators.forEach(s => metaBits.push(`${ini(s)}<span style="font-size:10px">${esc(s.scope)}<a href="#" onclick="event.preventDefault();actRemoveSubEstimator(${b.id},${s.id},'${escJs(s.scope)}')" style="color:#dc2626;margin-left:2px">✕</a></span>`));
@@ -3209,10 +3240,11 @@ function showForm(title, fields, onSubmit, submitLabel = 'Save', submitClass = '
         <div class="v2-combo">
           <div class="v2-combo-box">
             <span id="cc-${f.id}-chips"></span>
-            <input id="vf-${f.id}" class="v2-combo-input" type="text" autocomplete="off" placeholder="${esc(f.placeholder || 'Type to search…')}">
+            <input id="vf-${f.id}" class="v2-combo-input" type="text" autocomplete="off" ${f.maxLength ? `maxlength="${f.maxLength}"` : ''} placeholder="${esc(f.placeholder || 'Type to search…')}">
           </div>
           <div class="v2-combo-menu" id="cc-${f.id}-menu"></div>
-        </div></div>`;
+        </div>
+        ${f.hint ? `<div style="font-size:11px;color:var(--text-muted);margin-top:4px">${esc(f.hint)}</div>` : ''}</div>`;
     }
     if (f.type === 'textarea') {
       return `<div class="v2-field"><label>${f.label}${req}</label>
@@ -3234,7 +3266,8 @@ function showForm(title, fields, onSubmit, submitLabel = 'Save', submitClass = '
       return `<div id="custom-${f.id}"></div>`;
     }
     return `<div class="v2-field"><label>${f.label}${req}</label>
-      <input id="vf-${f.id}" type="${f.type || 'text'}" value="${esc(f.value ?? '')}" placeholder="${esc(f.placeholder || '')}" ${f.type === 'number' ? 'step="any"' : ''}></div>`;
+      <input id="vf-${f.id}" type="${f.type || 'text'}" value="${esc(f.value ?? '')}" placeholder="${esc(f.placeholder || '')}" ${f.type === 'number' ? 'step="any"' : ''} ${f.maxLength ? `maxlength="${f.maxLength}"` : ''}>
+      ${f.hint ? `<div style="font-size:11px;color:var(--text-muted);margin-top:4px">${esc(f.hint)}</div>` : ''}</div>`;
   }).join('');
 
   ov.innerHTML = `
@@ -3446,7 +3479,8 @@ function newBidForm({ projectId, projectName } = {}) {
     title = `+ Add Bid — ${esc(projectName)}`;
   } else {
     fields.push({ id: 'project_id', label: 'Project', type: 'project', multi: false, required: true,
-      newKey: 'project_name', options: projectOpts(), placeholder: 'Type project name…' });
+      newKey: 'project_name', options: projectOpts(), placeholder: 'Type project name…',
+      maxLength: 30, hint: 'Max 30 characters (Foundation limit). Suggested format: "Building name/# - Type of work" — e.g. "Merck B53 Controls" (customer isn\'t included — it\'s tracked separately).' });
   }
   fields.push(...startBidFields());
   showForm(title, fields, data => {
@@ -3520,7 +3554,8 @@ async function actNewOpportunity() {
 
   showForm('💡 New Opportunity', [
     { id: 'project_id', label: 'Project Title', type: 'project', multi: false, required: true,
-      newKey: 'project_name', options: projectOpts(), placeholder: 'Type project name…' },
+      newKey: 'project_name', options: projectOpts(), placeholder: 'Type project name…',
+      maxLength: 30, hint: 'Max 30 characters (Foundation limit). Suggested format: "Building name/# - Type of work" — e.g. "Merck B53 Controls" (customer isn\'t included — it\'s tracked separately).' },
     { id: 'owner_id', label: 'Who Added the Opportunity', type: 'select', required: true, options: teamOpts(), value: CURRENT_USER?.id },
     { id: 'source', label: 'Source', type: 'select', required: true, options: OPPORTUNITY_SOURCE_OPTIONS },
     { id: 'due_date', label: 'Due Date', type: 'date', required: true },
@@ -3535,6 +3570,7 @@ async function actNewOpportunity() {
     { id: 'notes', label: 'Additional Notes — why are we considering this?', type: 'textarea', required: true, placeholder: 'Why are we considering this?' },
     { id: 'rfi_due_date', label: 'RFI Due Date (not required)', type: 'date' },
     { id: 'rfi_due_time', label: 'RFI Due Time (optional)', type: 'time' },
+    { id: 'cm_portal_url', label: 'CM/GC Bid Portal Link (not required)', type: 'text', placeholder: 'https://…', hint: 'The construction manager\'s own bidding site, if the invite included one — click straight through for bid/no-bid review.' },
   ], data => {
     const contact_ids_by_company = {};
     const new_contacts_by_company = {};
@@ -3609,7 +3645,8 @@ function openNewContactFollowup(contacts) {
 async function actNewLead() {
   showForm('🌱 New Lead', [
     { id: 'project_id', label: 'Project', type: 'project', multi: false, required: true,
-      newKey: 'project_name', options: projectOpts(), placeholder: 'Type project name…' },
+      newKey: 'project_name', options: projectOpts(), placeholder: 'Type project name…',
+      maxLength: 30, hint: 'Max 30 characters (Foundation limit). Suggested format: "Building name/# - Type of work" — e.g. "Merck B53 Controls" (customer isn\'t included — it\'s tracked separately).' },
     { id: 'owner_id', label: 'Lead Owner', type: 'select', required: true, options: teamOpts(), value: CURRENT_USER?.id },
     { id: 'source', label: 'Source (where did this come from?)', type: 'text', placeholder: 'iSqFt, BuildingConnected, email invite, referral, phone call…' },
     { id: 'description', label: 'Description', type: 'textarea', placeholder: 'Brief description of what we heard…' },
@@ -3685,7 +3722,8 @@ async function actDemoteToLead(bidId) {
 function actNewLegacyJob() {
   showForm('🏭 New Legacy Job (bid pre-dates system)', [
     { id: 'project_id', label: 'Project', type: 'project', multi: false, required: true,
-      newKey: 'project_name', options: projectOpts(), placeholder: 'Type project name…' },
+      newKey: 'project_name', options: projectOpts(), placeholder: 'Type project name…',
+      maxLength: 30, hint: 'Max 30 characters (Foundation limit). Suggested format: "Building name/# - Type of work" — e.g. "Merck B53 Controls" (customer isn\'t included — it\'s tracked separately).' },
     { id: 'job_number', label: 'Job # (if known)', type: 'text', placeholder: '26-XXXX' },
     { id: 'awarded_company_id', label: 'Customer (who awarded us)', type: 'company', multi: false, newKey: 'new_company', options: companyOpts() },
     { id: 'pm_id', label: 'PM', type: 'select', emptyLabel: 'TBD', options: teamOpts(['pm', 'sales', 'estimator']) },
@@ -3830,7 +3868,8 @@ function actEditProject(projectId) {
   const name = (ALL_PROJECTS.find(p => p.id === projectId) || {}).name || '';
   const d = DETAIL_CACHE[projectId] || {};
   showForm('✏️ Edit Project (admin)', [
-    { id: 'name', label: 'Project Name', type: 'text', required: true, value: name },
+    { id: 'name', label: 'Project Name', type: 'text', required: true, value: name, maxLength: 30,
+      hint: 'Max 30 characters (Foundation limit). Suggested format: "Building name/# - Type of work".' },
     { id: 'description', label: 'Project Description', type: 'textarea', value: d.description, placeholder: 'Brief description of the scope of work…' },
     { id: 'location', label: 'Location', type: 'text', value: d.location, placeholder: 'City, State or site address…' },
     { id: 'size_bucket', label: 'Project Size', type: 'select', emptyLabel: 'Unknown', value: d.size_bucket, options: PROJECT_SIZE_BUCKETS },
@@ -3875,6 +3914,7 @@ function actEditBid(bidId) {
     // once a bid was already past those two moments. PM won't always equal
     // Salesperson, so this needs its own field rather than reusing that one.
     { id: 'pm_id', label: 'PM', type: 'select', emptyLabel: 'TBD', options: teamOpts(['pm', 'sales', 'estimator']), value: b.pm?.id },
+    { id: 'cm_portal_url', label: 'CM/GC Bid Portal Link (not required)', type: 'text', value: b.cm_portal_url, placeholder: 'https://…' },
   );
   if (showSubEst) fields.push({ id: 'sub_est_section', type: 'custom' });
   if (b.stage !== 'opportunity') {

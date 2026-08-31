@@ -89,6 +89,7 @@ const BidSchema = new mongoose.Schema({
   rfi_due_date:   { type: String, default: null },               // official RFI (Request for Information) cutoff, when a project has one — independent of due_date/stage
   rfi_due_time:   { type: String, default: null },               // "HH:MM", 24-hour — optional
   folder_url:     { type: String, default: null },               // link to THIS bid's own OneDrive folder — a new folder is created per bid (not per project); at award, the team renames it from "bid# - bid name" to "job# - job name" but the link itself stays valid
+  cm_portal_url:  { type: String, default: null },               // optional — the GC/CM's own bid portal/invite link, captured at opportunity intake so bid/no-bid review can click straight through instead of digging up the email
   // Nullable — null means "not yet known" (TBD), distinct from a real "No".
   // Whoever starts the bid often can't answer this yet, so it defaults to
   // TBD there; submitBid() requires a real answer before the bid can be
@@ -396,6 +397,10 @@ const SettingsSchema = new mongoose.Schema({
   // kick off setup) — configurable rather than hardcoded since that's a
   // person/role, not something derivable from the data. Null/unset = no email.
   queue_notify_email: { type: String, default: null },
+  // Who gets emailed the moment a new Bid Opportunity is entered (Carrie
+  // wanted Connor specifically, ahead of the 8am meeting) — same
+  // configurable-not-hardcoded reasoning as queue_notify_email above.
+  new_opportunity_notify_email: { type: String, default: null },
 }, opts);
 
 const CounterSchema = new mongoose.Schema({
