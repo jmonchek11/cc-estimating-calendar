@@ -2533,20 +2533,24 @@ function customerRowHtml(b, cust) {
     const live = current.is_current && current.outcome === 'pending';
     if (live && ['submitted', 'awarded'].includes(b.stage)) {
       const awardBtn = b.stage === 'submitted' ? `<button class="bc-btn-quiet" onclick="actAwardSubmission(${current.id})">Awarded</button>` : '';
+      // GC Outcome is independent of our own decision with this customer —
+      // a GC can be known to have lost the overall job before (or without)
+      // us ever separately deciding our own outcome with them, and hearing
+      // that settles ours automatically (see setGcOutcome).
       actionsHtml = `<div class="bc-row-actions">
         <button class="bc-btn-quiet" onclick="actLogFollowup('bid_submission',${current.id})">Log Follow-up</button>
         ${awardBtn}
         <button class="bc-btn-quiet" onclick="actNotAwardSubmission(${current.id})">Not Awarded</button>
+        <button class="bc-btn-quiet" onclick="actSetGcOutcome(${current.id})">GC Outcome</button>
       </div>`;
     }
     if ((current.followups || []).length) followupsHtml = `<div style="margin-top:6px">${current.followups.map(fuRow).join('')}</div>`;
     if (current.notes) subMetaExtra += ` · ${esc(current.notes)}`;
     if (current.not_awarded_notes) subMetaExtra += ` · <span style="color:#991b1b">${esc(current.not_awarded_notes)}</span>`;
     if (current.outcome === 'not_awarded') {
-      subMetaExtra += current.gc_awarded === true ? ` · <span style="color:#92400e">GC won it, picked someone else</span>`
-        : current.gc_awarded === false ? ` · <span style="color:#6b7280">GC never won the job</span>`
-        : canEditSub ? ` · <a href="#" onclick="event.preventDefault();actEditSubmission(${current.id})" style="color:#2563eb">Did the GC win it? — set</a>`
-        : ` · <span style="color:var(--text-muted)">GC outcome unknown</span>`;
+      subMetaExtra += current.gc_awarded === true ? ` · <span style="color:#92400e">GC won it, picked someone else</span> <a href="#" onclick="event.preventDefault();actSetGcOutcome(${current.id})" style="font-size:11px;color:#2563eb">edit</a>`
+        : current.gc_awarded === false ? ` · <span style="color:#6b7280">GC never won the job</span> <a href="#" onclick="event.preventDefault();actSetGcOutcome(${current.id})" style="font-size:11px;color:#2563eb">edit</a>`
+        : ` · <a href="#" onclick="event.preventDefault();actSetGcOutcome(${current.id})" style="color:#2563eb">Did the GC win it? — set</a>`;
     }
   } else if (b.stage === 'active_bid') {
     right = `<div class="bc-co-fu" style="color:#92400e;font-weight:700">awaiting submission</div>`;
@@ -4345,6 +4349,27 @@ function actNotAwardSubmission(submissionId) {
     { id: 'gc_awarded', label: 'Did the GC still win this job?', type: 'select', emptyLabel: "Don't know yet",
       options: [{ value: '1', label: 'Yes — they won it, picked someone else' }, { value: '0', label: 'No — they didn\'t win it either' }] },
   ], data => api('POST', `/api/v2/submissions/${submissionId}/not-awarded`, data), 'Confirm Not Awarded', 'red');
+}
+
+// A GC's own fate (did they win the overall job from the building owner)
+// is independent of, and often known before, our own decision with them —
+// they bid one package number covering every trade (mech, plumbing, elec,
+// etc), and any GC bidding that job, including ones LIS never even
+// submitted to, can win it. Reachable any time, not gated behind first
+// marking Not Awarded — if the GC didn't win the job at all, there's no
+// path left for them to award LIS anything, so a still-pending submission
+// settles to Not Awarded automatically (see setGcOutcome).
+function actSetGcOutcome(submissionId) {
+  const s = findSubmission(submissionId);
+  showForm(`GC Outcome — ${esc(s?.company?.name || 'customer')}`, [
+    { id: 'gc_awarded', label: 'Did the GC win this job?', type: 'select', emptyLabel: "Don't know yet",
+      value: s?.gc_awarded == null ? '' : (s.gc_awarded ? 1 : 0),
+      options: [{ value: '1', label: 'Yes — they won the job' }, { value: '0', label: "No — they didn't win it" }] },
+  ], async data => {
+    const r = await api('POST', `/api/v2/submissions/${submissionId}/gc-outcome`, data);
+    if (r.settled_our_outcome) alert(`Since ${s?.company?.name || 'this GC'} didn't win the job, this submission has been set to Not Awarded too.`);
+    return r;
+  }, 'Save', 'blue');
 }
 
 // Prompts for Estimator/PM right at the point of committing to bid it —

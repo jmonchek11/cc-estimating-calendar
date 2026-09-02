@@ -3201,6 +3201,37 @@ async function setSubmissionGcAwarded(submissionId, gc_awarded) {
   return { submission_id: sub._id };
 }
 
+// The everyday version of the above — reachable on any submission,
+// regardless of our own outcome, since hearing whether the GC itself won
+// the job is often known well before (or independent of) knowing whether
+// LIS specifically got picked. A GC bids their trade packages (mech,
+// plumbing, elec, etc.) as one number to the building owner; multiple GCs
+// can be bidding the same job, and any of them can lose the job entirely to
+// a GC LIS never even submitted to. If a GC didn't win the job at all,
+// there's no path left for them to have awarded LIS anything, so a
+// still-pending submission with that GC settles to not_awarded
+// automatically — no need to separately go mark it.
+async function setGcOutcome(submissionId, gcAwarded, actorId) {
+  const M = getModels();
+  const sub = await loadSubmission(submissionId);
+  const bid = await loadBid(sub.bid_id);
+  const val = gcAwarded === '' || gcAwarded == null ? null : (Number(gcAwarded) === 1);
+  const upd = { gc_awarded: val, updated_at: ts() };
+  const settlesOurOutcome = val === false && sub.outcome === 'pending';
+  if (settlesOurOutcome) {
+    upd.outcome = 'not_awarded';
+    upd.date_not_awarded = today();
+    upd.not_awarded_notes = sub.not_awarded_notes || 'GC did not win the job.';
+    upd.next_followup_date = null;
+  }
+  await M.BidSubmission.updateOne({ _id: sub._id }, { $set: upd });
+  if (settlesOurOutcome) {
+    await recomputeBidFollowup(bid._id);
+    await reconcileBidOutcome(bid._id, actorId);
+  }
+  return { submission_id: sub._id, settled_our_outcome: settlesOurOutcome };
+}
+
 // personId matches a bid via estimator/salesperson/sub-estimator, a job via
 // PM (falling back to the winning bid's estimator/salesperson, same
 // fallback getDashboard's mineOnly filter uses), and a CO via its own
@@ -4264,6 +4295,6 @@ module.exports = {
   logActivity, getActivityLog, undoActivity, bidLabel, coLabel, loadBid, loadCO, loadSubmission,
   mergeContacts, deleteCompany, deleteChangeOrder,
   getVendors, VENDOR_CATEGORIES,
-  getReports, getGcAwardReviewQueue, setSubmissionGcAwarded, projectLabel,
+  getReports, getGcAwardReviewQueue, setSubmissionGcAwarded, setGcOutcome, projectLabel,
   getOrCreateCalendarToken, resetCalendarToken, getTeamMemberIdByCalendarToken, buildIcsFeed, getEstimatorAvailability,
 };
