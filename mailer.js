@@ -373,6 +373,18 @@ function emailNewOpportunity(bid, actorName) {
   };
 }
 
+function emailCoQueued(co, actorName) {
+  return {
+    subject: `🔧 Change Order Ready for Setup — ${co.project_name || 'Unnamed'}`,
+    html: base(`
+      ${iconHeading(`${APP_URL}/icon-active-bids.png`, 'CO Approved — Queue')}
+      <p><strong>${actorName}</strong> just approved this change order to move forward — it's in the Queue and ready for setup.</p>
+      ${bidTable(co)}
+      ${buttonRow({ href: APP_URL, label: 'Open App' })}
+    `),
+  };
+}
+
 function emailApprovedToBid(bid, actorName) {
   return {
     subject: `📋 Ready for Setup — ${bid.project_name || bid.bid_number || 'Unnamed'}`,

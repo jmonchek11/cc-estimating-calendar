@@ -1044,6 +1044,15 @@ async function renderSettings() {
       </div>
     </div>
 
+    <div class="card" style="margin-bottom:14px">
+      <div style="padding:12px 16px;border-bottom:1px solid var(--border);font-weight:700;font-size:14px">🔧 CO Queue Notification</div>
+      <div style="padding:14px 16px">
+        <div class="v2-field"><label>Email to notify when a Change Order is approved into the Queue</label>
+          <input id="set-co-queue-email" type="text" placeholder="e.g. tbray@libertyintegrated.com" value="${esc(settings.co_queue_notify_email || '')}" ${isAdmin ? '' : 'disabled'} style="max-width:320px"></div>
+        ${isAdmin ? `<button class="v2-btn blue" onclick="actSaveCoQueueEmail()">Save</button>` : ''}
+      </div>
+    </div>
+
     ${isAdmin ? `
     <div class="card">
       <div style="padding:12px 16px;border-bottom:1px solid var(--border);font-weight:700;font-size:14px">✉️ Email Tools</div>
@@ -1100,6 +1109,12 @@ async function actSaveQueueEmail() {
 async function actSaveNewOppEmail() {
   try {
     await api('PUT', '/api/v2/settings', { new_opportunity_notify_email: document.getElementById('set-new-opp-email').value.trim() });
+    alert('Saved.');
+  } catch (e) { alert('Failed: ' + e.message); }
+}
+async function actSaveCoQueueEmail() {
+  try {
+    await api('PUT', '/api/v2/settings', { co_queue_notify_email: document.getElementById('set-co-queue-email').value.trim() });
     alert('Saved.');
   } catch (e) { alert('Failed: ' + e.message); }
 }
@@ -2140,7 +2155,7 @@ async function renderDashboard() {
     </div>
     <div class="dashboard-grid">
       <div class="card">
-        <div class="section-title">📅 Upcoming Due Dates — next 14 days (bids &amp; RFCs)</div>
+        <div class="section-title">📅 Upcoming Due Dates (bids &amp; RFCs)${d.dueSoonTotal > d.dueSoon.length ? ` <span style="color:var(--text-muted);font-weight:400;font-size:11px">— showing ${d.dueSoon.length} of ${d.dueSoonTotal}, most overdue/soonest first</span>` : ''}</div>
         ${d.dueSoon.length ? d.dueSoon.map(b => {
           const dot = b.due_date <= today ? '#dc2626' : '#166534';
           const label = b.type === 'co' ? esc(b.co_number) : (b.bid_number ? '#'+esc(b.bid_number) : '');
@@ -2151,7 +2166,7 @@ async function renderDashboard() {
               <div style="font-size:12px;font-weight:700;color:${dot}">Due ${fmtD(b.due_date)}${b.due_time ? ' · ' + fmtTimeShort(b.due_time) : ''}</div>
               <div style="font-size:11px;color:${dot}">${daysUntilLabel(b.due_date)}</div>
             </div>
-          </div>`; }).join('') : '<div class="text-muted" style="font-size:13px;padding:6px 0">Nothing due in the next 14 days</div>'}
+          </div>`; }).join('') : '<div class="text-muted" style="font-size:13px;padding:6px 0">Nothing with a due date right now</div>'}
       </div>
       <div class="card">
         <div class="section-title" style="color:var(--success)">✅ Awarded — YTD</div>

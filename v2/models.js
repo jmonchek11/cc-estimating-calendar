@@ -401,6 +401,10 @@ const SettingsSchema = new mongoose.Schema({
   // wanted Connor specifically, ahead of the 8am meeting) — same
   // configurable-not-hardcoded reasoning as queue_notify_email above.
   new_opportunity_notify_email: { type: String, default: null },
+  // Who gets emailed when a CO request is approved into the Queue (Jess
+  // wanted Thomas specifically, to kick off setup) — same pattern as the
+  // two settings above.
+  co_queue_notify_email: { type: String, default: null },
 }, opts);
 
 const CounterSchema = new mongoose.Schema({

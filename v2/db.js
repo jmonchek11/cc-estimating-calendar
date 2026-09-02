@@ -600,7 +600,7 @@ function etWallClockToUTCms(dateStr, timeStr) {
 
 async function getSettings() {
   const { Settings } = getModels();
-  return (await Settings.findById('company').lean()) || { fu_initial_days: 3, fu_recurring_days: 7, queue_notify_email: null, new_opportunity_notify_email: null };
+  return (await Settings.findById('company').lean()) || { fu_initial_days: 3, fu_recurring_days: 7, queue_notify_email: null, new_opportunity_notify_email: null, co_queue_notify_email: null };
 }
 
 function require_(data, fields) {
@@ -766,6 +766,7 @@ async function updateSettingsV2(data) {
   if ('fu_recurring_days' in data) upd.fu_recurring_days = Number(data.fu_recurring_days);
   if ('queue_notify_email' in data) upd.queue_notify_email = data.queue_notify_email ? String(data.queue_notify_email).trim() : null;
   if ('new_opportunity_notify_email' in data) upd.new_opportunity_notify_email = data.new_opportunity_notify_email ? String(data.new_opportunity_notify_email).trim() : null;
+  if ('co_queue_notify_email' in data) upd.co_queue_notify_email = data.co_queue_notify_email ? String(data.co_queue_notify_email).trim() : null;
   await M.Settings.findByIdAndUpdate('company', { $set: upd }, { upsert: true });
   return getSettings();
 }
@@ -3402,10 +3403,12 @@ async function getDashboard(userId, mineOnly) {
 
   const overdueBids = subs.filter(s => s.is_current && s.outcome === 'pending' && s.next_followup_date && s.next_followup_date < today && (!uid || bidById[s.bid_id]?.salesperson_id === uid || bidById[s.bid_id]?.apm_id === uid));
   const overdueCos = myCos.filter(c => c.stage === 'submitted_co' && !c.superseded && c.next_followup_date && c.next_followup_date < today);
-  const dueSoon = myBids.filter(b => ['active_bid', 'submitted'].includes(b.stage) && !b.superseded && b.due_date && b.due_date >= today && b.due_date <= ahead(14)).sort((a, b) => (a.due_date || '').localeCompare(b.due_date || ''));
-  // RFC/CO due dates on the same table as bids — same 14-day window, mirrors
-  // the stages dueSoon itself watches (active/submitted, not yet decided).
-  const coDueSoon = myCos.filter(c => ['active_co', 'submitted_co'].includes(c.stage) && !c.superseded && c.due_date && c.due_date >= today && c.due_date <= ahead(14));
+  // No date window (was "next 14 days," which hid both overdue items and
+  // anything further out) — every active/submitted bid or CO with a due
+  // date, oldest/most-overdue first, so the ones that need attention most
+  // sort to the top of the card's fixed display slice below.
+  const dueSoon = myBids.filter(b => ['active_bid', 'submitted'].includes(b.stage) && !b.superseded && b.due_date).sort((a, b) => (a.due_date || '').localeCompare(b.due_date || ''));
+  const coDueSoon = myCos.filter(c => ['active_co', 'submitted_co'].includes(c.stage) && !c.superseded && c.due_date);
 
   const myJobsPending = jobs.filter(j => !j.job_number).filter(isMyJob);
 
@@ -3439,10 +3442,11 @@ async function getDashboard(userId, mineOnly) {
       list: awardedYTD.slice(0, 8).sort((a,b)=>(b.award_date||'').localeCompare(a.award_date||'')).map(b => ({ id: b._id, project_id: b.project_id, bid_number: b.bid_number, project: pName[b.project_id], amount: b.estimate_amount, award_date: b.award_date, company: b.awarded_company_id ? coName[b.awarded_company_id] : null })),
       byMonth },
     overdueBidCount: overdueBids.length, overdueCoCount: overdueCos.length,
+    dueSoonTotal: dueSoon.length + coDueSoon.length,
     dueSoon: [
       ...dueSoon.map(b => ({ type: 'bid', id: b._id, project_id: b.project_id, bid_number: b.bid_number, project: pName[b.project_id], due_date: b.due_date, due_time: b.due_time, stage: b.stage })),
       ...coDueSoon.map(c => { const job = jobById[c.job_id]; return { type: 'co', id: c._id, project_id: job?.project_id || null, co_number: c.co_number, project: job ? (pName[job.project_id] || '—') : '—', due_date: c.due_date, due_time: null, stage: c.stage }; }),
-    ].sort((a, b) => (a.due_date || '').localeCompare(b.due_date || '')).slice(0, 15),
+    ].sort((a, b) => (a.due_date || '').localeCompare(b.due_date || '')).slice(0, 30),
     jobsPending: myJobsPending.length,
   };
 }

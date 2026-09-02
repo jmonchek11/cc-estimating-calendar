@@ -219,6 +219,18 @@ async function notifyNewOpportunity(bidId, actorName) {
     await mailer.sendMail({ to, subject, html });
   } catch (e) { console.error('[v2 notify] new-opportunity email failed:', e.message); }
 }
+async function notifyCoQueued(coId, actorName) {
+  try {
+    const M = getModels();
+    const settings = await M.Settings.findById('company').lean();
+    const to = settings?.co_queue_notify_email;
+    if (!to) return;
+    const shape = await coEmailShape(coId);
+    if (!shape) return;
+    const { subject, html } = mailer.emailCoQueued(shape, actorName || 'Someone');
+    await mailer.sendMail({ to, subject, html });
+  } catch (e) { console.error('[v2 notify] co-queued email failed:', e.message); }
+}
 async function notifyApprovedToBid(bidId, actorName) {
   try {
     const M = getModels();
@@ -371,4 +383,4 @@ async function notifyDueDateChanged(kind, id, oldDate, newDate, actorId) {
   } catch (e) { console.error('[v2 notify] due-date-changed email failed:', e.message); }
 }
 
-module.exports = { bidEmailShape, coEmailShape, emailShapeForReminder, notifyAwarded, notifyRoleAward, notifyApprovedToBid, notifyOwnerToForwardInvite, notifyAssigned, notifyWalkthroughSet, notifyWalkthroughAssignees, notifyFollowup, notifyDueDateChanged, notifyOpportunityClosed, notifyNewOpportunity, bidRecipients, walkthroughContactInfo, emailForV2Member };
+module.exports = { bidEmailShape, coEmailShape, emailShapeForReminder, notifyAwarded, notifyRoleAward, notifyApprovedToBid, notifyOwnerToForwardInvite, notifyAssigned, notifyWalkthroughSet, notifyWalkthroughAssignees, notifyFollowup, notifyDueDateChanged, notifyOpportunityClosed, notifyNewOpportunity, notifyCoQueued, bidRecipients, walkthroughContactInfo, emailForV2Member };
