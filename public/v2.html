@@ -673,6 +673,25 @@ function setHash(h) {
 // initial load (bootstrap) and on browser back/forward (popstate), so both
 // a refresh and the back button land on the actual page shown, not always
 // the dashboard.
+// Opening a flyout pushes a real history entry (setHash), so the browser's
+// own Back button is a completely ordinary — and very natural — way for
+// someone to "exit" a bid they clicked into. That popstate lands back here,
+// which re-renders the list page from scratch (a fresh API fetch), which
+// resets scroll to the top even though nothing about the list itself
+// changed. Save/restore keyed by hash so landing back on the same list
+// restores where they were, without needing to special-case the flyout's
+// own X button (which never re-renders the list at all, so it already
+// preserves scroll on its own).
+let SCROLL_MEMORY = {};
+function saveScrollForCurrentHash() {
+  const main = document.getElementById('main');
+  if (main) SCROLL_MEMORY[location.hash] = main.scrollTop;
+}
+function restoreScrollForCurrentHash() {
+  const main = document.getElementById('main');
+  const saved = SCROLL_MEMORY[location.hash];
+  if (main && saved != null) main.scrollTop = saved;
+}
 function routeFromHash() {
   const raw = (location.hash || '#dashboard').replace(/^#/, '');
   const [seg, arg, sub, subArg] = raw.split('/');
@@ -682,10 +701,11 @@ function routeFromHash() {
       // open its flyout once the project page underneath has loaded.
       if (sub === 'bid' && subArg) openBidFlyout(Number(arg), Number(subArg));
       else if (sub === 'co' && subArg) openCoFlyout(Number(arg), Number(subArg));
+      else restoreScrollForCurrentHash();
     });
     return;
   }
-  navigate(seg || 'dashboard');
+  Promise.resolve(navigate(seg || 'dashboard')).then(restoreScrollForCurrentHash);
 }
 window.addEventListener('popstate', routeFromHash);
 
@@ -2389,8 +2409,8 @@ function closeFlyout() {
   document.getElementById('fly-panel')?.remove();
 }
 
-function openBidFlyout(projectId, bidId) { FLYOUT = { kind: 'bid', projectId, id: bidId }; OPEN_PROJECT = projectId; setHash(`project/${projectId}/bid/${bidId}`); renderFlyout(true); }
-function openCoFlyout(projectId, coId) { FLYOUT = { kind: 'co', projectId, id: coId }; OPEN_PROJECT = projectId; setHash(`project/${projectId}/co/${coId}`); renderFlyout(true); }
+function openBidFlyout(projectId, bidId) { saveScrollForCurrentHash(); FLYOUT = { kind: 'bid', projectId, id: bidId }; OPEN_PROJECT = projectId; setHash(`project/${projectId}/bid/${bidId}`); renderFlyout(true); }
+function openCoFlyout(projectId, coId) { saveScrollForCurrentHash(); FLYOUT = { kind: 'co', projectId, id: coId }; OPEN_PROJECT = projectId; setHash(`project/${projectId}/co/${coId}`); renderFlyout(true); }
 
 async function renderFlyout(fresh) {
   if (!FLYOUT) return;
