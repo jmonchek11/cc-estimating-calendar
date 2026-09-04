@@ -1529,6 +1529,18 @@ async function reactivateBid(id, data, actorId) {
     upd.due_time = data.due_time || null;
   }
   await M.Bid.updateOne({ _id: bid._id }, { $set: upd });
+  // The prior round's submission(s) stay in the DB as real history — never
+  // deleted — but must stop counting as "current" the moment the bid is
+  // back in active_bid, the same way addSubmission already clears the old
+  // current flag the instant a genuinely new submission comes in. Without
+  // this, reconcileBidSubmitted's self-heal (getProjectDetail) reads the
+  // untouched old submission as "every customer already has a current
+  // submission" and silently snaps the bid straight back to 'submitted' —
+  // confirmed happening on B25-0321 and B26-0304 (9/3/26), undoing the
+  // reactivation before a real new submission could ever be logged.
+  if (target === 'active_bid') {
+    await M.BidSubmission.updateMany({ bid_id: bid._id, is_current: 1 }, { $set: { is_current: 0, next_followup_date: null, updated_at: ts() } });
+  }
   const proj = await M.Project.findById(bid.project_id).lean();
   await events.safeEmit('bid.stage_changed', {
     project_id: bid.project_id, bid_id: bid._id, actor_id: actorId || null,
@@ -3438,8 +3450,13 @@ async function getDashboard(userId, mineOnly) {
   // anything further out) — every active/submitted bid or CO with a due
   // date, oldest/most-overdue first, so the ones that need attention most
   // sort to the top of the card's fixed display slice below.
-  const dueSoon = myBids.filter(b => ['active_bid', 'submitted'].includes(b.stage) && !b.superseded && b.due_date).sort((a, b) => (a.due_date || '').localeCompare(b.due_date || ''));
-  const coDueSoon = myCos.filter(c => ['active_co', 'submitted_co'].includes(c.stage) && !c.superseded && c.due_date);
+  // active only, not submitted — a submitted bid/CO's due date has already
+  // been met (that's what submitting it means); showing it here as
+  // "overdue" was a real regression once the date bounds were removed
+  // (previously masked by the 14-day window). Follow-up on a submitted bid
+  // is tracked separately (next_followup_date, "Bids to Follow Up On").
+  const dueSoon = myBids.filter(b => b.stage === 'active_bid' && !b.superseded && b.due_date).sort((a, b) => (a.due_date || '').localeCompare(b.due_date || ''));
+  const coDueSoon = myCos.filter(c => c.stage === 'active_co' && !c.superseded && c.due_date);
 
   const myJobsPending = jobs.filter(j => !j.job_number).filter(isMyJob);
 
