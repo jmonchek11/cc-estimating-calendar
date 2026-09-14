@@ -4388,7 +4388,14 @@ function actApproveToBid(bidId) {
   showForm('✓ Approve to Bid', [
     { id: 'estimator_id', label: 'Estimator (if known)', type: 'select', emptyLabel: 'TBD', options: teamOpts(['estimator', 'sales']), value: b.estimator?.id },
     { id: 'sub_estimator_id', label: 'Sub-Estimator (optional)', type: 'select', emptyLabel: 'None', options: teamOpts(['estimator', 'sales']) },
-    { id: 'sub_estimator_scope', label: 'Sub-Estimator Scope', type: 'text', placeholder: 'e.g. Fire Alarm, Lighting Controls…' },
+    // One system per entry — the placeholder used to show two comma-joined
+    // examples ("Fire Alarm, Lighting Controls…"), which read as an
+    // instruction to combine multiple systems into one scope string rather
+    // than two separate examples of what a single scope looks like
+    // (confirmed happening on B26-0326: "Lighting, Fire Alarm" got typed
+    // and saved as one opaque scope value for one person). Add this form
+    // again — or use Edit Bid's Sub-Estimators section — for a second system.
+    { id: 'sub_estimator_scope', label: 'Sub-Estimator Scope (one system — e.g. "Fire Alarm")', type: 'text', placeholder: 'e.g. Fire Alarm' },
     // Salesperson and PM are separate fields (PM won't always = Salesperson)
     // — this was the one place assignment happens where Salesperson was
     // missing, so a bid could get a PM here and never show a salesperson at
