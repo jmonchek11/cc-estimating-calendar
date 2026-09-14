@@ -320,6 +320,7 @@ async function getProjectDetail(projectId) {
     rfi_due_time: b.rfi_due_time,
     folder_url: b.folder_url,
     cm_portal_url: b.cm_portal_url,
+    follow_up_interval_days: b.follow_up_interval_days,
     // Three-state — leave null (TBD) as null, don't collapse it to false,
     // or the edit form and badges can't tell "not yet known" from "No".
     certified_payroll: b.certified_payroll == null ? null : !!b.certified_payroll,
@@ -1565,7 +1566,7 @@ const ADMIN_EDITABLE = {
   // path can't do.
   bid:            ['bid_number', 'estimator_id', 'salesperson_id', 'apm_id', 'pm_id', 'date_received', 'due_date', 'due_time', 'start_date',
                    'drawing_stage', 'notes', 'jurisdiction', 'superseded', 'owner_id', 'source', 'rfi_due_date', 'rfi_due_time', 'folder_url', 'cm_portal_url',
-                   'certified_payroll', 'tax_exempt', 'prevailing_wage'],
+                   'certified_payroll', 'tax_exempt', 'prevailing_wage', 'follow_up_interval_days'],
   job:            ['job_number', 'pm_id', 'apm_id', 'awarded_company_id', 'award_date', 'folder_url'],
   change_order:   ['co_number', 'name', 'due_date', 'start_date', 'estimator_id', 'notes',
                    'estimate_amount', 'date_submitted', 'approved_by', 'approval_date'],
@@ -1598,6 +1599,7 @@ async function adminUpdate(entity, id, data) {
     // Three-state — '' (TBD) already became null above and stays null;
     // anything else is a real Yes/No answer.
     else if (f === 'certified_payroll' || f === 'tax_exempt' || f === 'prevailing_wage' || f === 'gc_awarded') v = (v == null) ? null : (Number(v) === 1 || v === true);
+    else if (f === 'follow_up_interval_days') v = (v == null || v === '') ? null : Number(v);
     upd[f] = v;
   }
   const r = await Model.updateOne({ _id: Number(id) }, { $set: upd });
@@ -1889,7 +1891,19 @@ async function logFollowupV2(data) {
   // A standalone company check-in has no bid/CO/submission to carry a
   // follow-up timer — only the project-tied types get a next_followup_date.
   const tracksTimer = data.parent_type !== 'company';
-  const next = (tracksTimer && outcome === 'no_decision') ? addWorkingDays(today(), s.fu_recurring_days) : null;
+  // A specific bid can override the company-wide cadence (Settings.fu_recurring_days)
+  // — some jobs genuinely need more/less time between calls than the default.
+  let recurringDays = s.fu_recurring_days;
+  if (tracksTimer && outcome === 'no_decision') {
+    let bidForInterval = null;
+    if (data.parent_type === 'bid') bidForInterval = await M.Bid.findById(Number(data.parent_id)).lean();
+    else if (data.parent_type === 'bid_submission') {
+      const sub = await M.BidSubmission.findById(Number(data.parent_id)).lean();
+      if (sub) bidForInterval = await M.Bid.findById(sub.bid_id).lean();
+    }
+    if (bidForInterval?.follow_up_interval_days) recurringDays = bidForInterval.follow_up_interval_days;
+  }
+  const next = (tracksTimer && outcome === 'no_decision') ? addWorkingDays(today(), recurringDays) : null;
 
   const fu = await M.Followup.create({
     _id: await nextId('followups'),
@@ -2930,9 +2944,9 @@ async function getBidList(stage) {
           id: c._id, project_id: job?.project_id || null, project: job ? (pName[job.project_id] || '—') : '—',
           project_on_hold: job ? !!pOnHold[job.project_id] : false,
           size_bucket: null, type_of_work: null, drawing_stage: null,
-          co_number: c.co_number, name: c.name, stage: c.stage,
+          co_number: c.co_number, name: c.name, stage: c.stage, notes: c.notes,
           job_number: job?.job_number || null,
-          estimator: null, salesperson: null, apm: null, pm: null,
+          estimator: tm[c.estimator_id] || null, salesperson: null, apm: null, pm: job?.pm_id ? (tm[job.pm_id] || null) : null,
           customers: [], sub_estimators: [], walkthroughs: [],
           due_date: c.due_date, due_time: null,
           approved_to_co: !!c.approved_to_co, approved_to_co_at: c.approved_to_co_at,

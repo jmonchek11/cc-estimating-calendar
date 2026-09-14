@@ -1851,7 +1851,10 @@ function renderBidListBody(stage) {
       <div class="proj-row" onclick="openCoFlyout(${b.project_id},${b.id})">
         <div style="flex:1;min-width:0">
           <div class="proj-name"><span class="badge" style="background:#ede9fe;color:#5b21b6;font-size:10px">🔧 CO</span> ${esc(b.project)} <span style="color:var(--text-muted);font-weight:400;font-size:12px">${esc(b.co_number)}</span> ${b.project_on_hold ? '<span class="badge" style="background:#fef3c7;color:#92400e">⏸ ON HOLD</span>' : ''}</div>
-          <div class="proj-meta">${esc(b.name)}${b.job_number ? `<span class="proj-meta-sep">·</span> Job ${esc(b.job_number)}` : ''}</div>
+          <div class="proj-meta">${esc(b.name)}${b.job_number ? `<span class="proj-meta-sep">·</span> Job ${esc(b.job_number)}` : ''}
+            ${b.estimator ? `<span class="proj-meta-sep">·</span> Est ${ini(b.estimator)}` : ''}
+            ${b.pm ? ` PM ${ini(b.pm)}` : ''}
+            ${b.notes ? `<span class="proj-meta-sep">·</span> ${esc(b.notes)}` : ''}</div>
         </div>
         <div style="display:flex;align-items:center;gap:12px;flex-shrink:0;align-self:center">
           ${adminDeleteIconHtml('change_order', b.id, `${b.co_number} — ${b.project}`)}
@@ -2944,6 +2947,7 @@ function bidActions(b) {
     } else if (b.stage === 'active_bid' || b.stage === 'submitted') {
       if (bidNeedsFirstSubmission(b)) primary = `<button class="v2-btn blue" onclick="actSubmitBid(${b.id})">Submit Bid</button>`;
       else menu.push({ label: '+ Add Submission', fn: `actAddSubmission(${b.id})` });
+      if (b.customers.length) menu.push({ label: '📝 Generate RFI', fn: `actGenerateRfi(${b.id})` });
       if (b.stage === 'active_bid') menu.push({ label: 'Close bid', fn: `actCloseBid(${b.id})`, danger: true });
       else menu.push({ label: '↻ Reactivate', fn: `actReactivateBid(${b.id})` });
     } else if (b.stage === 'closed') {
@@ -3972,6 +3976,8 @@ function actEditBid(bidId) {
         options: tbdYesNoOptions('Yes — notifies Purchasing on award') },
       { id: 'prevailing_wage', label: 'Prevailing Wage Job?', type: 'select', value: boolToSelectValue(b.prevailing_wage),
         options: tbdYesNoOptions('Yes') },
+      { id: 'follow_up_interval_days', label: 'Days Between Follow-ups (optional override)', type: 'number', value: b.follow_up_interval_days,
+        placeholder: `Company default is ${META.settings?.fu_recurring_days ?? 7} days` },
     );
     // Walk-through has its own dedicated action (🚶 button in the actions row,
     // plus a visible line on the bid card) rather than living buried in here —
@@ -4409,6 +4415,54 @@ async function actUnapproveToBid(bidId) {
   try { await api('POST', `/api/v2/bids/${bidId}/unapprove-to-bid`); await refresh(); }
   catch (e) { alert('Failed: ' + e.message); }
 }
+// ── RFI email generator — same idea as the Vendors page's Generate RFQ
+// Email (mailto:, BCC'd, never sends itself — attach plans/specs and hit
+// send in Outlook), but sourced from the bid's OWN customer contacts
+// rather than a company-wide vendor list, since an RFI always goes to
+// whichever GC(s) are already on this specific bid. BCC (not TO) so
+// competing GCs on the same bid never see each other on the thread.
+let RFI_STATE = { bidId: null, contacts: [] };
+function actGenerateRfi(bidId) {
+  const b = DETAIL_CACHE[OPEN_PROJECT]?.bids.find(x => x.id === bidId);
+  if (!b) return;
+  const contacts = (b.customers || []).flatMap(cust => (cust.contacts || []).map(ct => ({ ...ct, companyName: cust.name })));
+  if (!contacts.length) { alert('No contacts with an email on file for this bid\'s customers yet — add one from the Customers section first.'); return; }
+
+  document.getElementById('v2-form-overlay')?.remove();
+  const ov = document.createElement('div');
+  ov.className = 'v2-overlay'; ov.id = 'v2-form-overlay';
+  const label = b.project || b.bid_number || 'this bid';
+  const defaultSubject = `RFI – ${label}${b.bid_number ? ' – ' + b.bid_number : ''}`;
+  const defaultBody = `${timeGreeting()},\n\nWe have a question regarding ${label}. [ADD YOUR QUESTION HERE]\n\nPlease let us know at your earliest convenience so we can keep the estimate on track.\n\nThanks!\n${CURRENT_USER?.name || ''}`;
+  ov.innerHTML = `
+    <div class="v2-modal" style="max-width:560px;max-height:88vh;overflow-y:auto">
+      <div class="v2-modal-hd">📝 Generate RFI<button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">✕</button></div>
+      <div class="v2-modal-bd">
+        <div class="v2-field"><label>Send to — check which GC(s)${contacts.length > 1 ? ' (BCC’d, so they won’t see each other)' : ''}</label>
+          ${contacts.map((c, i) => `<label class="v2-check" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="rfi-c-${i}" ${c.email ? '' : 'disabled'}> ${esc(c.full_name)} — ${esc(c.companyName)}${c.email ? ` <span style="color:var(--text-muted)">(${esc(c.email)})</span>` : ' <span style="color:#dc2626">no email on file</span>'}</label>`).join('')}
+        </div>
+        <div class="v2-field"><label>Subject</label><input id="rfi-subject" type="text" value="${esc(defaultSubject)}"></div>
+        <div class="v2-field"><label>Body</label><textarea id="rfi-body" rows="8">${esc(defaultBody)}</textarea></div>
+        <div style="font-size:11px;color:var(--text-muted)">Opens your default mail app with the checked GC(s) BCC'd — attach plans/specs and make any final edits before sending. mailto links can't carry attachments.</div>
+      </div>
+      <div class="v2-modal-ft">
+        <button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">Cancel</button>
+        <button class="v2-btn blue" onclick="openRfiMailto()">Open in Outlook →</button>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+  RFI_STATE = { bidId, contacts };
+}
+function openRfiMailto() {
+  const bcc = RFI_STATE.contacts.filter((c, i) => c.email && document.getElementById(`rfi-c-${i}`)?.checked).map(c => c.email).join(',');
+  if (!bcc) { alert('Check at least one GC to send to.'); return; }
+  const subject = document.getElementById('rfi-subject')?.value || '';
+  const body = document.getElementById('rfi-body')?.value || '';
+  const mailto = `mailto:?bcc=${encodeURIComponent(bcc)}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  if (mailto.length > 1900 && !confirm('This link is long and some mail clients may truncate it. Continue?')) return;
+  window.location.href = mailto;
+}
+
 function actCloseBid(bidId) {
   showForm('Close Opportunity / Bid', [
     { id: 'closed_date', label: 'Closure Date', type: 'date', required: true, value: today },

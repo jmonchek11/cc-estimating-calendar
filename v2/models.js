@@ -170,6 +170,10 @@ const BidSchema = new mongoose.Schema({
 
   // System-managed while submitted
   next_followup_date: { type: String, default: null },
+  // Per-bid override of Settings.fu_recurring_days — some jobs genuinely
+  // need a longer (or shorter) gap between follow-up calls than the
+  // company-wide default. null = use the global setting.
+  follow_up_interval_days: { type: Number, default: null },
 
   // Set when a newer bid is added to the same project (e.g. a later drawing
   // stage). Superseded bids are inactive/historical — excluded from active
