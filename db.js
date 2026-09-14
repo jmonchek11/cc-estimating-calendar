@@ -971,11 +971,11 @@ async function getOnlineUsers() {
 const IDEA_MAX_IMAGES = 3;
 const IDEA_MAX_IMAGE_BYTES = 4 * 1024 * 1024; // ~4MB decoded, generous headroom over a compressed screenshot
 
-// Admins post straight to 'new', same as always. Anyone else starts at
-// 'pending_approval' — invisible to everyone but themselves and admins
-// until an admin approves it (approveIdea below). Per Joe's request: every
-// non-admin submission needs sign-off before it reaches the board or his
-// inbox.
+// Every submission — admin or not — starts at 'pending_approval', invisible
+// to everyone but the submitter and admins until an admin approves it
+// (approveIdea below). Was admin-bypass before; Carrie asked for every idea
+// to go through the same review (discussed at the 8am Bid/No-bid meeting)
+// rather than an admin's own submission skipping straight to the board.
 async function submitIdea(data) {
   const images = Array.isArray(data.images) ? data.images.slice(0, IDEA_MAX_IMAGES) : [];
   for (const img of images) {
@@ -984,8 +984,7 @@ async function submitIdea(data) {
     if (approxBytes > IDEA_MAX_IMAGE_BYTES) throw new Error('Image too large (max ~4MB each)');
   }
   const submitterId = data.submitted_by ? Number(data.submitted_by) : null;
-  const submitter = submitterId ? await getMember(submitterId) : null;
-  const status = submitter?.is_admin ? 'new' : 'pending_approval';
+  const status = 'pending_approval';
   const id = await nextId('ideas');
   const now = nowStr();
   await Idea.create({

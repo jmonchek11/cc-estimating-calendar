@@ -601,9 +601,10 @@ app.get('/api/online', async (req, res) => {
 
 // ── Ideas / feedback ──────────────────────────────────────────────────────────
 const IDEA_ADMIN_NOTIFY_EMAIL = 'jmonchek@libertyintegrated.com';
-// Non-admin submissions sit in 'pending_approval' until one of these people
-// approves them (see approveIdea in db.js) — matches the current is_admin set
-// minus Joe, who's already the one being notified via IDEA_ADMIN_NOTIFY_EMAIL.
+// Every submission — admin or not — sits in 'pending_approval' until one of
+// these people approves it (approveIdea in db.js), discussed at the 8am
+// Bid/No-bid meeting. Was admin-bypass-straight-to-'new' before; Carrie
+// asked for every idea to go through the same review.
 const IDEA_APPROVER_EMAILS = ['cwinters@libertyintegrated.com', 'jbaker@libertyintegrated.com', 'ddosenbach@libertyintegrated.com', 'cyaffe@libertyintegrated.com'];
 
 app.post('/api/ideas', async (req, res) => {
@@ -615,16 +616,11 @@ app.post('/api/ideas', async (req, res) => {
     // Logged loudly on failure since this runs outside the request/response
     // cycle and a silent .catch(() => {}) here was undiagnosable last time.
     db.getMember(req.session.userId).then(submitter => {
-      if (result.status === 'pending_approval') {
-        console.log(`[ideas] #${result.id} submitted by user ${req.session.userId} — pending approval, notifying approvers`);
-        return Promise.all(IDEA_APPROVER_EMAILS.map(to => {
-          const { subject, html } = mailer.emailIdeaNeedsApproval(req.body, submitter?.name);
-          return mailer.sendMail({ to, subject, html });
-        }));
-      }
-      console.log(`[ideas] #${result.id} submitted by user ${req.session.userId} — notifying ${IDEA_ADMIN_NOTIFY_EMAIL}`);
-      const { subject, html } = mailer.emailIdeaSubmitted(req.body, submitter?.name);
-      return mailer.sendMail({ to: IDEA_ADMIN_NOTIFY_EMAIL, subject, html });
+      console.log(`[ideas] #${result.id} submitted by user ${req.session.userId} — pending approval, notifying approvers`);
+      return Promise.all(IDEA_APPROVER_EMAILS.map(to => {
+        const { subject, html } = mailer.emailIdeaNeedsApproval(req.body, submitter?.name);
+        return mailer.sendMail({ to, subject, html });
+      }));
     }).catch(e => console.error(`[ideas] submission-notify email failed for #${result.id}:`, e.message));
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
