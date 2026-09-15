@@ -1903,7 +1903,9 @@ async function logFollowupV2(data) {
     }
     if (bidForInterval?.follow_up_interval_days) recurringDays = bidForInterval.follow_up_interval_days;
   }
-  const next = (tracksTimer && outcome === 'no_decision') ? addWorkingDays(today(), recurringDays) : null;
+  // Count from the follow-up's own date, not save time — a backfilled entry
+  // must not inflate the gap to the next follow-up.
+  const next = (tracksTimer && outcome === 'no_decision') ? addWorkingDays(data.followup_date || today(), recurringDays) : null;
 
   const fu = await M.Followup.create({
     _id: await nextId('followups'),
