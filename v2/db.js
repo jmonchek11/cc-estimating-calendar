@@ -3431,10 +3431,11 @@ async function getDashboard(userId, mineOnly) {
   const yearStart = today.slice(0, 4) + '-01-01';
   const ago = (n) => new Date(Date.now() - n * 86400000).toISOString().split('T')[0];
   const ahead = (n) => new Date(Date.now() + n * 86400000).toISOString().split('T')[0];
-  const pName = {}; projects.forEach(p => pName[p._id] = p.name);
+  const pName = {}; const pOnHold = {}; projects.forEach(p => { pName[p._id] = p.name; pOnHold[p._id] = !!p.on_hold; });
   const coName = {}; companies.forEach(c => coName[c._id] = c.name);
   const bidById = {}; bids.forEach(b => bidById[b._id] = b);
   const jobById = {}; jobs.forEach(j => jobById[j._id] = j);
+  const coProjectId = (c) => jobById[c.job_id]?.project_id ?? null;
 
   const isMyBid = (b) => !uid || b.estimator_id === uid || b.salesperson_id === uid || b.apm_id === uid || (b.sub_estimators || []).some(s => s.estimator_id === uid);
   const isMyCo = (c) => !uid || c.estimator_id === uid;
@@ -3461,8 +3462,8 @@ async function getDashboard(userId, mineOnly) {
   const awardedYTD = myBids.filter(b => b.stage === 'awarded' && b.award_date && b.award_date >= yearStart && b.award_date <= today);
   const awardedMissingDate = myBids.filter(b => b.stage === 'awarded' && !b.award_date).length;
 
-  const overdueBids = subs.filter(s => s.is_current && s.outcome === 'pending' && s.next_followup_date && s.next_followup_date < today && (!uid || bidById[s.bid_id]?.salesperson_id === uid || bidById[s.bid_id]?.apm_id === uid));
-  const overdueCos = myCos.filter(c => c.stage === 'submitted_co' && !c.superseded && c.next_followup_date && c.next_followup_date < today);
+  const overdueBids = subs.filter(s => s.is_current && s.outcome === 'pending' && s.next_followup_date && s.next_followup_date < today && !pOnHold[bidById[s.bid_id]?.project_id] && (!uid || bidById[s.bid_id]?.salesperson_id === uid || bidById[s.bid_id]?.apm_id === uid));
+  const overdueCos = myCos.filter(c => c.stage === 'submitted_co' && !c.superseded && c.next_followup_date && c.next_followup_date < today && !pOnHold[coProjectId(c)]);
   // No date window (was "next 14 days," which hid both overdue items and
   // anything further out) — every active/submitted bid or CO with a due
   // date, oldest/most-overdue first, so the ones that need attention most
@@ -3472,8 +3473,8 @@ async function getDashboard(userId, mineOnly) {
   // "overdue" was a real regression once the date bounds were removed
   // (previously masked by the 14-day window). Follow-up on a submitted bid
   // is tracked separately (next_followup_date, "Bids to Follow Up On").
-  const dueSoon = myBids.filter(b => b.stage === 'active_bid' && !b.superseded && b.due_date).sort((a, b) => (a.due_date || '').localeCompare(b.due_date || ''));
-  const coDueSoon = myCos.filter(c => c.stage === 'active_co' && !c.superseded && c.due_date);
+  const dueSoon = myBids.filter(b => b.stage === 'active_bid' && !b.superseded && b.due_date && !pOnHold[b.project_id]).sort((a, b) => (a.due_date || '').localeCompare(b.due_date || ''));
+  const coDueSoon = myCos.filter(c => c.stage === 'active_co' && !c.superseded && c.due_date && !pOnHold[coProjectId(c)]);
 
   const myJobsPending = jobs.filter(j => !j.job_number).filter(isMyJob);
 
