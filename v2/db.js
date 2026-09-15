@@ -1516,11 +1516,12 @@ async function addSubmission(id, data, actorId) {
 async function reactivateBid(id, data, actorId) {
   const M = getModels();
   const bid = await loadBid(id);
-  if (!['submitted', 'closed'].includes(bid.stage)) throw new Error(`Cannot reactivate a bid from stage '${bid.stage}'`);
+  if (!['submitted', 'closed', 'not_awarded'].includes(bid.stage)) throw new Error(`Cannot reactivate a bid from stage '${bid.stage}'`);
   const fromStage = bid.stage;
   const target = fromStage === 'closed' && !bid.bid_number ? 'opportunity' : 'active_bid';
   const upd = { stage: target, next_followup_date: null, updated_at: ts() };
   if (fromStage === 'closed') Object.assign(upd, { closed_date: null, closed_approved_by: null, close_reason: null });
+  if (fromStage === 'not_awarded') Object.assign(upd, { date_not_awarded: null, not_awarded_notes: null });
   if (target === 'active_bid') {
     require_(data, ['due_date']);
     upd.due_date = data.due_date;

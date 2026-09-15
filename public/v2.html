@@ -388,9 +388,9 @@
       <a class="nav-item" data-page="submitted-bids" href="#submitted-bids" onclick="navigate('submitted-bids');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="21" y1="3" x2="10" y2="14"/><polygon points="21 3 14 21 10 14 3 10 21 3"/></svg></span> Bids to Follow Up On</a>
       <a class="nav-item" data-page="awarded-bids" href="#awarded-bids" onclick="navigate('awarded-bids');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></span> Awarded Bids</a>
       <a class="nav-item" data-page="not-awarded-bids" href="#not-awarded-bids" onclick="navigate('not-awarded-bids');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg></span> Not Awarded Bids</a>
-      <a class="nav-item" data-page="submitted-cos" href="#submitted-cos" onclick="navigate('submitted-cos');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="21" y1="3" x2="10" y2="14"/><polygon points="21 3 14 21 10 14 3 10 21 3"/></svg></span> Change Orders to Follow Up On</a>
       <div class="nav-section-label">CHANGE ORDERS</div>
       <a class="nav-item" data-page="active-cos" href="#active-cos" onclick="navigate('active-cos');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><polyline points="23 20 23 14 17 14"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg></span> Active Change Orders</a>
+      <a class="nav-item" data-page="submitted-cos" href="#submitted-cos" onclick="navigate('submitted-cos');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="21" y1="3" x2="10" y2="14"/><polygon points="21 3 14 21 10 14 3 10 21 3"/></svg></span> Change Orders to Follow Up On</a>
       <a class="nav-item" data-page="approved-cos" href="#approved-cos" onclick="navigate('approved-cos');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></span> Approved Change Orders</a>
       <a class="nav-item" data-page="not-approved-cos" href="#not-approved-cos" onclick="navigate('not-approved-cos');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg></span> Not Approved Change Orders</a>
       <div class="nav-section-label">PROJECTS</div>
@@ -652,6 +652,17 @@ async function ensureMeta() {
   META = data; CURRENT_USER = META.current_user;
   renderAppSwitcher();
   renderReleaseBadge();
+  // ALL_PROJECTS powers the project fuzzy-search combobox ("+ New Bid" etc.)
+  // from ANY page, not just the Projects list — it used to only get filled
+  // in when the Projects page itself had been visited, so opening "+ New
+  // Bid" straight from the Dashboard found zero options and the picker
+  // silently behaved as create-new-only, however close a match existed.
+  if (!ALL_PROJECTS.length) {
+    try {
+      const pr = await fetch('/api/v2/projects');
+      if (pr.ok) { PROJECTS_RAW = await pr.json(); ALL_PROJECTS = PROJECTS_RAW.map(p => ({ id: p.id, name: p.name })); }
+    } catch (e) { /* project picker just falls back to create-new; not fatal */ }
+  }
 }
 function renderReleaseBadge() {
   const dot = document.getElementById('release-badge-dot');
@@ -2952,6 +2963,8 @@ function bidActions(b) {
     } else if (b.stage === 'closed') {
       // The customer came back after all — reopens to wherever it was closed
       // from (opportunity if it never got a bid #, active_bid otherwise).
+      menu.push({ label: '↻ Reactivate', fn: `actReactivateBid(${b.id})` });
+    } else if (b.stage === 'not_awarded') {
       menu.push({ label: '↻ Reactivate', fn: `actReactivateBid(${b.id})` });
     }
     if (canEditBid && BID_EDITABLE_STAGES.includes(b.stage)) menu.push({ label: '✏️ Edit bid', fn: `actEditBid(${b.id})` });
