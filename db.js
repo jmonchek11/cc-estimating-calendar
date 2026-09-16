@@ -1057,6 +1057,10 @@ async function getIdeas(viewerId) {
   return [...pending, ...active, ...terminal];
 }
 
+async function getIdea(id) {
+  return await Idea.findById(Number(id)).lean();
+}
+
 async function updateIdeaStatus(id, status) {
   const { IDEA_STATUSES } = require('./models/Idea');
   if (!IDEA_STATUSES.includes(status)) throw new Error(`Invalid status '${status}'`);
@@ -1981,7 +1985,7 @@ module.exports = {
   getPropagatableCustomersByJobNum, applyPropagateCustomersByJobNum,
   addIgnoredPair, getIgnoredPairs,
   heartbeat, getOnlineUsers,
-  submitIdea, getIdeas, updateIdeaStatus, approveIdea, voteIdea, addIdeaComment,
+  submitIdea, getIdeas, getIdea, updateIdeaStatus, approveIdea, voteIdea, addIdeaComment,
   getEstimatorBids,
   savePhase, getLinkedCOs, linkCOToParent, checkDuplicateBidNumber,
   getSettings, updateSettings,

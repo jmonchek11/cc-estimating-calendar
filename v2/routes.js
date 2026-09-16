@@ -173,7 +173,10 @@ router.get('/api/v2/meta', async (req, res) => {
       if (m) {
         const liberty_apps = await directory.getMyApps({ ms_oid: m.ms_oid, email: m.email });
         const unseen_release_count = await v2db.getUnseenReleaseCount(m.id).catch(() => 0);
-        current_user = { id: m.id, name: m.name, is_admin: !!m.is_admin, role: m.role, liberty_apps, notification_prefs: m.notification_prefs, unseen_release_count };
+        // Ideas approval is locked to Carrie specifically (per Joe, 2026-09-16)
+        // — surfaced here so the frontend can hide the Approve/Decline buttons
+        // from other admins instead of showing them a control that 403s.
+        current_user = { id: m.id, name: m.name, is_admin: !!m.is_admin, role: m.role, liberty_apps, notification_prefs: m.notification_prefs, unseen_release_count, can_approve_ideas: m.email === 'cyaffe@libertyintegrated.com' };
       }
     } catch { /* ignore — current_user stays null */ }
     res.json({ ...meta, current_user });

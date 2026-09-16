@@ -6605,6 +6605,10 @@ function ideaCardHtml(i, isAdmin) {
   const upActive = i.my_vote === 1, downActive = i.my_vote === -1;
   const done = i.is_terminal;
   const pending = i.is_pending_approval;
+  // Ideas approval is locked to Carrie specifically — other admins still get
+  // the status-change dropdown below for already-visible ideas, just not the
+  // Approve/Decline gate on a pending_approval one.
+  const canApproveIdeas = !!CURRENT_USER?.can_approve_ideas;
   const openComments = IDEAS_COMMENTS_OPEN.has(i.id);
   return `
     <div style="display:flex;gap:10px;padding:10px 0;border-bottom:1px solid #f1f5f9;${done ? 'opacity:0.55' : ''}">
@@ -6626,10 +6630,10 @@ function ideaCardHtml(i, isAdmin) {
               ${pending && !isAdmin ? ` · <span style="font-size:10px;color:var(--text-muted)">not yet visible to others</span>` : ''}
             </div>
           </div>
-          ${isAdmin && pending ? `<div style="display:flex;gap:4px;flex-shrink:0">
+          ${canApproveIdeas && pending ? `<div style="display:flex;gap:4px;flex-shrink:0">
             <button class="v2-btn blue" style="font-size:11px;padding:3px 8px" onclick="approveIdea(${i.id})">Approve</button>
             <button class="v2-btn outline" style="font-size:11px;padding:3px 8px" onclick="setIdeaStatus(${i.id},'wontfix')">Decline</button>
-          </div>` : isAdmin ? `<select style="font-size:11px;border-radius:4px;padding:2px 4px;border:1px solid var(--border);cursor:pointer;flex-shrink:0" onchange="setIdeaStatus(${i.id}, this.value)">
+          </div>` : pending ? '' : isAdmin ? `<select style="font-size:11px;border-radius:4px;padding:2px 4px;border:1px solid var(--border);cursor:pointer;flex-shrink:0" onchange="setIdeaStatus(${i.id}, this.value)">
             ${['new', 'reviewed', 'done', 'wontfix'].map(s => `<option value="${s}" ${i.status === s ? 'selected' : ''}>${IDEA_STATUS_LABEL[s]}</option>`).join('')}
           </select>` : ''}
         </div>

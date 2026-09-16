@@ -629,7 +629,9 @@ app.post('/api/ideas', async (req, res) => {
 app.post('/api/ideas/:id/approve', async (req, res) => {
   try {
     const user = await db.getMember(req.session.userId);
-    if (!user || !user.is_admin) return res.status(403).json({ error: 'Admin only' });
+    // Locked to Carrie specifically (per Joe, 2026-09-16) — being an admin
+    // elsewhere in the app no longer implies idea-approval rights.
+    if (!user || !IDEA_APPROVER_EMAILS.includes(user.email)) return res.status(403).json({ error: 'Only Carrie Yaffe can approve ideas' });
     const idea = await db.approveIdea(req.params.id, req.session.userId);
     res.json({ ok: true });
     console.log(`[ideas] #${idea.id} approved by user ${req.session.userId} — notifying ${IDEA_ADMIN_NOTIFY_EMAIL}`);
@@ -650,6 +652,13 @@ app.put('/api/ideas/:id', async (req, res) => {
   try {
     const user = await db.getMember(req.session.userId);
     if (!user || !user.is_admin) return res.status(403).json({ error: 'Admin only' });
+    // This generic status-change path can also move an idea OUT of
+    // pending_approval (e.g. -> 'wontfix' for Decline) — same approval gate
+    // as /api/ideas/:id/approve applies here, or it'd be an open bypass.
+    const current = await db.getIdea(req.params.id);
+    if (current?.status === 'pending_approval' && !IDEA_APPROVER_EMAILS.includes(user.email)) {
+      return res.status(403).json({ error: 'Only Carrie Yaffe can approve ideas' });
+    }
     const result = await db.updateIdeaStatus(req.params.id, req.body.status);
     res.json({ ok: true });
     // Fire-and-forget — only email the submitter if the status actually
