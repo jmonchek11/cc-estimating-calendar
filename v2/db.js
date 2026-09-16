@@ -1634,13 +1634,11 @@ async function awardSubmission(submissionId, data, actorId) {
   const bid = await loadBid(sub.bid_id);
   if (bid.stage !== 'submitted') throw new Error(`Bid must be 'submitted' to award (stage is '${bid.stage}')`);
   if (sub.outcome !== 'pending') throw new Error(`This submission is already '${sub.outcome}'`);
-  // Certified Payroll/Tax Exempt/Prevailing Wage are forced here rather than
-  // at submission — they only actually matter once a bid wins (each notifies
-  // a different back-office team on award), so requiring them on every
-  // submission — decided or not — was pure friction. May already be answered
-  // from Start Bid/Edit Bid; the frontend pre-fills those, but still sends a
-  // real answer either way.
-  require_(data, ['award_date', 'award_amount', 'certified_payroll', 'tax_exempt', 'prevailing_wage']);
+  // Certified Payroll/Tax Exempt/Prevailing Wage are no longer asked here —
+  // per the estimating dept head (2026-09-16), the team doesn't need them
+  // forced at award anymore. Still settable any time via Start Bid/Edit Bid;
+  // award just leaves whatever's already on the bid untouched.
+  require_(data, ['award_date', 'award_amount']);
   requireNonZeroAmount(data.award_amount);
 
   await M.BidSubmission.updateOne({ _id: sub._id }, { $set: {
@@ -1648,9 +1646,6 @@ async function awardSubmission(submissionId, data, actorId) {
   }});
   await M.Bid.updateOne({ _id: bid._id }, { $set: {
     stage: 'awarded', award_date: data.award_date, awarded_company_id: sub.company_id,
-    certified_payroll: Number(data.certified_payroll) === 1,
-    tax_exempt: Number(data.tax_exempt) === 1,
-    prevailing_wage: Number(data.prevailing_wage) === 1,
     updated_at: ts(),
   }});
   await recomputeBidHeadline(bid._id);   // headline now reflects the winning submission

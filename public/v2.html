@@ -4336,19 +4336,9 @@ function actAwardSubmission(submissionId) {
     // submitted amount stays on the submission as its own historical record).
     { id: 'award_amount', label: 'Award / Contract / PO Price $', type: 'currency', required: true, value: s?.amount },
     { id: 'pm_id', label: 'Assign PM (can be set later)', type: 'select', emptyLabel: 'TBD', options: teamOpts(['pm', 'sales', 'estimator']) },
-    // Forced here, not at submission — each only actually matters once a
-    // bid wins (notifies a different back-office team on award). Pre-filled
-    // if already answered earlier (Start Bid/Edit Bid); still a real
-    // required choice if not.
-    { id: 'certified_payroll', label: 'Certified Payroll Job?', type: 'select', required: true,
-      value: b.certified_payroll == null ? '' : (b.certified_payroll ? 1 : 0),
-      options: submitYesNoOptions('Yes — notifies Accounting', b.certified_payroll != null) },
-    { id: 'tax_exempt', label: 'Tax Exempt Job?', type: 'select', required: true,
-      value: b.tax_exempt == null ? '' : (b.tax_exempt ? 1 : 0),
-      options: submitYesNoOptions('Yes — notifies Purchasing', b.tax_exempt != null) },
-    { id: 'prevailing_wage', label: 'Prevailing Wage Job?', type: 'select', required: true,
-      value: b.prevailing_wage == null ? '' : (b.prevailing_wage ? 1 : 0),
-      options: submitYesNoOptions('Yes', b.prevailing_wage != null) },
+    // Per the estimating dept head (2026-09-16): no longer asked/required at
+    // Award — still settable any time via Start Bid/Edit Bid if it matters
+    // for a given job, but the confirm-award flow no longer forces an answer.
   ], async data => {
     await api('POST', `/api/v2/submissions/${submissionId}/award`, data);
     await maybeBatchNotAwardSiblings(submissionId, s?.company?.name);
