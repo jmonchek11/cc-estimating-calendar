@@ -604,8 +604,9 @@ const IDEA_ADMIN_NOTIFY_EMAIL = 'jmonchek@libertyintegrated.com';
 // Every submission — admin or not — sits in 'pending_approval' until one of
 // these people approves it (approveIdea in db.js), discussed at the 8am
 // Bid/No-bid meeting. Was admin-bypass-straight-to-'new' before; Carrie
-// asked for every idea to go through the same review.
-const IDEA_APPROVER_EMAILS = ['cwinters@libertyintegrated.com', 'jbaker@libertyintegrated.com', 'ddosenbach@libertyintegrated.com', 'cyaffe@libertyintegrated.com'];
+// asked for every idea to go through the same review. Carrie only as of
+// 2026-09-16 — Connor/Dillon/Jess used to be notified too but shouldn't be.
+const IDEA_APPROVER_EMAILS = ['cyaffe@libertyintegrated.com'];
 
 app.post('/api/ideas', async (req, res) => {
   if (!req.session.userId) return res.status(401).json({ error: 'Not logged in' });
