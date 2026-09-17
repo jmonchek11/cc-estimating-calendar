@@ -542,6 +542,8 @@ router.post('/api/v2/jobs',                   t(req => v2db.createLegacyJob({ ..
   (req, r) => ({ action: 'job.create_legacy', summary: `Created legacy job #${r.job_id || r.id}`, entity_type: 'job', entity_id: r.job_id || r.id })));
 router.patch('/api/v2/jobs/:id',              t(req => v2db.updateJob(req.params.id, req.body, req.session.userId),
   (req) => ({ action: 'job.update', summary: `Edited job #${req.params.id} (${Object.keys(req.body).join(', ')})`, entity_type: 'job', entity_id: Number(req.params.id) })));
+router.patch('/api/v2/jobs/:id/permits',      t(req => v2db.updateJobPermits(req.params.id, req.body),
+  (req) => ({ action: 'job.update_permits', summary: `Edited permits on job #${req.params.id} (${Object.keys(req.body).join(', ')})`, entity_type: 'job', entity_id: Number(req.params.id) })));
 router.post('/api/v2/jobs/:id/change-orders', t(req => v2db.createChangeOrder(req.params.id, req.body, req.session.userId),
   async (req, r) => ({ action: 'co.create', summary: `Created CO ${await v2db.coLabel(r.co_id)} on job #${req.params.id}`, entity_type: 'change_order', entity_id: r.co_id })));
 

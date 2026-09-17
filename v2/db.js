@@ -439,6 +439,12 @@ async function getProjectDetail(projectId) {
       // (same real folder, just renamed) — falls back to the bid's current
       // value only for older jobs awarded before Job had its own field.
       folder_url: j.folder_url || (j.winning_bid_id ? (bids.find(b => b._id === j.winning_bid_id)?.folder_url || null) : null),
+      needs_permit: j.needs_permit == null ? null : !!j.needs_permit,
+      needs_rough_in_permit: j.needs_rough_in_permit == null ? null : !!j.needs_rough_in_permit,
+      needs_accelerated_permit: j.needs_accelerated_permit == null ? null : !!j.needs_accelerated_permit,
+      permit_date_applied: j.permit_date_applied || null,
+      permit_date_approved: j.permit_date_approved || null,
+      permit_date_coa_received: j.permit_date_coa_received || null,
       change_orders: cos
         .filter(c => c.job_id === j._id)
         .map(fmtCo)
@@ -2517,6 +2523,35 @@ async function updateJob(id, data, actorId) {
   return { job_id: jobId };
 }
 
+// Permit tracking (Pat McCreesh's process) — one endpoint for both phases
+// (requirements + dates) since it's soft-locked, not hard-enforced: whatever
+// fields are present in `data` get set, so the same "Edit" action can touch
+// the Yes/No requirements again later just as easily as it fills in a date.
+// Three-state on needs_permit (null = not yet answered), same pattern as
+// Bid.certified_payroll/tax_exempt/prevailing_wage.
+async function updateJobPermits(id, data) {
+  const M = getModels();
+  const jobId = Number(id);
+  const job = await M.Job.findById(jobId).lean();
+  if (!job) throw new Error('Job not found');
+  const b3 = (v) => (v === '' || v == null) ? null : (Number(v) === 1);
+  const upd = { updated_at: ts() };
+  if ('needs_permit' in data) {
+    upd.needs_permit = b3(data.needs_permit);
+    // The sub-questions only mean anything once a permit is actually
+    // needed — clear them rather than leave a stale Yes/No sitting under a
+    // "No permit needed" answer.
+    if (upd.needs_permit !== true) { upd.needs_rough_in_permit = null; upd.needs_accelerated_permit = null; }
+  }
+  if ('needs_rough_in_permit' in data) upd.needs_rough_in_permit = b3(data.needs_rough_in_permit);
+  if ('needs_accelerated_permit' in data) upd.needs_accelerated_permit = b3(data.needs_accelerated_permit);
+  for (const f of ['permit_date_applied', 'permit_date_approved', 'permit_date_coa_received']) {
+    if (f in data) upd[f] = data[f] || null;
+  }
+  await M.Job.updateOne({ _id: jobId }, { $set: upd });
+  return { job_id: jobId };
+}
+
 // ── Change Orders ─────────────────────────────────────────────────────────────
 // Shared lookup for CO event payloads — project name + job # via the CO's Job.
 async function _coEventContext(M, co) {
@@ -4346,7 +4381,7 @@ module.exports = {
   getCompanyCommunications, getContactCommunications, getAllCommunications,
   addBidCustomerContact, removeBidCustomerContact,
   awardSubmission, notAwardSubmission, closeBid, approveToBid, unapproveToBid, logFollowupV2, updateFollowup,
-  createLegacyJob, updateJob,
+  createLegacyJob, updateJob, updateJobPermits,
   createChangeOrder, submitCO, approveCO, notApproveCO, voidCO, reopenCO, reviseCO,
   createCoRequest, approveCoRequest, unapproveCoRequest, startCoRequest,
   _norm, resolveCompanyByName, ensureBidCustomer, teamMap,

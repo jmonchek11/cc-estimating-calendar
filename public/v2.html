@@ -3008,7 +3008,63 @@ function jobNode(j, legacy = false) {
         </div>
       </div>
     </div>
+    ${permitsSectionHtml(j)}
     ${j.change_orders.map(coNode).join('')}`;
+}
+
+// Permit tracking (Pat McCreesh's process) — two phases: requirements
+// (needs_permit +, if yes, rough-in/accelerated) answered once, then dates
+// filled in as they happen. Soft-locked, not hard-enforced — "edit" always
+// reopens the requirements even after dates exist, same as every other form
+// here; the UI just leads with whichever phase is more relevant right now.
+function permitYesNo(v) { return v === true ? 'Yes' : v === false ? 'No' : 'TBD'; }
+function permitsSectionHtml(j) {
+  if (j.needs_permit == null) {
+    return `<div class="v2-co" style="border-left-color:#a855f7">
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:700;font-size:12px;color:#7e22ce">🏛️ Permits — not yet reviewed</div>
+        <button class="v2-btn outline" style="margin-top:6px;font-size:11px;padding:3px 8px" onclick="actEditPermitRequirements(${j.id})">Set permit requirements</button>
+      </div>
+    </div>`;
+  }
+  if (j.needs_permit === false) {
+    return `<div class="v2-co" style="border-left-color:#a855f7">
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:700;font-size:12px;color:#7e22ce">🏛️ Permits — not required <a href="#" onclick="event.preventDefault();actEditPermitRequirements(${j.id})" style="font-size:11px;color:#2563eb;font-weight:400">edit</a></div>
+      </div>
+    </div>`;
+  }
+  const dateRow = (label, val) => `<div style="font-size:11.5px;color:var(--text-muted)">${label}: ${val ? fmtD(val) : '—'}</div>`;
+  return `<div class="v2-co" style="border-left-color:#a855f7">
+    <div style="flex:1;min-width:0">
+      <div style="font-weight:700;font-size:12px;color:#7e22ce">🏛️ Permits — required <a href="#" onclick="event.preventDefault();actEditPermitRequirements(${j.id})" style="font-size:11px;color:#2563eb;font-weight:400">edit</a></div>
+      <div style="font-size:11.5px;color:var(--text-muted);margin-top:2px">Rough-In: ${permitYesNo(j.needs_rough_in_permit)} · Accelerated: ${permitYesNo(j.needs_accelerated_permit)}</div>
+      ${dateRow('Applied', j.permit_date_applied)}
+      ${dateRow('Approved', j.permit_date_approved)}
+      ${dateRow('COA Received', j.permit_date_coa_received)}
+      <button class="v2-btn outline" style="margin-top:6px;font-size:11px;padding:3px 8px" onclick="actEditPermitDates(${j.id})">Update dates</button>
+    </div>
+  </div>`;
+}
+function actEditPermitRequirements(jobId) {
+  const j = DETAIL_CACHE[OPEN_PROJECT]?.jobs.find(x => x.id === jobId) || {};
+  const yn = (v) => v == null ? '' : (v ? 1 : 0);
+  showForm('🏛️ Permit Requirements', [
+    { id: 'needs_permit', label: 'Do we need a permit?', type: 'select', emptyLabel: 'TBD — not yet known', value: yn(j.needs_permit),
+      options: [{ value: 1, label: 'Yes' }, { value: 0, label: 'No' }] },
+    { id: 'needs_rough_in_permit', label: 'Do we need a Rough-In permit?', type: 'select', emptyLabel: 'TBD — not yet known', value: yn(j.needs_rough_in_permit),
+      options: [{ value: 1, label: 'Yes' }, { value: 0, label: 'No' }] },
+    { id: 'needs_accelerated_permit', label: 'Do we need an Accelerated permit?', type: 'select', emptyLabel: 'TBD — not yet known', value: yn(j.needs_accelerated_permit),
+      options: [{ value: 1, label: 'Yes' }, { value: 0, label: 'No' }] },
+  ], data => api('PATCH', `/api/v2/jobs/${jobId}/permits`, data), 'Save', 'blue');
+}
+function actEditPermitDates(jobId) {
+  const j = DETAIL_CACHE[OPEN_PROJECT]?.jobs.find(x => x.id === jobId) || {};
+  showForm('🏛️ Permit Dates', [
+    { id: 'permit_date_applied', label: 'Date Permit Applied', type: 'date', value: j.permit_date_applied },
+    { id: 'permit_date_approved', label: 'Date Permit Approved', type: 'date', value: j.permit_date_approved },
+    { id: 'permit_date_coa_received', label: 'Date Certificate of Approval Received', type: 'date', value: j.permit_date_coa_received },
+  ], data => api('PATCH', `/api/v2/jobs/${jobId}/permits`, data), 'Save', 'blue');
 }
 
 function coNode(co) {

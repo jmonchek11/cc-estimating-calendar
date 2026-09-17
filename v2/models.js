@@ -199,6 +199,24 @@ const JobSchema = new mongoose.Schema({
   // later without touching the bid, and so a legacy job (no bid at all) can
   // have one too — same field, same editing UI as Bid.folder_url.
   folder_url:         { type: String, default: null },
+
+  // Permit tracking (Pat McCreesh's process — applying for, accelerating,
+  // and closing out permits/COA). Two phases: requirements (needs_permit +,
+  // if yes, the two sub-questions) answered once up front, then dates filled
+  // in as they actually happen. Soft-locked, not hard-enforced — the
+  // requirements stay correctable later via an explicit Edit action, same
+  // as every other form in the app; the UI just leads with the dates phase
+  // once requirements are answered instead of re-asking them every time.
+  // Three-state (null = not yet answered) on needs_permit, same pattern as
+  // Bid.certified_payroll/tax_exempt/prevailing_wage.
+  needs_permit:              { type: Boolean, default: null },
+  // Only meaningful once needs_permit === true; left null otherwise.
+  needs_rough_in_permit:     { type: Boolean, default: null },
+  needs_accelerated_permit:  { type: Boolean, default: null },
+  permit_date_applied:       { type: String, default: null },
+  permit_date_approved:      { type: String, default: null },
+  permit_date_coa_received:  { type: String, default: null },   // Certificate of Approval
+
   created_at: { type: String, default: ts },
   updated_at: { type: String, default: ts },
 }, opts);
