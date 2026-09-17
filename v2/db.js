@@ -992,12 +992,25 @@ async function recomputeBidHeadline(bidId) {
   }});
 }
 
-// Add a company to a bid's customer roster if it isn't already on it (idempotent).
+// Add a company to a bid's customer roster if it isn't already on it
+// (idempotent). Two near-simultaneous calls (e.g. a double form-submit) can
+// each see the row as not existing yet and both try to insert — a plain
+// find-then-create, or even findOneAndUpdate+upsert, does NOT prevent this
+// on its own; only the unique (bid_id, company_id) index on BidCustomer
+// (models.js) actually closes the race, by rejecting the loser's insert.
+// Confirmed happening on 5 bids in prod (B26-0288/Gilbane among them), each
+// showing the same customer twice with the same submission underneath —
+// cleaned up 2026-09-17. The loser's duplicate-key error (code 11000) just
+// means the winner already created it, so it's a no-op, not a real failure.
 async function ensureBidCustomer(bidId, companyId) {
   const M = getModels();
   const exists = await M.BidCustomer.findOne({ bid_id: bidId, company_id: companyId }).lean();
   if (exists) return;
-  await M.BidCustomer.create({ _id: await nextId('bid_customers'), bid_id: bidId, company_id: companyId, contact_ids: [] });
+  try {
+    await M.BidCustomer.create({ _id: await nextId('bid_customers'), bid_id: bidId, company_id: companyId, contact_ids: [] });
+  } catch (e) {
+    if (e.code !== 11000) throw e;
+  }
 }
 
 // Find a company by case/punctuation-insensitive name, creating it if new. Lets

@@ -288,6 +288,14 @@ const BidCustomerSchema = new mongoose.Schema({
   company_id:  { type: Number, required: true },                 // FK → Company
   contact_ids: { type: [Number], default: [] },                  // FK → Contact (at this company, for this bid)
 }, opts);
+// One customer per bid — without this, two near-simultaneous "add this
+// customer" calls (e.g. a double form-submit) can each see the row as not
+// existing yet and both insert, silently duplicating the customer on the
+// bid (confirmed happening on 5 bids in prod, cleaned up 2026-09-17). A
+// findOneAndUpdate+upsert alone does NOT prevent this without a unique
+// index backing it — see ensureBidCustomer in v2/db.js, which now also
+// swallows the resulting duplicate-key error as a no-op.
+BidCustomerSchema.index({ bid_id: 1, company_id: 1 }, { unique: true });
 
 // One row per submission EVENT: a number we sent to a specific customer.
 // A bid has many — one per customer, plus best-and-final / scope-change
