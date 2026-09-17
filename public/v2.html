@@ -2543,8 +2543,8 @@ function customerRowHtml(b, cust) {
 
   let outcomeBadge = '', right = '', actionsHtml = '', followupsHtml = '', subMetaExtra = '';
   if (current) {
-    if (current.outcome === 'awarded') outcomeBadge = ` <span class="awarded-pill">✓ AWARDED ${fmtD(current.award_date)}</span>`;
-    else if (current.outcome === 'not_awarded') outcomeBadge = ` <span class="badge" style="background:#fee2e2;color:#991b1b">✗ NOT AWARDED ${fmtD(current.date_not_awarded)}</span>`;
+    if (current.outcome === 'awarded') outcomeBadge = ` <span class="awarded-pill">✓ AWARDED ${fmtD(current.award_date)}</span>${CURRENT_USER?.is_admin ? ` <a href="#" onclick="event.preventDefault();actRevertAward(${current.id})" style="font-size:11px;color:#dc2626">↺ revert</a>` : ''}`;
+    else if (current.outcome === 'not_awarded') outcomeBadge = ` <span class="badge" style="background:#fee2e2;color:#991b1b">✗ NOT AWARDED ${fmtD(current.date_not_awarded)}</span>${CURRENT_USER?.is_admin ? ` <a href="#" onclick="event.preventDefault();actRevertNotAwarded(${current.id})" style="font-size:11px;color:#dc2626">↺ revert</a>` : ''}`;
     else if (current.outcome === 'pending' && current.awaiting_po) outcomeBadge = ` <span class="badge" style="background:#ffedd5;color:#9a3412" title="${esc(current.awaiting_po_notes || 'Getting this — waiting on contract/PO/funding')}">🔥 AWAITING PO</span>`;
     const overdue = !b.project_on_hold && current.next_followup_date && current.next_followup_date < today && current.outcome === 'pending';
     // Once awarded, the negotiated award_amount is the number that matters —
@@ -4437,6 +4437,21 @@ function actNotAwardSubmission(submissionId) {
     { id: 'gc_awarded', label: 'Did the GC still win this job?', type: 'select', emptyLabel: "Don't know yet",
       options: [{ value: '1', label: 'Yes — they won it, picked someone else' }, { value: '0', label: 'No — they didn\'t win it either' }] },
   ], data => api('POST', `/api/v2/submissions/${submissionId}/not-awarded`, data), 'Confirm Not Awarded', 'red');
+}
+
+// Admin-only corrections for a mistaken Award/Not Awarded — e.g. marked
+// Awarded when really it's just verbally promised and still waiting on a
+// PO (see 🔥 Awaiting PO), or a plain data-entry mistake. Reverting an
+// award also deletes the Job it created, but ONLY if nothing real has
+// happened to it yet (no Job # from accounting, no change orders) — the
+// server refuses otherwise rather than risk destroying real work.
+function actRevertAward(submissionId) {
+  if (!confirm('Revert this award back to Pending? If a Job was created for it (and nothing has been done with it yet — no Job # or change orders), that Job will be deleted too.')) return;
+  api('POST', `/api/v2/submissions/${submissionId}/revert-award`, {}).then(refresh).catch(e => alert('Failed: ' + e.message));
+}
+function actRevertNotAwarded(submissionId) {
+  if (!confirm('Revert this Not Awarded decision back to Pending?')) return;
+  api('POST', `/api/v2/submissions/${submissionId}/revert-not-awarded`, {}).then(refresh).catch(e => alert('Failed: ' + e.message));
 }
 
 // A GC's own fate (did they win the overall job from the building owner)

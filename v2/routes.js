@@ -450,6 +450,13 @@ router.post('/api/v2/submissions/:id/award', async (req, res) => {
 });
 router.post('/api/v2/submissions/:id/not-awarded',  t(req => v2db.notAwardSubmission(req.params.id, req.body, req.session.userId),
   async (req, r) => ({ action: 'bid.not_awarded', summary: `Marked a submission not awarded on bid ${await v2db.bidLabel(r.bid_id)}`, entity_type: 'bid', entity_id: r.bid_id })));
+// Admin-only corrections for a mistaken Award/Not Awarded — see revertAward/
+// revertNotAwarded in v2/db.js for the safety checks (won't silently delete
+// a Job that already has a Job # or change orders on it).
+router.post('/api/v2/submissions/:id/revert-award', requireAdmin, t(req => v2db.revertAward(req.params.id, req.session.userId),
+  async (req, r) => ({ action: 'bid.revert_award', summary: `Reverted award on bid ${await v2db.bidLabel(r.bid_id)}${r.job_deleted ? ' (Job deleted)' : ''}`, entity_type: 'bid', entity_id: r.bid_id })));
+router.post('/api/v2/submissions/:id/revert-not-awarded', requireAdmin, t(req => v2db.revertNotAwarded(req.params.id, req.session.userId),
+  async (req, r) => ({ action: 'bid.revert_not_awarded', summary: `Reverted not-awarded on bid ${await v2db.bidLabel(r.bid_id)}`, entity_type: 'bid', entity_id: r.bid_id })));
 
 // ── Import Bid from JIS (Job Information Sheet) ───────────────────────────────
 // file_base64: the .xlsx file, base64-encoded (existing express.json limit is

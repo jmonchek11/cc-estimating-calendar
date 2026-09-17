@@ -1809,6 +1809,78 @@ async function notAwardSubmission(submissionId, data, actorId) {
   return { submission_id: sub._id, bid_id: bid._id };
 }
 
+// ── Admin corrections: undo an Awarded/Not Awarded decision on one
+// submission ──────────────────────────────────────────────────────────────
+// Per Joe (2026-09-17): mistakes happen (marked awarded/not-awarded when it
+// shouldn't have been), and the "we're getting it, waiting on paperwork"
+// situation (see awaiting_po) sometimes only becomes clear AFTER someone
+// already jumped straight to Awarded. Admin-only, not the general
+// reactivateBid() flow — this reverses a single submission's outcome, not
+// the whole bid's stage.
+async function revertAward(submissionId, actorId) {
+  const M = getModels();
+  const sub = await loadSubmission(submissionId);
+  const bid = await loadBid(sub.bid_id);
+  if (sub.outcome !== 'awarded') throw new Error(`This submission isn't Awarded (it's '${sub.outcome}')`);
+  // The Job created at award time only gets deleted if nothing real has
+  // happened to it yet — a Job # from accounting or a real change order
+  // means someone downstream is already relying on it existing, so refuse
+  // rather than silently destroy that work; the admin has to sort it out
+  // manually in that case.
+  const job = await M.Job.findOne({ winning_bid_id: bid._id }).lean();
+  if (job) {
+    if (job.job_number) throw new Error(`Can't revert — this job already has Job # ${job.job_number} from accounting. Clear the Job # first if this really was a mistake.`);
+    const coCount = await M.ChangeOrder.countDocuments({ job_id: job._id });
+    if (coCount) throw new Error("Can't revert — this job already has change order(s) on it. This needs to be sorted out manually.");
+  }
+  const s = await getSettings();
+  await M.BidSubmission.updateOne({ _id: sub._id }, { $set: {
+    outcome: 'pending', award_date: null, award_amount: null,
+    next_followup_date: addWorkingDays(sub.date_submitted || today(), s.fu_initial_days),
+    updated_at: ts(),
+  }});
+  await M.Bid.updateOne({ _id: bid._id }, { $set: {
+    stage: 'submitted', award_date: null, awarded_company_id: null, updated_at: ts(),
+  }});
+  if (job) await M.Job.deleteOne({ _id: job._id });
+  await recomputeBidHeadline(bid._id);
+  await recomputeBidFollowup(bid._id);
+  const proj = await M.Project.findById(bid.project_id).lean();
+  await events.safeEmit('bid.stage_changed', {
+    project_id: bid.project_id, bid_id: bid._id, actor_id: actorId || null,
+    payload: { from: 'awarded', to: 'submitted', project_name: proj?.name || null, reason: 'award reverted (admin correction)' },
+  });
+  return { submission_id: sub._id, bid_id: bid._id, job_deleted: !!job };
+}
+
+async function revertNotAwarded(submissionId, actorId) {
+  const M = getModels();
+  const sub = await loadSubmission(submissionId);
+  const bid = await loadBid(sub.bid_id);
+  if (sub.outcome !== 'not_awarded') throw new Error(`This submission isn't Not Awarded (it's '${sub.outcome}')`);
+  const s = await getSettings();
+  await M.BidSubmission.updateOne({ _id: sub._id }, { $set: {
+    outcome: 'pending', date_not_awarded: null, not_awarded_notes: null, gc_awarded: null,
+    next_followup_date: addWorkingDays(sub.date_submitted || today(), s.fu_initial_days),
+    updated_at: ts(),
+  }});
+  // If every customer on the bid had already been decided, reconcileBidOutcome
+  // had already flipped the bid itself to 'not_awarded' — reopening one
+  // submission means that's no longer true, so move the bid back.
+  if (bid.stage === 'not_awarded') {
+    await M.Bid.updateOne({ _id: bid._id }, { $set: {
+      stage: 'submitted', date_not_awarded: null, not_awarded_notes: null, updated_at: ts(),
+    }});
+    const proj = await M.Project.findById(bid.project_id).lean();
+    await events.safeEmit('bid.stage_changed', {
+      project_id: bid.project_id, bid_id: bid._id, actor_id: actorId || null,
+      payload: { from: 'not_awarded', to: 'submitted', project_name: proj?.name || null, reason: 'not-awarded reverted (admin correction)' },
+    });
+  }
+  await recomputeBidFollowup(bid._id);
+  return { submission_id: sub._id, bid_id: bid._id };
+}
+
 // ── lead / opportunity / active_bid → closed ──────────────────────────────────
 async function closeBid(id, data, actorId) {
   const M = getModels();
@@ -4393,7 +4465,7 @@ module.exports = {
   getContacts, getContactDetail, createContact, updateContact, deleteContact, getContactBids, getCompanyBids,
   getCompanyCommunications, getContactCommunications, getAllCommunications,
   addBidCustomerContact, removeBidCustomerContact,
-  awardSubmission, notAwardSubmission, closeBid, approveToBid, unapproveToBid, logFollowupV2, updateFollowup,
+  awardSubmission, notAwardSubmission, revertAward, revertNotAwarded, closeBid, approveToBid, unapproveToBid, logFollowupV2, updateFollowup,
   createLegacyJob, updateJob, updateJobPermits,
   createChangeOrder, submitCO, approveCO, notApproveCO, voidCO, reopenCO, reviseCO,
   createCoRequest, approveCoRequest, unapproveCoRequest, startCoRequest,
