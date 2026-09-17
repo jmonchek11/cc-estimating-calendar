@@ -345,6 +345,17 @@ const BidSubmissionSchema = new mongoose.Schema({
   created_at:      { type: String, default: ts },
   updated_at:      { type: String, default: ts },
 }, opts);
+// At most one CURRENT submission per (bid, company) — a superseded
+// (is_current:0) row is real history and there can be many of those, but
+// two "live" rows for the same customer double-counts everything built on
+// is_current (Reports' byCustomer $, Dashboard's overdue-follow-up count,
+// the bid card itself showing the same customer's decision twice). A
+// near-simultaneous double form-submit on Add Submission (find-then-update-
+// then-create, not atomic) has produced exactly this in prod — confirmed on
+// 3 bids, cleaned up 2026-09-17 alongside the same-shaped BidCustomer bug.
+// Partial index (only enforced where is_current:1) so old superseded rows
+// sharing the same (bid_id, company_id) never trip it.
+BidSubmissionSchema.index({ bid_id: 1, company_id: 1 }, { unique: true, partialFilterExpression: { is_current: 1 } });
 
 const ContactSchema = new mongoose.Schema({
   _id:        Number,

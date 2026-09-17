@@ -1424,13 +1424,21 @@ async function submitBid(id, data, actorId) {
   const s = await getSettings();
   for (const companyId of companyIds) {
     await ensureBidCustomer(bid._id, companyId);
-    await M.BidSubmission.create({
-      _id: await nextId('bid_submissions'),
-      bid_id: bid._id, company_id: companyId,
-      amount: Number(data.amount), date_submitted: data.date_submitted, approved_by: data.approved_by,
-      submission_type: 'initial', notes: data.notes || null, is_current: 1,
-      outcome: 'pending', next_followup_date: addWorkingDays(data.date_submitted, s.fu_initial_days),
-    });
+    try {
+      await M.BidSubmission.create({
+        _id: await nextId('bid_submissions'),
+        bid_id: bid._id, company_id: companyId,
+        amount: Number(data.amount), date_submitted: data.date_submitted, approved_by: data.approved_by,
+        submission_type: 'initial', notes: data.notes || null, is_current: 1,
+        outcome: 'pending', next_followup_date: addWorkingDays(data.date_submitted, s.fu_initial_days),
+      });
+    } catch (e) {
+      // Same double form-submit race as addSubmission — a duplicate-key hit
+      // here just means this customer already got submitted (by the other
+      // half of the double-click), not a real failure; skip it and move on
+      // to the rest of the batch rather than aborting the whole submit.
+      if (e.code !== 11000) throw e;
+    }
   }
 
   const upd = { jurisdiction: String(data.jurisdiction), updated_at: ts() };
@@ -1487,13 +1495,24 @@ async function addSubmission(id, data, actorId) {
     { $set: { is_current: 0, next_followup_date: null, updated_at: ts() } }
   );
   const s = await getSettings();
-  await M.BidSubmission.create({
-    _id: await nextId('bid_submissions'),
-    bid_id: bid._id, company_id: companyId,
-    amount: Number(data.amount), date_submitted: data.date_submitted, approved_by: data.approved_by,
-    submission_type: data.submission_type, notes: data.notes || null, is_current: 1,
-    outcome: 'pending', next_followup_date: addWorkingDays(data.date_submitted, s.fu_initial_days),
-  });
+  try {
+    await M.BidSubmission.create({
+      _id: await nextId('bid_submissions'),
+      bid_id: bid._id, company_id: companyId,
+      amount: Number(data.amount), date_submitted: data.date_submitted, approved_by: data.approved_by,
+      submission_type: data.submission_type, notes: data.notes || null, is_current: 1,
+      outcome: 'pending', next_followup_date: addWorkingDays(data.date_submitted, s.fu_initial_days),
+    });
+  } catch (e) {
+    // The unique (bid_id, company_id) partial index (models.js) means a
+    // near-simultaneous double form-submit now fails loudly instead of
+    // silently creating two "current" rows for the same customer — unlike
+    // ensureBidCustomer's identical-either-way rows, two submissions here
+    // could carry different amounts/dates, so silently dropping the loser
+    // isn't safe; surface it and let them check what's actually there.
+    if (e.code === 11000) throw new Error('This customer already has a current submission — someone else may have just added one. Refresh and check before retrying.');
+    throw e;
+  }
   await recomputeBidHeadline(bid._id);
   await recomputeBidFollowup(bid._id);
 
@@ -3526,7 +3545,11 @@ async function getReports({ from, to, granularity, personId } = {}) {
     const s = ensureCust(sub.company_id);
     s.submittedCount++; s.submittedValue += (sub.amount || 0);
     if (b.stage === 'closed') s.closedCount++;
-    else if (sub.outcome === 'awarded') { s.awardedCount++; s.awardedValue += (sub.amount || 0); }
+    // Once awarded, the negotiated award_amount (if captured) is the real
+    // number — same fallback recomputeBidHeadline already uses for the
+    // bid's own headline. Using the originally-submitted amount here
+    // instead was quietly wrong whenever the two differed.
+    else if (sub.outcome === 'awarded') { s.awardedCount++; s.awardedValue += (sub.award_amount ?? sub.amount ?? 0); }
     else if (sub.outcome === 'not_awarded') s.notAwardedCount++;
     else s.pendingCount++;
   }));
