@@ -6725,6 +6725,7 @@ function ideaCardHtml(i, isAdmin) {
               ${i.page ? ` · <span style="background:#f1f5f9;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:600">${esc(IDEA_PAGE_NAMES[i.page] || i.page)}</span>` : ''}
               · <span style="background:${pending ? '#fffbeb' : '#f1f5f9'};color:${pending ? '#92400e' : 'inherit'};padding:1px 5px;border-radius:3px;font-size:10px;font-weight:600">${IDEA_STATUS_LABEL[i.status]}</span>
               ${pending && !isAdmin ? ` · <span style="font-size:10px;color:var(--text-muted)">not yet visible to others</span>` : ''}
+              ${i.approved_by_name ? ` · <span style="color:#166534">✓ approved by ${esc(i.approved_by_name)}</span>` : ''}
             </div>
           </div>
           ${canApproveIdeas && pending ? `<div style="display:flex;gap:4px;flex-shrink:0">

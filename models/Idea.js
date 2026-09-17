@@ -26,6 +26,11 @@ const schema = new mongoose.Schema({
   page:         { type: String, default: null },
   submitted_by: { type: Number, default: null },
   status:       { type: String, enum: IDEA_STATUSES, default: 'new' },
+  // Who cleared it out of pending_approval (see approveIdea in db.js) and
+  // when — surfaced on the Ideas popup and in the "new idea" notification
+  // email so Joe can see at a glance that it went through Carrie.
+  approved_by:  { type: Number, default: null },
+  approved_at:  { type: String, default: null },
   // Map of userId (string) -> 1 (upvote) | -1 (downvote). A user's own key is
   // removed entirely when they un-vote, rather than stored as 0.
   votes:        { type: Map, of: Number, default: {} },

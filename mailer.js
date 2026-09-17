@@ -661,11 +661,12 @@ function emailIdeaSubmitted(idea, submitterName) {
     subject: `${idea.type === 'issue' ? '🐛' : '💡'} New ${idea.type === 'issue' ? 'bug report' : 'idea'} — ${idea.title}`,
     html: base(`
       ${iconHeading(ideaIconUrl(idea.type), IDEA_TYPE_ICON(idea.type))}
-      <p><strong>${submitterName || 'Someone'}</strong> just submitted a new ${idea.type === 'issue' ? 'bug report' : 'idea'}.</p>
+      <p><strong>${submitterName || 'Someone'}</strong> just submitted a new ${idea.type === 'issue' ? 'bug report' : 'idea'}${idea.approved_by_name ? `, approved by <strong>${idea.approved_by_name}</strong>` : ''}.</p>
       <table>
         <tr><td class="lbl">Title</td><td><strong>${idea.title}</strong></td></tr>
         ${idea.body ? `<tr><td class="lbl">Details</td><td>${idea.body}</td></tr>` : ''}
         ${idea.page ? `<tr><td class="lbl">Page</td><td>${idea.page}</td></tr>` : ''}
+        ${idea.approved_by_name ? `<tr><td class="lbl">Approved by</td><td>${idea.approved_by_name}</td></tr>` : ''}
       </table>
       ${buttonRow({ href: APP_URL, label: 'Open App' })}
     `),

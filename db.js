@@ -1033,6 +1033,8 @@ async function getIdeas(viewerId) {
       status: i.status, created_at: i.created_at, updated_at: i.updated_at,
       submitted_by_name:     i.submitted_by && teamMap[i.submitted_by] ? teamMap[i.submitted_by].name : null,
       submitted_by_initials: i.submitted_by && teamMap[i.submitted_by] ? teamMap[i.submitted_by].initials : null,
+      approved_by_name: i.approved_by && teamMap[i.approved_by] ? teamMap[i.approved_by].name : null,
+      approved_at: i.approved_at || null,
       score,
       my_vote: viewerId ? (votes[String(viewerId)] || 0) : 0,
       comments: (i.comments || []).map(c => ({
@@ -1080,9 +1082,11 @@ async function approveIdea(id, approverId) {
   const idea = await Idea.findById(Number(id)).lean();
   if (!idea) throw new Error('Idea not found');
   if (idea.status !== 'pending_approval') throw new Error(`This isn't awaiting approval (status is '${idea.status}')`);
-  await Idea.updateOne({ _id: Number(id) }, { status: 'new', updated_at: nowStr() });
+  const now = nowStr();
+  await Idea.updateOne({ _id: Number(id) }, { status: 'new', approved_by: approverId || null, approved_at: now, updated_at: now });
   const submitter = idea.submitted_by ? await getMember(idea.submitted_by) : null;
-  return { id: Number(id), type: idea.type, title: idea.title, body: idea.body, page: idea.page, submitted_by: idea.submitted_by, submitter_name: submitter?.name || null };
+  const approver = approverId ? await getMember(approverId) : null;
+  return { id: Number(id), type: idea.type, title: idea.title, body: idea.body, page: idea.page, submitted_by: idea.submitted_by, submitter_name: submitter?.name || null, approved_by_name: approver?.name || null, approved_at: now };
 }
 
 // value: 1 (upvote), -1 (downvote), or 0 (remove my vote)
