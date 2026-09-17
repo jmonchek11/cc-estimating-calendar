@@ -3434,13 +3434,20 @@ async function setAwaitingPo(submissionId, data, actorId) {
 // PM (falling back to the winning bid's estimator/salesperson, same
 // fallback getDashboard's mineOnly filter uses), and a CO via its own
 // estimator or its parent job's match — "any person relevant" per the ask.
-async function getReports({ from, to, granularity, personId } = {}) {
+// Shared base for getReports + both drill-downs — the exact same eligible-
+// bid cohort every one of them counts from, so a number shown on a chart/
+// card and the list you get by clicking into it can never disagree. Filters:
+// personId (estimator/salesperson/apm/sub-estimator on the bid), companyId
+// (bid has this company on its customer roster), typeOfWork/sizeBucket
+// (the bid's Project). All optional/composable.
+async function getReportsCohort({ from, to, granularity, personId, companyId, typeOfWork, sizeBucket } = {}) {
   const M = getModels();
   const gran = ['week', 'month', 'year'].includes(granularity) ? granularity : 'month';
   const pid = personId ? Number(personId) : null;
+  const cid = companyId ? Number(companyId) : null;
   const inRange = (d) => !!d && (!from || d >= from) && (!to || d <= to);
 
-  const [bids, cos, jobs, projects, companies, members, currentSubs] = await Promise.all([
+  const [bids, cos, jobs, projects, companies, members, currentSubs, bidCustomers] = await Promise.all([
     M.Bid.find({ superseded: { $ne: 1 } }).lean(),
     M.ChangeOrder.find({ superseded: { $ne: 1 } }).lean(),
     M.Job.find().lean(),
@@ -3448,41 +3455,53 @@ async function getReports({ from, to, granularity, personId } = {}) {
     M.Company.find().lean(),
     M.TeamMember.find().lean(),
     M.BidSubmission.find({ is_current: 1 }).lean(),
+    cid ? M.BidCustomer.find({ company_id: cid }).lean() : Promise.resolve([]),
   ]);
 
-  const pName = {}; projects.forEach(p => pName[p._id] = p.name);
+  const pName = {}; const pType = {}; const pSize = {};
+  projects.forEach(p => { pName[p._id] = p.name; pType[p._id] = p.type_of_work || null; pSize[p._id] = p.size_bucket || null; });
   const coName = {}; companies.forEach(c => coName[c._id] = c.name);
   const bidById = {}; bids.forEach(b => bidById[b._id] = b);
   const jobById = {}; jobs.forEach(j => jobById[j._id] = j);
   const tm = teamMap(members);
+  const bidsWithCompany = cid ? new Set(bidCustomers.map(bc => bc.bid_id)) : null;
 
   const bidMatchesPerson = (b) => !pid || b.estimator_id === pid || b.salesperson_id === pid || b.apm_id === pid || (b.sub_estimators || []).some(s => s.estimator_id === pid);
+  const bidMatchesFilters = (b) =>
+    bidMatchesPerson(b)
+    && (!cid || bidsWithCompany.has(b._id))
+    && (!typeOfWork || pType[b.project_id] === typeOfWork)
+    && (!sizeBucket || pSize[b.project_id] === sizeBucket);
   const jobMatchesPerson = (j) => {
     if (!pid) return true;
     if (j.pm_id === pid || j.apm_id === pid) return true;
     const wb = j.winning_bid_id ? bidById[j.winning_bid_id] : null;
     return wb ? bidMatchesPerson(wb) : false;
   };
-  const coMatchesPerson = (c) => {
-    if (!pid) return true;
-    if (c.estimator_id === pid) return true;
+  const coMatchesFilters = (c) => {
     const job = jobById[c.job_id];
-    return job ? jobMatchesPerson(job) : false;
+    const wb = job?.winning_bid_id ? bidById[job.winning_bid_id] : null;
+    if (pid && !(c.estimator_id === pid || (job && jobMatchesPerson(job)))) return false;
+    if (cid && (!wb || !bidsWithCompany.has(wb._id))) return false;
+    if ((typeOfWork || sizeBucket) && job) {
+      if (typeOfWork && pType[job.project_id] !== typeOfWork) return false;
+      if (sizeBucket && pSize[job.project_id] !== sizeBucket) return false;
+    }
+    return true;
   };
 
-  const eligibleBids = bids.filter(bidMatchesPerson);
-  const eligibleCos = cos.filter(coMatchesPerson);
-  const eligibleJobs = jobs.filter(jobMatchesPerson);
+  const eligibleBids = bids.filter(bidMatchesFilters);
+  const eligibleCos = cos.filter(coMatchesFilters);
   const sumAmt = (arr) => arr.reduce((s, x) => s + (x.estimate_amount || 0), 0);
 
-  // ── Summary cards ──────────────────────────────────────────────────────
-  // Everything below is a FUNNEL anchored on date_submitted: "submitted"
-  // is the cohort of bids submitted in this range, and awarded/notAwarded/
-  // pending are how THOSE SAME bids turned out — regardless of how long it
-  // took to decide. This guarantees awarded + notAwarded + pending ==
-  // submitted, so the numbers always reconcile (a bid submitted in January
-  // and awarded in July shows up as "awarded" in January's cohort, not as
-  // an unexplained award with no matching submission in July's).
+  // Everything downstream is a FUNNEL anchored on date_submitted:
+  // "submitted" is the cohort of bids submitted in this range, and
+  // awarded/notAwarded/pending are how THOSE SAME bids turned out —
+  // regardless of how long it took to decide. This guarantees awarded +
+  // notAwarded + pending == submitted, so the numbers always reconcile (a
+  // bid submitted in January and awarded in July shows up as "awarded" in
+  // January's cohort, not as an unexplained award with no matching
+  // submission in July's).
   const opportunitiesIn = eligibleBids.filter(b => b.stage === 'opportunity' && inRange((b.created_at || '').slice(0, 10)));
   const activeBidsIn    = eligibleBids.filter(b => b.stage === 'active_bid' && inRange((b.created_at || '').slice(0, 10)));
   const submittedIn     = eligibleBids.filter(b => inRange(b.date_submitted));
@@ -3493,10 +3512,25 @@ async function getReports({ from, to, granularity, personId } = {}) {
   // after submission) without ever being formally awarded/not-awarded —
   // its own bucket so the funnel still reconciles exactly to `submitted`.
   const closedIn        = submittedIn.filter(b => b.stage === 'closed');
-  const decided = awardedIn.length + notAwardedIn.length;
 
   const submittedCosIn = eligibleCos.filter(c => inRange(c.date_submitted));
-  const approvedCosIn  = submittedCosIn.filter(c => c.stage === 'approved');
+  const subsByBid = {}; currentSubs.forEach(s => (subsByBid[s.bid_id] = subsByBid[s.bid_id] || []).push(s));
+
+  return {
+    gran, inRange, pid, cid, bids, cos, jobs, pName, coName, bidById, jobById, tm, sumAmt,
+    eligibleBids, eligibleCos, opportunitiesIn, activeBidsIn, submittedIn, awardedIn, notAwardedIn, pendingIn, closedIn,
+    submittedCosIn, subsByBid,
+  };
+}
+
+async function getReports(filters = {}) {
+  const {
+    gran, submittedIn, awardedIn, notAwardedIn, pendingIn, closedIn, submittedCosIn, sumAmt,
+    coName, pName, tm, subsByBid, opportunitiesIn, activeBidsIn, pid,
+  } = await getReportsCohort(filters);
+  const { from, to } = filters;
+  const decided = awardedIn.length + notAwardedIn.length;
+  const approvedCosIn = submittedCosIn.filter(c => c.stage === 'approved');
 
   const summary = {
     opportunities: { count: opportunitiesIn.length, value: sumAmt(opportunitiesIn) },
@@ -3512,7 +3546,10 @@ async function getReports({ from, to, granularity, personId } = {}) {
   };
 
   // ── Time series — bucketed by date_submitted (one timeline), split by
-  // how each submitted bid ultimately turned out. ────────────────────────
+  // how each submitted bid ultimately turned out. bucketKey is returned
+  // per-bucket so the frontend can hand it straight back to the bid
+  // drill-down endpoint (same bucketKeyFor() both sides — no separately
+  // computed date-range math that could disagree with what's on screen).
   const buckets = {};
   const touch = (b, field) => {
     const key = bucketKeyFor(b.date_submitted, gran);
@@ -3536,19 +3573,15 @@ async function getReports({ from, to, granularity, personId } = {}) {
   // Bid.stage === 'closed' overrides every submission on it to Closed,
   // since closeBid() never touches BidSubmission — the whole opportunity
   // was called off regardless of what any individual submission still says.
-  // Dollar figures use the submission's own amount, not the bid's
-  // denormalized headline (which only reflects the current/winning one).
   const custStats = {};
   const ensureCust = (id) => custStats[id] || (custStats[id] = { companyId: id, name: coName[id] || '—', submittedCount: 0, submittedValue: 0, awardedCount: 0, awardedValue: 0, notAwardedCount: 0, pendingCount: 0, closedCount: 0 });
-  const subsByBid = {}; currentSubs.forEach(s => (subsByBid[s.bid_id] = subsByBid[s.bid_id] || []).push(s));
   submittedIn.forEach(b => (subsByBid[b._id] || []).forEach(sub => {
     const s = ensureCust(sub.company_id);
     s.submittedCount++; s.submittedValue += (sub.amount || 0);
     if (b.stage === 'closed') s.closedCount++;
     // Once awarded, the negotiated award_amount (if captured) is the real
     // number — same fallback recomputeBidHeadline already uses for the
-    // bid's own headline. Using the originally-submitted amount here
-    // instead was quietly wrong whenever the two differed.
+    // bid's own headline.
     else if (sub.outcome === 'awarded') { s.awardedCount++; s.awardedValue += (sub.award_amount ?? sub.amount ?? 0); }
     else if (sub.outcome === 'not_awarded') s.notAwardedCount++;
     else s.pendingCount++;
@@ -3556,23 +3589,6 @@ async function getReports({ from, to, granularity, personId } = {}) {
   const byCustomer = Object.values(custStats)
     .map(s => ({ ...s, winRate: (s.awardedCount + s.notAwardedCount) ? Math.round((s.awardedCount / (s.awardedCount + s.notAwardedCount)) * 1000) / 10 : null }))
     .sort((a, b) => b.awardedValue - a.awardedValue || b.submittedValue - a.submittedValue);
-
-  // ── By job — "lessons learned": original award $ vs approved CO growth
-  const byJob = eligibleJobs
-    .filter(j => j.winning_bid_id && inRange(j.award_date))
-    .map(j => {
-      const bid = bidById[j.winning_bid_id];
-      const originalAmount = bid?.estimate_amount || 0;
-      const jobCos = cos.filter(c => c.job_id === j._id && c.stage === 'approved');
-      const approvedCoTotal = sumAmt(jobCos);
-      return {
-        jobId: j._id, jobNumber: j.job_number || '(pending #)', projectId: j.project_id, projectName: pName[j.project_id] || '—',
-        company: coName[j.awarded_company_id] || '—', awardDate: j.award_date,
-        originalAmount, approvedCoTotal, approvedCoCount: jobCos.length,
-        growthPct: originalAmount ? Math.round((approvedCoTotal / originalAmount) * 1000) / 10 : null,
-      };
-    })
-    .sort((a, b) => (b.growthPct ?? -Infinity) - (a.growthPct ?? -Infinity));
 
   // ── Not-awarded detail list — the summary card only has a count/value;
   // this backs a "why did we lose these" drill-down with the project name
@@ -3585,7 +3601,52 @@ async function getReports({ from, to, granularity, personId } = {}) {
     }))
     .sort((a, b) => (b.dateNotAwarded || '').localeCompare(a.dateNotAwarded || ''));
 
-  return { summary, timeSeries, byCustomer, byJob, notAwardedList, granularity: gran, from: from || null, to: to || null, person: pid ? (tm[pid]?.name || null) : null };
+  return { summary, timeSeries, byCustomer, notAwardedList, granularity: gran, from: from || null, to: to || null, person: pid ? (tm[pid]?.name || null) : null };
+}
+
+// Powers clicking a Bid Volume Over Time bar — the exact same bids that bar
+// aggregates, listed out individually. bucketKey/granularity must match
+// what the chart used (bucketKeyFor is the single source of truth both
+// sides read from), optionally narrowed to one outcome slice of the bar
+// (awarded/notAwarded/pending/closed) if that's what was clicked.
+async function getReportsBidDrilldown(filters = {}) {
+  const { bucketKey, outcome } = filters;
+  const { gran, submittedIn, pName, coName, tm, subsByBid } = await getReportsCohort(filters);
+  let rows = submittedIn;
+  if (bucketKey) rows = rows.filter(b => bucketKeyFor(b.date_submitted, gran) === bucketKey);
+  if (outcome) {
+    const stageFor = { awarded: 'awarded', notAwarded: 'not_awarded', pending: 'submitted', closed: 'closed' }[outcome];
+    if (stageFor) rows = rows.filter(b => b.stage === stageFor);
+  }
+  return rows.map(b => {
+    const subs = subsByBid[b._id] || [];
+    const companies = [...new Set(subs.map(s => coName[s.company_id]).filter(Boolean))];
+    return {
+      bidId: b._id, bidNumber: b.bid_number, projectId: b.project_id, projectName: pName[b.project_id] || '—',
+      companies, amount: b.estimate_amount, stage: b.stage, dateSubmitted: b.date_submitted,
+      estimator: tm[b.estimator_id]?.name || null,
+    };
+  }).sort((a, b) => (b.amount || 0) - (a.amount || 0));
+}
+
+// Powers clicking a By Customer row/bar — that ONE company's own submission
+// rows (its own amount/outcome, not the bid's overall headline), same
+// filters as the table itself.
+async function getReportsCustomerDrilldown(filters = {}) {
+  const cid = Number(filters.companyId);
+  if (!cid) throw new Error('companyId is required');
+  const { submittedIn, pName, tm, subsByBid } = await getReportsCohort(filters);
+  const rows = [];
+  submittedIn.forEach(b => (subsByBid[b._id] || []).forEach(sub => {
+    if (sub.company_id !== cid) return;
+    const outcome = b.stage === 'closed' ? 'closed' : sub.outcome;
+    rows.push({
+      bidId: b._id, bidNumber: b.bid_number, projectId: b.project_id, projectName: pName[b.project_id] || '—',
+      amount: outcome === 'awarded' ? (sub.award_amount ?? sub.amount) : sub.amount,
+      outcome, dateSubmitted: sub.date_submitted, estimator: tm[b.estimator_id]?.name || null,
+    });
+  }));
+  return rows.sort((a, b) => (b.amount || 0) - (a.amount || 0));
 }
 
 // mineOnly/userId: "My View" (default in the UI) filters every bubble/list to
@@ -4503,6 +4564,6 @@ module.exports = {
   logActivity, getActivityLog, undoActivity, bidLabel, coLabel, loadBid, loadCO, loadSubmission,
   mergeContacts, deleteCompany, deleteChangeOrder,
   getVendors, VENDOR_CATEGORIES,
-  getReports, getGcAwardReviewQueue, setSubmissionGcAwarded, setGcOutcome, setAwaitingPo, projectLabel,
+  getReports, getReportsBidDrilldown, getReportsCustomerDrilldown, getGcAwardReviewQueue, setSubmissionGcAwarded, setGcOutcome, setAwaitingPo, projectLabel,
   getOrCreateCalendarToken, resetCalendarToken, getTeamMemberIdByCalendarToken, buildIcsFeed, getEstimatorAvailability,
 };

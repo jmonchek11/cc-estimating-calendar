@@ -5624,7 +5624,7 @@ function renderContactsBody() {
 // ── Reports — trends over opportunities/bids/COs/jobs + per-job lessons
 // learned (CO growth vs original award). Every rollup is computed server-side
 // in getReports() (v2/db.js); this page is just filters + Chart.js. ────────
-let REPORTS_STATE = { preset: 'ytd', from: null, to: null, granularity: 'month', personId: '' };
+let REPORTS_STATE = { preset: 'ytd', from: null, to: null, granularity: 'month', personId: '', companyId: '', typeOfWork: '', sizeBucket: '', customerSort: 'awardedValue' };
 let REPORTS_CHARTS = {};
 let REPORTS_DATA = null;
 let REPORTS_SHOW_NOT_AWARDED = false;
@@ -5660,7 +5660,7 @@ async function renderReports() {
 
   main.innerHTML = `
     <div class="page-header">
-      <div><div class="page-title">${pageIcon('reports')} Reports</div><div class="page-subtitle">Trends across opportunities, bids, and jobs — and lessons learned from past ones</div></div>
+      <div><div class="page-title">${pageIcon('reports')} Reports</div><div class="page-subtitle">What's been submitted, what won, and who we should be bidding to</div></div>
     </div>
     <div class="card" style="padding:12px 16px;margin-bottom:16px">
       <div class="v2-filterbar" style="flex-wrap:wrap">
@@ -5687,6 +5687,18 @@ async function renderReports() {
           <option value="">Everyone</option>
           ${META.team.map(t => `<option value="${t.id}" ${String(t.id) === REPORTS_STATE.personId ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}
         </select>
+        <select id="rp-company" onchange="onReportsFilterChange()">
+          <option value="">Any Customer</option>
+          ${[...META.companies].sort((a,b)=>a.name.localeCompare(b.name)).map(c => `<option value="${c.id}" ${String(c.id) === REPORTS_STATE.companyId ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
+        </select>
+        <select id="rp-type" onchange="onReportsFilterChange()">
+          <option value="">Any Type of Work</option>
+          ${TYPE_OF_WORK_OPTIONS.map(o => `<option value="${esc(o.value)}" ${o.value === REPORTS_STATE.typeOfWork ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
+        </select>
+        <select id="rp-size" onchange="onReportsFilterChange()">
+          <option value="">Any Size</option>
+          ${PROJECT_SIZE_BUCKETS.map(o => `<option value="${esc(o.value)}" ${o.value === REPORTS_STATE.sizeBucket ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
+        </select>
         <span class="clear-link" onclick="clearReportsFilters()">Clear</span>
       </div>
     </div>
@@ -5710,33 +5722,47 @@ function onReportsCustomDateChange() {
 function onReportsFilterChange() {
   REPORTS_STATE.granularity = document.getElementById('rp-granularity')?.value || 'month';
   REPORTS_STATE.personId = document.getElementById('rp-person')?.value || '';
+  REPORTS_STATE.companyId = document.getElementById('rp-company')?.value || '';
+  REPORTS_STATE.typeOfWork = document.getElementById('rp-type')?.value || '';
+  REPORTS_STATE.sizeBucket = document.getElementById('rp-size')?.value || '';
   loadReportsData();
 }
 function clearReportsFilters() {
-  REPORTS_STATE = { preset: 'ytd', from: null, to: null, granularity: 'month', personId: '' };
+  REPORTS_STATE = { preset: 'ytd', from: null, to: null, granularity: 'month', personId: '', companyId: '', typeOfWork: '', sizeBucket: '', customerSort: 'awardedValue' };
   renderReports();
 }
-async function loadReportsData() {
+// Shared by loadReportsData and both drill-down calls — every request reads
+// the exact same filter state, so a modal's contents can never quietly
+// drift from what's currently on screen.
+function reportsFilterParams() {
   const range = REPORTS_STATE.preset === 'custom' ? { from: REPORTS_STATE.from, to: REPORTS_STATE.to } : reportsRangeForPreset(REPORTS_STATE.preset);
   const params = new URLSearchParams();
   if (range.from) params.set('from', range.from);
   if (range.to) params.set('to', range.to);
   params.set('granularity', REPORTS_STATE.granularity);
   if (REPORTS_STATE.personId) params.set('personId', REPORTS_STATE.personId);
+  if (REPORTS_STATE.companyId) params.set('companyId', REPORTS_STATE.companyId);
+  if (REPORTS_STATE.typeOfWork) params.set('typeOfWork', REPORTS_STATE.typeOfWork);
+  if (REPORTS_STATE.sizeBucket) params.set('sizeBucket', REPORTS_STATE.sizeBucket);
+  return params;
+}
+async function loadReportsData() {
   let data;
-  try { data = await api('GET', `/api/v2/reports?${params.toString()}`); }
+  try { data = await api('GET', `/api/v2/reports?${reportsFilterParams().toString()}`); }
   catch (e) { document.getElementById('rp-body').innerHTML = `<div class="err-card">${esc(e.message)}</div>`; return; }
   renderReportsBody(data);
 }
 function renderReportsBody(data) {
   REPORTS_DATA = data;
-  const { summary, timeSeries, byCustomer, byJob, notAwardedList } = data;
+  const { summary, timeSeries, byCustomer, notAwardedList } = data;
   const card = (label, value, sub, color) => `
     <div class="stat-card" style="flex:1;min-width:118px">
       <div style="font-size:20px;font-weight:800${color ? `;color:${color}` : ''}">${value}</div>
       <div style="font-size:11px;color:var(--text-muted)">${label}</div>
       ${sub != null ? `<div style="font-size:12px;font-weight:600;margin-top:2px">${sub}</div>` : ''}
     </div>`;
+
+  const sortedCustomers = reportsSortCustomers(byCustomer);
 
   const body = document.getElementById('rp-body');
   body.innerHTML = `
@@ -5748,25 +5774,31 @@ function renderReportsBody(data) {
       <div onclick="toggleReportsNotAwarded()" style="cursor:pointer;flex:1;min-width:118px">${card('Not Awarded', summary.notAwarded.count, null, '#dc2626')}</div>
       ${card('Still Pending', summary.pending.count, null, '#92400e')}
       ${card('Closed', summary.closed.count, null, 'var(--text-muted)')}
-      ${card('Win Rate', summary.winRate == null ? '—' : summary.winRate + '%')}
+      ${card('Win Rate', summary.winRate == null ? '—' : summary.winRate + '%', null, '#1e40af')}
       ${card('Approved COs', summary.approvedCOs.count, fmt$(summary.approvedCOs.value))}
     </div>
     <div style="font-size:11px;color:var(--text-muted);margin:-10px 0 16px 2px">Submitted / Awarded / Not Awarded / Still Pending / Closed are all the same cohort — bids submitted in this range — broken down by how they turned out (regardless of how long the decision took, or whether it happened before it was ever decided). They always add up to Submitted.</div>
     <div class="card" style="padding:16px;margin-bottom:16px">
-      <div style="font-weight:700;font-size:13px;margin-bottom:10px">Bid Volume Over Time</div>
+      <div style="font-weight:700;font-size:13px;margin-bottom:4px">Bid Volume Over Time</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Click a bar to see exactly which bids make it up.</div>
       ${timeSeries.length ? `<div style="overflow-x:auto"><div style="min-width:${Math.max(600, timeSeries.length * 70)}px;height:280px"><canvas id="rp-chart-timeseries"></canvas></div></div>`
         : '<div style="color:var(--text-muted);font-size:13px;padding:20px 0;text-align:center">No submitted activity in this range.</div>'}
     </div>
     <div class="card" style="padding:16px;margin-bottom:16px">
-      <div style="font-weight:700;font-size:13px;margin-bottom:4px">By Customer</div>
-      <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Awarded/Not Awarded are outcomes of the same bids counted in Submitted for this range — not a separately-dated event.</div>
-      ${byCustomer.length ? `<div style="height:${Math.max(180, Math.min(byCustomer.length, 10) * 34)}px;margin-bottom:16px"><canvas id="rp-chart-customer"></canvas></div>` : ''}
-      <div style="overflow-x:auto">${byCustomerTableHtml(byCustomer)}</div>
-    </div>
-    <div class="card" style="padding:16px;margin-bottom:16px">
-      <div style="font-weight:700;font-size:13px;margin-bottom:4px">By Job — Lessons Learned</div>
-      <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Approved change-order dollars as a share of the original awarded bid — which jobs grew in scope after award.</div>
-      <div style="overflow-x:auto">${byJobTableHtml(byJob)}</div>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;margin-bottom:4px">
+        <div>
+          <div style="font-weight:700;font-size:13px">By Customer — who we should be bidding to</div>
+          <div style="font-size:11px;color:var(--text-muted)">Click a bar or row to see the actual bids behind it. Awarded/Not Awarded are outcomes of the same bids counted in Submitted for this range.</div>
+        </div>
+        <select id="rp-customer-sort" onchange="onReportsCustomerSortChange()" style="font-size:11px">
+          <option value="awardedValue" ${REPORTS_STATE.customerSort === 'awardedValue' ? 'selected' : ''}>Sort: Awarded $</option>
+          <option value="winRate" ${REPORTS_STATE.customerSort === 'winRate' ? 'selected' : ''}>Sort: Win Rate</option>
+          <option value="submittedValue" ${REPORTS_STATE.customerSort === 'submittedValue' ? 'selected' : ''}>Sort: Submitted $</option>
+          <option value="submittedCount" ${REPORTS_STATE.customerSort === 'submittedCount' ? 'selected' : ''}>Sort: # Submitted</option>
+        </select>
+      </div>
+      ${sortedCustomers.length ? `<div style="height:${Math.max(180, Math.min(sortedCustomers.length, 10) * 34)}px;margin-bottom:16px"><canvas id="rp-chart-customer"></canvas></div>` : ''}
+      <div style="overflow-x:auto">${byCustomerTableHtml(sortedCustomers)}</div>
     </div>
     ${REPORTS_SHOW_NOT_AWARDED ? `
     <div class="card" id="rp-not-awarded" style="padding:16px">
@@ -5774,7 +5806,7 @@ function renderReportsBody(data) {
         <div style="font-weight:700;font-size:13px">Not Awarded — Detail</div>
         <button class="v2-btn outline" style="padding:4px 10px;font-size:11px" onclick="toggleReportsNotAwarded()">Hide</button>
       </div>
-      <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Every bid that lost in this range, with the project it belongs to — click a row to open the project.</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Every bid that lost in this range, with the project it belongs to — click a row to open the bid.</div>
       <div style="overflow-x:auto">${notAwardedTableHtml(notAwardedList)}</div>
     </div>` : ''}`;
 
@@ -5789,31 +5821,49 @@ function renderReportsBody(data) {
       data: {
         labels: timeSeries.map(t => t.label),
         datasets: [
-          { label: 'Awarded', data: timeSeries.map(t => t.awardedValue), backgroundColor: '#16a34a', stack: 's' },
-          { label: 'Not Awarded', data: timeSeries.map(t => t.notAwardedValue), backgroundColor: '#dc2626', stack: 's' },
-          { label: 'Still Pending', data: timeSeries.map(t => t.pendingValue), backgroundColor: '#fbbf24', stack: 's' },
-          { label: 'Closed', data: timeSeries.map(t => t.closedValue), backgroundColor: '#6b7280', stack: 's' },
+          { label: 'Awarded', data: timeSeries.map(t => t.awardedValue), backgroundColor: '#16a34a', stack: 's', outcome: 'awarded' },
+          { label: 'Not Awarded', data: timeSeries.map(t => t.notAwardedValue), backgroundColor: '#dc2626', stack: 's', outcome: 'notAwarded' },
+          { label: 'Still Pending', data: timeSeries.map(t => t.pendingValue), backgroundColor: '#fbbf24', stack: 's', outcome: 'pending' },
+          { label: 'Closed', data: timeSeries.map(t => t.closedValue), backgroundColor: '#6b7280', stack: 's', outcome: 'closed' },
         ],
       },
       options: {
-        responsive: true, maintainAspectRatio: false,
+        responsive: true, maintainAspectRatio: false, onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
         plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } } },
         scales: { x: { stacked: true }, y: { stacked: true, ticks: { callback: v => fmt$(v) } } },
+        onClick: (evt, els, chart) => {
+          if (!els.length) return;
+          const el = els[0];
+          const bucket = timeSeries[el.index];
+          const outcome = chart.data.datasets[el.datasetIndex].outcome;
+          openReportsBidDrilldown(bucket.key, bucket.label, outcome, chart.data.datasets[el.datasetIndex].label);
+        },
       },
     });
   }
-  if (byCustomer.length) {
-    const top = byCustomer.slice(0, 10);
+  if (sortedCustomers.length) {
+    const top = sortedCustomers.slice(0, 10);
+    const metricFor = { awardedValue: 'awardedValue', winRate: 'winRate', submittedValue: 'submittedValue', submittedCount: 'submittedCount' }[REPORTS_STATE.customerSort] || 'awardedValue';
+    const metricLabel = { awardedValue: 'Awarded $', winRate: 'Win Rate %', submittedValue: 'Submitted $', submittedCount: '# Submitted' }[metricFor];
     REPORTS_CHARTS.customer = new Chart(document.getElementById('rp-chart-customer'), {
       type: 'bar',
-      data: { labels: top.map(c => c.name), datasets: [{ label: 'Awarded $', data: top.map(c => c.awardedValue), backgroundColor: '#16a34a' }] },
+      data: { labels: top.map(c => c.name), datasets: [{ label: metricLabel, data: top.map(c => c[metricFor] ?? 0), backgroundColor: '#16a34a' }] },
       options: {
-        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+        indexAxis: 'y', responsive: true, maintainAspectRatio: false, onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
         plugins: { legend: { display: false } },
-        scales: { x: { ticks: { callback: v => fmt$(v) } } },
+        scales: { x: { ticks: { callback: v => metricFor === 'winRate' ? v + '%' : (metricFor === 'submittedCount' ? v : fmt$(v)) } } },
+        onClick: (evt, els) => { if (!els.length) return; openReportsCustomerDrilldown(top[els[0].index]); },
       },
     });
   }
+}
+function onReportsCustomerSortChange() {
+  REPORTS_STATE.customerSort = document.getElementById('rp-customer-sort')?.value || 'awardedValue';
+  if (REPORTS_DATA) renderReportsBody(REPORTS_DATA);
+}
+function reportsSortCustomers(rows) {
+  const key = REPORTS_STATE.customerSort || 'awardedValue';
+  return [...rows].sort((a, b) => (b[key] ?? -Infinity) - (a[key] ?? -Infinity));
 }
 function byCustomerTableHtml(rows) {
   if (!rows.length) return '<div style="color:var(--text-muted);font-size:13px;padding:12px 0;text-align:center">No customer activity in this range.</div>';
@@ -5828,38 +5878,93 @@ function byCustomerTableHtml(rows) {
       <th style="text-align:right;padding:6px 10px;color:var(--text-muted);font-size:11px">Win Rate</th>
     </tr></thead>
     <tbody>${rows.map(c => `
-      <tr style="border-bottom:1px solid #f1f5f9">
-        <td style="padding:6px 10px">${esc(c.name)}</td>
+      <tr style="border-bottom:1px solid #f1f5f9;cursor:pointer" onclick="openReportsCustomerDrilldownById(${c.companyId})">
+        <td style="padding:6px 10px;color:#2563eb">${esc(c.name)}</td>
         <td style="padding:6px 10px;text-align:right">${c.submittedCount} · ${fmt$(c.submittedValue)}</td>
         <td style="padding:6px 10px;text-align:right;font-weight:600;color:#166534">${c.awardedCount} · ${fmt$(c.awardedValue)}</td>
         <td style="padding:6px 10px;text-align:right;color:#dc2626">${c.notAwardedCount}</td>
         <td style="padding:6px 10px;text-align:right;color:#92400e">${c.pendingCount}</td>
         <td style="padding:6px 10px;text-align:right;color:var(--text-muted)">${c.closedCount}</td>
-        <td style="padding:6px 10px;text-align:right">${c.winRate == null ? '—' : c.winRate + '%'}</td>
+        <td style="padding:6px 10px;text-align:right;font-weight:600">${c.winRate == null ? '—' : c.winRate + '%'}</td>
       </tr>`).join('')}</tbody>
   </table>`;
 }
-function byJobTableHtml(rows) {
-  if (!rows.length) return '<div style="color:var(--text-muted);font-size:13px;padding:12px 0;text-align:center">No awarded jobs in this range.</div>';
-  return `<table style="width:100%;border-collapse:collapse;font-size:13px">
-    <thead><tr style="border-bottom:1px solid var(--border)">
-      <th style="text-align:left;padding:6px 10px;color:var(--text-muted);font-size:11px">Job #</th>
-      <th style="text-align:left;padding:6px 10px;color:var(--text-muted);font-size:11px">Project</th>
-      <th style="text-align:left;padding:6px 10px;color:var(--text-muted);font-size:11px">Customer</th>
-      <th style="text-align:right;padding:6px 10px;color:var(--text-muted);font-size:11px">Original Bid</th>
-      <th style="text-align:right;padding:6px 10px;color:var(--text-muted);font-size:11px">Approved COs</th>
-      <th style="text-align:right;padding:6px 10px;color:var(--text-muted);font-size:11px">Growth</th>
+// Generic read-only list modal — powers both drill-downs. Rows are always
+// bid-shaped ({ bidId, projectId, ... }); clicking one opens that bid
+// directly (openBidFlyout), same as everywhere else in the app.
+function showListModal(title, subtitle, rows, columns) {
+  document.getElementById('v2-form-overlay')?.remove();
+  const ov = document.createElement('div');
+  ov.className = 'v2-overlay'; ov.id = 'v2-form-overlay';
+  const bodyHtml = rows.length ? `<table style="width:100%;border-collapse:collapse;font-size:13px">
+    <thead><tr style="border-bottom:1px solid var(--border);position:sticky;top:0;background:#fff">
+      ${columns.map(c => `<th style="text-align:${c.align || 'left'};padding:6px 10px;color:var(--text-muted);font-size:11px">${esc(c.label)}</th>`).join('')}
     </tr></thead>
-    <tbody>${rows.map(j => `
-      <tr style="border-bottom:1px solid #f1f5f9;cursor:pointer" onclick="renderProjectPage(${j.projectId})">
-        <td style="padding:6px 10px">${esc(j.jobNumber)}</td>
-        <td style="padding:6px 10px">${esc(j.projectName)}</td>
-        <td style="padding:6px 10px">${esc(j.company)}</td>
-        <td style="padding:6px 10px;text-align:right">${fmt$(j.originalAmount)}</td>
-        <td style="padding:6px 10px;text-align:right">${j.approvedCoCount} · ${fmt$(j.approvedCoTotal)}</td>
-        <td style="padding:6px 10px;text-align:right;font-weight:700;color:${j.growthPct > 15 ? '#dc2626' : j.growthPct > 0 ? '#92400e' : 'var(--text-muted)'}">${j.growthPct == null ? '—' : j.growthPct + '%'}</td>
+    <tbody>${rows.map(r => `
+      <tr style="border-bottom:1px solid #f1f5f9;cursor:pointer" onclick="document.getElementById('v2-form-overlay').remove();openBidFlyout(${r.projectId},${r.bidId})">
+        ${columns.map(c => `<td style="text-align:${c.align || 'left'};padding:6px 10px${c.color ? `;color:${c.color(r)}` : ''}${c.bold ? ';font-weight:600' : ''}">${c.render(r)}</td>`).join('')}
       </tr>`).join('')}</tbody>
-  </table>`;
+  </table>` : '<div style="color:var(--text-muted);font-size:13px;padding:24px 0;text-align:center">No matching bids.</div>';
+  ov.innerHTML = `<div class="v2-modal" style="max-width:760px">
+    <div class="v2-modal-hd">${esc(title)}<button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">✕</button></div>
+    ${subtitle ? `<div style="padding:0 20px 10px;margin-top:-6px;font-size:11px;color:var(--text-muted)">${esc(subtitle)}</div>` : ''}
+    <div class="v2-modal-bd" style="max-height:56vh;overflow-y:auto;padding-top:0">${bodyHtml}</div>
+    <div class="v2-modal-ft"><button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">Close</button></div>
+  </div>`;
+  document.body.appendChild(ov);
+}
+const REPORTS_OUTCOME_COLOR = { awarded: '#166534', not_awarded: '#dc2626', pending: '#92400e', closed: 'var(--text-muted)' };
+const REPORTS_OUTCOME_LABEL = { awarded: 'Awarded', not_awarded: 'Not Awarded', pending: 'Pending', closed: 'Closed' };
+// A bid drill-down row's `stage` is the Bid's real stage string, where
+// 'submitted' means "still pending a decision" in report terms — map it to
+// the same outcome vocabulary the customer drill-down and color/label maps
+// above already use, so both drill-downs read consistently.
+const REPORTS_STAGE_TO_OUTCOME = { awarded: 'awarded', not_awarded: 'not_awarded', submitted: 'pending', closed: 'closed' };
+async function openReportsBidDrilldown(bucketKey, bucketLabel, outcome, outcomeLabel) {
+  const params = reportsFilterParams();
+  params.set('bucketKey', bucketKey);
+  if (outcome) params.set('outcome', outcome);
+  let rows;
+  try { rows = await api('GET', `/api/v2/reports/bid-drilldown?${params.toString()}`); }
+  catch (e) { alert('Failed to load: ' + e.message); return; }
+  showListModal(
+    `${bucketLabel}${outcomeLabel ? ' — ' + outcomeLabel : ''}`,
+    `${rows.length} bid${rows.length === 1 ? '' : 's'} making up this bar`,
+    rows,
+    [
+      { label: 'Bid #', render: r => esc(r.bidNumber || '—') },
+      { label: 'Project', render: r => esc(r.projectName) },
+      { label: 'Customer(s)', render: r => esc((r.companies || []).join(', ') || '—') },
+      { label: 'Estimator', render: r => esc(r.estimator || '—') },
+      { label: 'Stage', render: r => esc(REPORTS_OUTCOME_LABEL[REPORTS_STAGE_TO_OUTCOME[r.stage]] || r.stage), color: r => REPORTS_OUTCOME_COLOR[REPORTS_STAGE_TO_OUTCOME[r.stage]] || 'inherit' },
+      { label: 'Amount', align: 'right', bold: true, render: r => fmt$(r.amount || 0) },
+    ]
+  );
+}
+function openReportsCustomerDrilldownById(companyId) {
+  const row = (REPORTS_DATA?.byCustomer || []).find(c => c.companyId === companyId);
+  if (row) openReportsCustomerDrilldown(row);
+}
+async function openReportsCustomerDrilldown(customerRow) {
+  const params = reportsFilterParams();
+  params.set('companyId', customerRow.companyId);
+  let rows;
+  try { rows = await api('GET', `/api/v2/reports/customer-drilldown?${params.toString()}`); }
+  catch (e) { alert('Failed to load: ' + e.message); return; }
+  const total = rows.reduce((s, r) => s + (r.amount || 0), 0);
+  showListModal(
+    customerRow.name,
+    `${rows.length} submission${rows.length === 1 ? '' : 's'} in this range — ${fmt$(total)} total`,
+    rows,
+    [
+      { label: 'Bid #', render: r => esc(r.bidNumber || '—') },
+      { label: 'Project', render: r => esc(r.projectName) },
+      { label: 'Estimator', render: r => esc(r.estimator || '—') },
+      { label: 'Outcome', render: r => esc(REPORTS_OUTCOME_LABEL[r.outcome] || r.outcome), color: r => REPORTS_OUTCOME_COLOR[r.outcome] || 'inherit', bold: true },
+      { label: 'Submitted', align: 'right', render: r => fmtD(r.dateSubmitted) },
+      { label: 'Amount', align: 'right', bold: true, render: r => fmt$(r.amount || 0) },
+    ]
+  );
 }
 
 function notAwardedTableHtml(rows) {

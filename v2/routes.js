@@ -498,6 +498,11 @@ router.delete('/api/v2/contacts/:id',    requireAdmin, t(req => v2db.deleteConta
 router.get('/api/v2/vendors', async (req, res) => { try { res.json(await v2db.getVendors(req.query)); } catch (e) { res.status(500).json({ error: e.message }); } });
 
 router.get('/api/v2/reports', async (req, res) => { try { res.json(await v2db.getReports(req.query)); } catch (e) { res.status(500).json({ error: e.message }); } });
+// Drill-down: same filters as /api/v2/reports (plus bucketKey/outcome or
+// companyId) — the actual bids behind a chart bar or table row, so a click
+// never shows a number without a way to see what it's made of.
+router.get('/api/v2/reports/bid-drilldown', async (req, res) => { try { res.json(await v2db.getReportsBidDrilldown(req.query)); } catch (e) { res.status(500).json({ error: e.message }); } });
+router.get('/api/v2/reports/customer-drilldown', async (req, res) => { try { res.json(await v2db.getReportsCustomerDrilldown(req.query)); } catch (e) { res.status(500).json({ error: e.message }); } });
 
 // Data-cleanup queue for backfilling gc_awarded on old Not Awarded
 // submissions — admin-only, same as the other cleanup/Data Health tools.
