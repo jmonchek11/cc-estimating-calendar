@@ -52,7 +52,16 @@
     border-top: 1px dashed var(--border); margin-top: 8px; padding-top: 6px;
     font-size: 12px; color: var(--text-muted);
   }
-  .v2-fu-row { padding: 2px 0; }
+  .v2-fu-row { padding: 7px 0; border-bottom: 1px solid #eef0f3; }
+  .v2-fu-row:last-child { border-bottom: none; padding-bottom: 2px; }
+  .v2-fu-row:first-child { padding-top: 2px; }
+  .v2-fu-date { font-weight: 700; font-size: 12px; color: var(--text); }
+  .v2-fu-who { font-size: 11px; color: var(--text-muted); }
+  .v2-fu-notes { font-size: 12.5px; color: var(--text); margin-top: 3px; line-height: 1.4; }
+  .v2-fu-next {
+    display: inline-block; margin-top: 5px; font-size: 11px; font-weight: 600;
+    color: #0e7490; background: #ecfeff; padding: 2px 8px; border-radius: 10px;
+  }
   .awarded-pill {
     display: inline-block; background: #16a34a; color: #fff;
     font-size: 10px; font-weight: 700; padding: 1px 8px; border-radius: 10px;
@@ -2752,6 +2761,7 @@ function bidNode(b, proj) {
   if (b.close_reason) metaBits.push(`Closed ${fmtD(b.closed_date)} by ${esc(b.closed_approved_by)} — ${esc(b.close_reason)}`);
   if (b.not_awarded_notes) metaBits.push(`<span style="color:#dc2626">Not awarded ${fmtD(b.date_not_awarded)}:</span> ${esc(b.not_awarded_notes)}`);
   if (b.notes) metaBits.push(`📝 ${esc(b.notes)}`);
+  const wtHtml = walkthroughHtml(b);
 
   return `
     <div class="bc-card ${b.superseded ? 'bc-superseded' : ''}">
@@ -2776,7 +2786,7 @@ function bidNode(b, proj) {
       ${projectDetailsHtml(proj)}
       <div class="bc-divider"></div>
       ${customersSectionHtml(b)}
-      ${walkthroughHtml(b)}
+      ${wtHtml ? `<div style="padding:2px 16px 14px">${wtHtml}</div>` : ''}
       <div class="bc-divider"></div>
       ${activitySectionHtml(b)}
       ${bidActions(b)}
@@ -3142,15 +3152,22 @@ function fuRow(f) {
   // Whoever actually logged this one (or an admin) can fix a mistake in it —
   // matches the server-side check in updateFollowup.
   const canEdit = CURRENT_USER?.is_admin || (CURRENT_USER?.id && CURRENT_USER.id === f.contacted_by?.id);
+  // Split into a compact header line (when/who/how) and the actual note text
+  // on its own line — the old single run-on line (date, initials, method,
+  // contact name, notes, and the outcome all inline) was the "clustered
+  // text" that made a bid with a few entries hard to scan at a glance.
+  const outcomePill = f.outcome === 'no_decision' && f.next_followup_date ? `<span class="v2-fu-next">→ next ${fmtD(f.next_followup_date)}</span>`
+    : f.outcome === 'awarded' ? '<span class="v2-fu-next" style="color:#166534;background:#f0fdf4">→ AWARDED</span>'
+    : f.outcome === 'approved' ? '<span class="v2-fu-next" style="color:#166534;background:#f0fdf4">→ APPROVED</span>'
+    : f.outcome === 'not_awarded' ? '<span class="v2-fu-next" style="color:#991b1b;background:#fef2f2">→ NOT AWARDED</span>' : '';
   return `<div class="v2-fu-row">
-    ${fmtD(f.followup_date)} — ${ini(f.contacted_by)}
-    ${METHOD[f.contact_method] || ''} w/ <strong>${esc(f.contact_name || f.customer_contact || '?')}</strong>:
-    ${esc(f.notes || '')}
-    ${f.outcome === 'no_decision' && f.next_followup_date ? `→ next ${fmtD(f.next_followup_date)}` : ''}
-    ${f.outcome === 'awarded' ? '<span style="color:#166534;font-weight:700">→ AWARDED</span>' : ''}
-    ${f.outcome === 'approved' ? '<span style="color:#166534;font-weight:700">→ APPROVED</span>' : ''}
-    ${f.outcome === 'not_awarded' ? '<span class="overdue-txt">→ NOT AWARDED</span>' : ''}
-    ${canEdit ? `<a href="#" onclick="event.preventDefault();actEditFollowup(${f.id})" style="font-size:11px;margin-left:4px">✏️</a>` : ''}
+    <div style="display:flex;align-items:baseline;gap:6px;flex-wrap:wrap">
+      <span class="v2-fu-date">${fmtD(f.followup_date)}</span>
+      <span class="v2-fu-who">${ini(f.contacted_by)} · ${METHOD[f.contact_method] || ''} w/ <strong>${esc(f.contact_name || f.customer_contact || '?')}</strong></span>
+      ${canEdit ? `<a href="#" onclick="event.preventDefault();actEditFollowup(${f.id})" style="font-size:11px">✏️</a>` : ''}
+    </div>
+    ${f.notes ? `<div class="v2-fu-notes">${esc(f.notes)}</div>` : ''}
+    ${outcomePill}
   </div>`;
 }
 
