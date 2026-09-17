@@ -1876,6 +1876,7 @@ function renderBidListBody(stage) {
         <div style="flex:1;min-width:0">
           <div class="proj-name">${esc(b.project)}${b.bid_number ? ` <span style="color:var(--text-muted);font-weight:400;font-size:12px">#${esc(b.bid_number)}</span>` : ''}
             ${b.project_on_hold ? '<span class="badge" style="background:#fef3c7;color:#92400e">⏸ ON HOLD</span>' : ''}
+            ${b.awaiting_po ? '<span class="badge" style="background:#ffedd5;color:#9a3412">🔥 AWAITING PO</span>' : ''}
             ${b.drawing_stage ? `<span class="badge" style="background:#ede9fe;color:#5b21b6;font-size:10px">${esc(b.drawing_stage)}</span>` : ''}
             ${b.size_bucket ? `<span class="badge" style="background:#e0f2fe;color:#075985;font-size:10px">${esc(b.size_bucket)}</span>` : ''}
             ${b.type_of_work ? `<span class="badge" style="background:#f0fdf4;color:#166534;font-size:10px">${esc(b.type_of_work)}</span>` : ''}</div>
@@ -2535,6 +2536,7 @@ function customerRowHtml(b, cust) {
   if (current) {
     if (current.outcome === 'awarded') outcomeBadge = ` <span class="awarded-pill">✓ AWARDED ${fmtD(current.award_date)}</span>`;
     else if (current.outcome === 'not_awarded') outcomeBadge = ` <span class="badge" style="background:#fee2e2;color:#991b1b">✗ NOT AWARDED ${fmtD(current.date_not_awarded)}</span>`;
+    else if (current.outcome === 'pending' && current.awaiting_po) outcomeBadge = ` <span class="badge" style="background:#ffedd5;color:#9a3412" title="${esc(current.awaiting_po_notes || 'Getting this — waiting on contract/PO/funding')}">🔥 AWAITING PO</span>`;
     const overdue = !b.project_on_hold && current.next_followup_date && current.next_followup_date < today && current.outcome === 'pending';
     // Once awarded, the negotiated award_amount is the number that matters —
     // the originally-submitted amount stays visible underneath it as context
@@ -2555,6 +2557,7 @@ function customerRowHtml(b, cust) {
         ${awardBtn}
         <button class="bc-btn-quiet" onclick="actNotAwardSubmission(${current.id})">Not Awarded</button>
         <button class="bc-btn-quiet" onclick="actSetGcOutcome(${current.id})">GC Outcome</button>
+        ${b.stage === 'submitted' ? `<button class="bc-btn-quiet" onclick="actToggleAwaitingPo(${current.id},${current.awaiting_po ? 'false' : 'true'})">${current.awaiting_po ? '🔥 Clear Awaiting PO' : '🔥 Awaiting PO'}</button>` : ''}
       </div>`;
     }
     if ((current.followups || []).length) followupsHtml = `<div style="margin-top:6px">${current.followups.map(fuRow).join('')}</div>`;
@@ -2606,7 +2609,6 @@ function activitySectionHtml(b) {
   const bidFollowups = (b.followups || []).length ? `<div style="margin-bottom:6px">${b.followups.map(fuRow).join('')}</div>` : '';
   return `<div class="bc-section">
     <div class="bc-sec-hd"><span class="bc-sec-title">Activity</span></div>
-    ${walkthroughHtml(b)}
     ${rfiHtml(b)}
     ${bidFollowups}
     ${remindersHtml('bid', b.id, b.reminders)}
@@ -2774,6 +2776,7 @@ function bidNode(b, proj) {
       ${projectDetailsHtml(proj)}
       <div class="bc-divider"></div>
       ${customersSectionHtml(b)}
+      ${walkthroughHtml(b)}
       <div class="bc-divider"></div>
       ${activitySectionHtml(b)}
       ${bidActions(b)}
@@ -2813,6 +2816,7 @@ function walkthroughHtml(b) {
       </div>
       ${(contact || company) ? `<div style="font-size:11.5px;color:#155e75;margin-top:2px">Site contact: ${contact ? esc(contact.full_name) : '—'}${company ? ' · ' + esc(company.name) : ''}${contact?.phone ? ' · ' + esc(contact.phone) : ''}</div>` : ''}
       ${(w.assignees || []).length ? `<div style="font-size:11.5px;color:#155e75;margin-top:4px;display:flex;align-items:center;gap:5px;flex-wrap:wrap">Attending: ${w.assignees.map(walkthroughAssigneeChip).join('')}</div>` : ''}
+      ${w.notes ? `<div style="font-size:11.5px;color:#0e7490;margin-top:4px;white-space:pre-wrap">${esc(w.notes)}</div>` : ''}
     </div>`;
   }).join('');
   return `<div class="v2-fu" style="background:#ecfeff;border:1px solid #a5f3fc;border-radius:6px;padding:8px 10px;margin-top:6px">
@@ -3433,6 +3437,7 @@ const OPPORTUNITY_SOURCE_OPTIONS = ['CM Platform', 'Portal', 'Email', 'Phone Cal
 const TYPE_OF_WORK_OPTIONS = [
   'Ground-Up Construction', 'Core & Shell', 'Fit-Out/Tenant Improvement', 'Renovation/Remodel',
   'Gut Renovation', 'Adaptive Reuse', 'Build-to-Suit', 'Spec Build', 'Phased-Occupied Renovation', 'Design-Build',
+  'Mechanical & Controls',
 ].map(v => ({ value: v, label: v }));
 // Who a customer company IS on a job (Owner, GC, Mechanical Contractor…) —
 // distinct from vendor category, which is what a vendor sells.
@@ -4061,6 +4066,7 @@ function walkthroughFormFields(existing, contactsByCompany, defaultAssigneeIds) 
     // shows its actual saved assignees instead.
     { id: 'walkthrough_assignee_ids', label: 'Assign Team Members (each gets an email to RSVP)', type: 'multicheck',
       options: teamOpts(), value: existing ? (existing.assignees || []).map(a => a.id) : (defaultAssigneeIds || []) },
+    { id: 'walkthrough_notes', label: 'Notes', type: 'textarea', placeholder: 'What was found/discussed on site…', value: existing?.notes },
   ];
 }
 function walkthroughSubmitData(data) {
@@ -4073,6 +4079,7 @@ function walkthroughSubmitData(data) {
     new_contact_name: contact_id ? null : document.getElementById('wt-new-contact-name')?.value?.trim() || null,
     new_contact_phone: contact_id ? null : document.getElementById('wt-new-contact-phone')?.value?.trim() || null,
     assignee_ids: data.walkthrough_assignee_ids || [],
+    notes: data.walkthrough_notes || null,
   };
 }
 async function actAddWalkthrough(bidId) {
@@ -4378,6 +4385,23 @@ function actSetGcOutcome(submissionId) {
     if (r.settled_our_outcome) alert(`Since ${s?.company?.name || 'this GC'} didn't win the job, this submission has been set to Not Awarded too.`);
     return r;
   }, 'Save', 'blue');
+}
+
+// "We're getting this, just waiting on paperwork" — per the estimating
+// team's Teams discussion (2026-09-16/17): still a real follow-up timer
+// (just a longer ~3-week cadence, see AWAITING_PO_INTERVAL_DAYS server-
+// side), not a paused state like On-Hold — the 🔥 badge is what's supposed
+// to keep it on a salesperson's radar instead of blending into a plain
+// "still deciding" bid. Clearing it reverts to the normal cadence.
+function actToggleAwaitingPo(submissionId, turnOn) {
+  const s = findSubmission(submissionId);
+  if (!turnOn) {
+    api('POST', `/api/v2/submissions/${submissionId}/awaiting-po`, { awaiting_po: 0 }).then(refresh).catch(e => alert('Failed: ' + e.message));
+    return;
+  }
+  showForm(`🔥 Awaiting PO — ${esc(s?.company?.name || 'customer')}`, [
+    { id: 'notes', label: 'Notes (optional)', type: 'textarea', placeholder: 'Waiting on signed PO from GC, funding approval expected next week…' },
+  ], data => api('POST', `/api/v2/submissions/${submissionId}/awaiting-po`, { awaiting_po: 1, notes: data.notes }), 'Mark Awaiting PO', 'blue');
 }
 
 // Prompts for Estimator/PM right at the point of committing to bid it —

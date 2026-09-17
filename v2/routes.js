@@ -499,6 +499,7 @@ router.post('/api/v2/submissions/:id/gc-awarded', requireAdmin, t(req => v2db.se
 // Everyday version — any logged-in user, any submission outcome, since
 // hearing a GC's own fate isn't gated behind our own decision with them.
 router.post('/api/v2/submissions/:id/gc-outcome', t(req => v2db.setGcOutcome(req.params.id, req.body.gc_awarded, req.session.userId)));
+router.post('/api/v2/submissions/:id/awaiting-po', t(req => v2db.setAwaitingPo(req.params.id, req.body, req.session.userId)));
 
 router.get('/api/v2/companies/:id/bids', async (req, res) => { try { res.json(await v2db.getCompanyBids(req.params.id)); } catch (e) { res.status(500).json({ error: e.message }); } });
 router.get('/api/v2/companies/:id/communications', async (req, res) => { try { res.json(await v2db.getCompanyCommunications(req.params.id)); } catch (e) { res.status(500).json({ error: e.message }); } });

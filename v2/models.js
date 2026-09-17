@@ -126,6 +126,7 @@ const BidSchema = new mongoose.Schema({
       time:           { type: String, default: null },    // "HH:MM", 24-hour — reminder only fires when both date AND time are set
       company_id:     { type: Number, default: null },    // FK -> Company — site contact's company, found-or-created same as any other company field
       contact_id:     { type: Number, default: null },    // FK -> Contact
+      notes:          { type: String, default: null },    // free text — what was found/discussed on site
       reminder_sent:  { type: Boolean, default: false },
       // Internal team members assigned to attend, each with their own
       // one-click RSVP (a rsvp_token per person, not per walkthrough, so
@@ -304,6 +305,16 @@ const BidSubmissionSchema = new mongoose.Schema({
   // not yet known (the normal case right after marking not_awarded).
   gc_awarded:         { type: Boolean, default: null },
   next_followup_date: { type: String, default: null },
+  // "We're getting this, just waiting on paperwork" — a softer state than a
+  // real award (see awardSubmission), set while outcome is still 'pending'.
+  // Per the estimating team's Teams discussion (2026-09-16/17): still needs
+  // an active follow-up timer (Connor — "still a bid we need to follow up
+  // on... things can always change"), just a longer cadence (Carrie/Connor —
+  // "2-3 weeks") and visually called out (🔥) rather than treated as a
+  // separate paused state like On-Hold.
+  awaiting_po:        { type: Boolean, default: false },
+  awaiting_po_date:   { type: String, default: null },
+  awaiting_po_notes:  { type: String, default: null },
 
   created_at:      { type: String, default: ts },
   updated_at:      { type: String, default: ts },

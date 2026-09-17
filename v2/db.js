@@ -328,7 +328,7 @@ async function getProjectDetail(projectId) {
     prevailing_wage: b.prevailing_wage == null ? null : !!b.prevailing_wage,
     approved_to_bid: !!b.approved_to_bid, approved_to_bid_at: b.approved_to_bid_at,
     walkthroughs: (b.walkthroughs || []).map(w => ({
-      id: w._id, date: w.date, time: w.time,
+      id: w._id, date: w.date, time: w.time, notes: w.notes || null,
       company: companyById[w.company_id] || null,
       contact: contactById[w.contact_id] || null,
       // rsvp_token deliberately excluded — it's the auth for that person's
@@ -356,6 +356,7 @@ async function getProjectDetail(projectId) {
         date_not_awarded: sub.date_not_awarded,
         not_awarded_notes: sub.not_awarded_notes,
         gc_awarded: sub.gc_awarded == null ? null : !!sub.gc_awarded,
+        awaiting_po: !!sub.awaiting_po, awaiting_po_date: sub.awaiting_po_date, awaiting_po_notes: sub.awaiting_po_notes,
         next_followup_date: sub.next_followup_date,
         followups: subFollowups
           .filter(f => f.parent_id === sub._id)
@@ -2284,7 +2285,7 @@ async function addWalkthrough(id, data, actorId) {
   const { assignees, newlyAdded } = buildAssigneesList([], data.assignee_ids);
   const entry = {
     _id: wid, date: data.date || null, time: data.time || null,
-    company_id: companyId, contact_id: contactId, reminder_sent: false, assignees,
+    company_id: companyId, contact_id: contactId, notes: data.notes || null, reminder_sent: false, assignees,
   };
   await M.Bid.updateOne({ _id: bid._id }, { $push: { walkthroughs: entry }, $set: { updated_at: ts() } });
   return { bid_id: bid._id, walkthrough_id: wid, new_assignee_ids: newlyAdded };
@@ -2311,6 +2312,7 @@ async function updateWalkthrough(bidId, walkthroughId, data, actorId) {
     { $set: {
       'walkthroughs.$.date': newDate, 'walkthroughs.$.time': newTime,
       'walkthroughs.$.company_id': companyId, 'walkthroughs.$.contact_id': contactId,
+      'walkthroughs.$.notes': data.notes !== undefined ? (data.notes || null) : existing.notes,
       'walkthroughs.$.reminder_sent': reminderSent, 'walkthroughs.$.assignees': assignees, updated_at: ts(),
     }}
   );
@@ -2883,14 +2885,18 @@ async function getBidList(stage) {
   // the data-cleanup gap (missing job # / PM assignment) an "all awarded
   // bids" view exists to catch, so join it only for that stage rather than
   // adding the cost to every other list.
-  const [projects, companies, members, bidCustomers, jobs] = await Promise.all([
+  const [projects, companies, members, bidCustomers, jobs, currentSubs] = await Promise.all([
     M.Project.find().lean(), M.Company.find().lean(), M.TeamMember.find().lean(), M.BidCustomer.find({ bid_id: { $in: ids } }).lean(),
     stage === 'awarded' ? M.Job.find({ winning_bid_id: { $in: ids } }).lean() : Promise.resolve([]),
+    // Only 'submitted' bids can be flagged awaiting_po (a submission still
+    // pending its own decision) — fetched just for that list's 🔥 badge.
+    stage === 'submitted' ? M.BidSubmission.find({ bid_id: { $in: ids }, is_current: 1, awaiting_po: true }).lean() : Promise.resolve([]),
   ]);
   const pName = {}; const pSize = {}; const pType = {}; const pOnHold = {};
   projects.forEach(p => { pName[p._id] = p.name; pSize[p._id] = p.size_bucket; pType[p._id] = p.type_of_work; pOnHold[p._id] = !!p.on_hold; });
   const coName = {}; companies.forEach(c => coName[c._id] = c.name);
   const tm = teamMap(members);
+  const awaitingPoBids = new Set(currentSubs.map(s => s.bid_id));
   const custByBid = {}; bidCustomers.forEach(bc => (custByBid[bc.bid_id] = custByBid[bc.bid_id] || []).push(coName[bc.company_id]));
   const jobByBid = {}; jobs.forEach(j => { if (j.winning_bid_id) jobByBid[j.winning_bid_id] = j; });
   const rows = bids.map(b => {
@@ -2914,6 +2920,7 @@ async function getBidList(stage) {
         assignees: (w.assignees || []).map(a => ({ ...(tm[a.member_id] || { id: a.member_id }), rsvp: a.rsvp })),
       })),
       estimate_amount: b.estimate_amount, date_submitted: b.date_submitted, next_followup_date: b.next_followup_date,
+      awaiting_po: awaitingPoBids.has(b._id),
       award_date: b.award_date, awarded_company: b.awarded_company_id ? coName[b.awarded_company_id] : null,
       // Before award there's no Job yet, so fall back to the bid's own early
       // pm_id (set at Approve to Bid) — once a Job exists, its own pm_id
@@ -3254,6 +3261,34 @@ async function setGcOutcome(submissionId, gcAwarded, actorId) {
     await reconcileBidOutcome(bid._id, actorId);
   }
   return { submission_id: sub._id, settled_our_outcome: settlesOurOutcome };
+}
+
+// "We're getting this, just waiting on paperwork" — see the schema comment
+// on BidSubmission.awaiting_po. Only meaningful on a submission still
+// actively being decided; a longer default follow-up cadence than the usual
+// fu_recurring_days (the team settled on ~3 weeks over the normal ~1) unless
+// the bid already has its own explicit follow_up_interval_days override, in
+// which case that stays authoritative. Clearing it reverts to the normal
+// cadence rather than leaving the stretched-out date in place.
+const AWAITING_PO_INTERVAL_DAYS = 15; // ~3 working weeks
+async function setAwaitingPo(submissionId, data, actorId) {
+  const M = getModels();
+  const sub = await loadSubmission(submissionId);
+  if (sub.outcome !== 'pending') throw new Error('Only meaningful while still awaiting a decision');
+  const bid = await loadBid(sub.bid_id);
+  const on = Number(data.awaiting_po) === 1;
+  const s = await getSettings();
+  const days = bid.follow_up_interval_days || (on ? AWAITING_PO_INTERVAL_DAYS : s.fu_recurring_days);
+  const upd = {
+    awaiting_po: on,
+    awaiting_po_date: on ? today() : null,
+    awaiting_po_notes: on ? (data.notes || null) : null,
+    next_followup_date: addWorkingDays(today(), days),
+    updated_at: ts(),
+  };
+  await M.BidSubmission.updateOne({ _id: sub._id }, { $set: upd });
+  await recomputeBidFollowup(bid._id);
+  return { submission_id: sub._id, awaiting_po: on };
 }
 
 // personId matches a bid via estimator/salesperson/sub-estimator, a job via
@@ -4325,6 +4360,6 @@ module.exports = {
   logActivity, getActivityLog, undoActivity, bidLabel, coLabel, loadBid, loadCO, loadSubmission,
   mergeContacts, deleteCompany, deleteChangeOrder,
   getVendors, VENDOR_CATEGORIES,
-  getReports, getGcAwardReviewQueue, setSubmissionGcAwarded, setGcOutcome, projectLabel,
+  getReports, getGcAwardReviewQueue, setSubmissionGcAwarded, setGcOutcome, setAwaitingPo, projectLabel,
   getOrCreateCalendarToken, resetCalendarToken, getTeamMemberIdByCalendarToken, buildIcsFeed, getEstimatorAvailability,
 };
