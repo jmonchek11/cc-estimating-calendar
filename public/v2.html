@@ -2555,19 +2555,28 @@ function customerRowHtml(b, cust) {
       ${showAward && current.award_amount !== current.amount ? `<div style="font-size:11px;color:var(--text-muted)">bid ${fmt$(current.amount)}</div>` : ''}
       ${current.outcome === 'pending' && current.next_followup_date ? `<div class="bc-co-fu ${overdue ? 'overdue-txt' : ''}">${overdue ? 'OVERDUE ' : 'Next F/U '}${fmtD(current.next_followup_date)}</div>` : ''}`;
     const live = current.is_current && current.outcome === 'pending';
-    if (live && ['submitted', 'awarded'].includes(b.stage)) {
-      const awardBtn = b.stage === 'submitted' ? `<button class="bc-btn-quiet" onclick="actAwardSubmission(${current.id})">Awarded</button>` : '';
-      // GC Outcome is independent of our own decision with this customer —
-      // a GC can be known to have lost the overall job before (or without)
-      // us ever separately deciding our own outcome with them, and hearing
-      // that settles ours automatically (see setGcOutcome).
-      actionsHtml = `<div class="bc-row-actions">
-        <button class="bc-btn-quiet" onclick="actLogFollowup('bid_submission',${current.id})">Log Follow-up</button>
-        ${awardBtn}
-        <button class="bc-btn-quiet" onclick="actNotAwardSubmission(${current.id})">Not Awarded</button>
-        <button class="bc-btn-quiet" onclick="actSetGcOutcome(${current.id})">GC Outcome</button>
-        ${b.stage === 'submitted' ? `<button class="bc-btn-quiet" onclick="actToggleAwaitingPo(${current.id},${current.awaiting_po ? 'false' : 'true'})">${current.awaiting_po ? '🔥 Clear Awaiting PO' : '🔥 Awaiting PO'}</button>` : ''}
-      </div>`;
+    // Log Follow-up is deliberately NOT gated behind `live` — communication
+    // with a customer doesn't stop just because a decision's already been
+    // made (per Connor: "anyone should be able to add a follow up on any
+    // bid at any time... so you can track communication log tied to the
+    // bid"). Every other action here still only makes sense while pending
+    // a decision, so those stay exactly as gated as before.
+    if (current.is_current) {
+      actionsHtml = `<div class="bc-row-actions"><button class="bc-btn-quiet" onclick="actLogFollowup('bid_submission',${current.id})">Log Follow-up</button></div>`;
+      if (live && ['submitted', 'awarded'].includes(b.stage)) {
+        const awardBtn = b.stage === 'submitted' ? `<button class="bc-btn-quiet" onclick="actAwardSubmission(${current.id})">Awarded</button>` : '';
+        // GC Outcome is independent of our own decision with this customer —
+        // a GC can be known to have lost the overall job before (or without)
+        // us ever separately deciding our own outcome with them, and hearing
+        // that settles ours automatically (see setGcOutcome).
+        actionsHtml = `<div class="bc-row-actions">
+          <button class="bc-btn-quiet" onclick="actLogFollowup('bid_submission',${current.id})">Log Follow-up</button>
+          ${awardBtn}
+          <button class="bc-btn-quiet" onclick="actNotAwardSubmission(${current.id})">Not Awarded</button>
+          <button class="bc-btn-quiet" onclick="actSetGcOutcome(${current.id})">GC Outcome</button>
+          ${b.stage === 'submitted' ? `<button class="bc-btn-quiet" onclick="actToggleAwaitingPo(${current.id},${current.awaiting_po ? 'false' : 'true'})">${current.awaiting_po ? '🔥 Clear Awaiting PO' : '🔥 Awaiting PO'}</button>` : ''}
+        </div>`;
+      }
     }
     if ((current.followups || []).length) followupsHtml = `<div style="margin-top:6px">${current.followups.map(fuRow).join('')}</div>`;
     if (current.notes) subMetaExtra += ` · ${esc(current.notes)}`;
@@ -3804,16 +3813,49 @@ function openNewContactFollowup(contacts) {
 // due date and customer/contact pickers an opportunity has (those get
 // filled in once it's promoted and there's actually something to track).
 async function actNewLead() {
+  // A lead is lighter-weight than an opportunity (see the comment on
+  // actPromoteLead below) — customer/contact are optional here, unlike
+  // Promote's required version of the same picker, since the whole point
+  // of a lead is often that you've heard about something before you know
+  // who the actual customer is yet. But the field needs to at least EXIST
+  // for the times it is already known (per Jess — there was no way to add
+  // one at all until promoting to an opportunity).
+  let contactsByCompany = {};
+  try {
+    const contacts = (await api('GET', '/api/v2/contacts')).sort((a, c) => (a.full_name || '').localeCompare(c.full_name || ''));
+    contacts.forEach(c => { if (c.company_id) (contactsByCompany[c.company_id] = contactsByCompany[c.company_id] || []).push(c); });
+  } catch { /* per-customer contact lists just come up empty if this fails */ }
+
   showForm('🌱 New Lead', [
     { id: 'project_id', label: 'Project', type: 'project', multi: false, required: true,
       newKey: 'project_name', options: projectOpts(), placeholder: 'Type project name…',
       maxLength: 30, hint: 'Max 30 characters (Foundation limit). Suggested format: "Building name/# - Type of work" — e.g. "Merck B53 Controls" (customer isn\'t included — it\'s tracked separately).' },
     { id: 'owner_id', label: 'Lead Owner', type: 'select', required: true, options: teamOpts(), value: CURRENT_USER?.id },
     { id: 'source', label: 'Source (where did this come from?)', type: 'text', placeholder: 'iSqFt, BuildingConnected, email invite, referral, phone call…' },
+    { id: 'company_ids', label: 'Customer(s) — if already known', type: 'company', multi: true, newKey: 'new_companies', options: companyOpts(), placeholder: 'Type customer name…',
+      onChange: () => renderOppContactPickers(contactsByCompany) },
+    { id: 'opp_contacts_section', type: 'custom' },
     { id: 'description', label: 'Description', type: 'textarea', placeholder: 'Brief description of what we heard…' },
     { id: 'location', label: 'Location', type: 'text', placeholder: 'City, State or site address…' },
     { id: 'notes', label: 'Notes (internal discussion)', type: 'textarea', placeholder: 'Why are we tracking this? What do we still need to know?' },
-  ], data => api('POST', '/api/v2/leads', data), 'Create Lead');
+  ], data => {
+    const contact_ids_by_company = {};
+    const new_contacts_by_company = {};
+    const selected = COMBO_STATE['company_ids'] || [];
+    selected.filter(s => s.id).forEach(s => {
+      const picks = COMBO_STATE['opp_contact_' + s.id] || [];
+      const existingIds = picks.filter(p => p.id).map(p => p.id);
+      const newNames = picks.filter(p => !p.id).map(p => p.name);
+      if (existingIds.length) contact_ids_by_company[s.id] = existingIds;
+      if (newNames.length) new_contacts_by_company[s.id] = newNames;
+    });
+    return api('POST', '/api/v2/leads', { ...data, contact_ids_by_company, new_contacts_by_company }).then(result => {
+      if (result.new_contacts?.length) openNewContactFollowup(result.new_contacts);
+      return result;
+    });
+  }, 'Create Lead');
+
+  renderOppContactPickers(contactsByCompany);
 }
 // A lead is deliberately lighter-weight than an opportunity (see the New
 // Lead form above) — promoting one now collects everything a directly-
