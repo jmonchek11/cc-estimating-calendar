@@ -2299,7 +2299,12 @@ async function deleteReminder(id) {
 // workaround of demoting a held opportunity back to 'lead'. Turning it on
 // schedules the first 60-day check-in Reminder; turning it off clears any
 // pending one so it doesn't keep pinging after the hold is lifted.
-async function setProjectOnHold(projectId, onHold, actorId) {
+// untilDate: when to check back in — defaults to 60 days out (the original
+// behavior) if not given, but per Kevin, a specific known resume date
+// (funding decision expected, customer said "check back in Q2," etc.)
+// should be usable directly instead of always falling back to a generic
+// 60-day nudge.
+async function setProjectOnHold(projectId, onHold, actorId, untilDate) {
   const M = getModels();
   const pid = Number(projectId);
   const proj = await M.Project.findById(pid).lean();
@@ -2309,7 +2314,7 @@ async function setProjectOnHold(projectId, onHold, actorId) {
   if (on) {
     await M.Reminder.create({
       _id: await nextId('reminders'), parent_type: 'project', parent_id: pid,
-      note: 'On-Hold check-in', remind_on: addDays(today(), 60), dismissed: 0, emailed: 0, created_by: actorId || null,
+      note: 'On-Hold check-in', remind_on: untilDate || addDays(today(), 60), dismissed: 0, emailed: 0, created_by: actorId || null,
     });
   } else {
     await M.Reminder.updateMany({ parent_type: 'project', parent_id: pid, dismissed: { $ne: 1 } }, { $set: { dismissed: 1 } });

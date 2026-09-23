@@ -689,6 +689,30 @@ function setHash(h) {
   const newHash = '#' + h;
   if (location.hash !== newHash) history.pushState(null, '', newHash);
 }
+// Browser tab title — also what shows as the link description when a URL
+// is pasted into Teams/Outlook/etc, which used to always just read "LIS
+// Estimating Calendar" regardless of what page it actually pointed to
+// (per Carrie). BASE_PAGE_TITLE is whatever the underlying page (list,
+// project, dashboard…) set most recently — closeFlyout() restores it since
+// closing a flyout doesn't re-render the page underneath.
+let BASE_PAGE_TITLE = null;
+function setPageTitle(title) {
+  document.title = title ? `${title} — LIS Estimating Calendar` : 'LIS Estimating Calendar';
+}
+function setBasePageTitle(title) {
+  BASE_PAGE_TITLE = title;
+  setPageTitle(title);
+}
+const NAV_PAGE_TITLES = {
+  dashboard: 'Dashboard', health: 'Data Health', history: 'History', communications: 'Communications',
+  leads: 'Active Leads', opportunities: 'Bid Opportunities', 'closed-opportunities': 'Closed Opportunities',
+  queue: 'Queue', 'active-bids': 'Active Bids', 'incomplete-bids': 'Incomplete Bids', 'submitted-bids': 'Bids to Follow Up On',
+  'awarded-bids': 'Awarded Bids', 'not-awarded-bids': 'Not Awarded Bids', 'gc-award-review': 'Review GC Outcomes',
+  'active-cos': 'Active Change Orders', 'submitted-cos': 'Change Orders to Follow Up On',
+  'approved-cos': 'Approved Change Orders', 'not-approved-cos': 'Not Approved Change Orders',
+  search: 'Search', contacts: 'Contacts', vendors: 'Vendors', reports: 'Reports', digest: 'Weekly Digest',
+  calendar: 'Calendar', settings: 'Settings',
+};
 // Parses the current URL hash and renders whatever it points to — used on
 // initial load (bootstrap) and on browser back/forward (popstate), so both
 // a refresh and the back button land on the actual page shown, not always
@@ -745,6 +769,7 @@ function navigate(page) {
   setHash(page);
   closeFlyout();
   closeMobileNav();
+  setBasePageTitle(NAV_PAGE_TITLES[page] || (page === 'projects' ? 'Projects' : null));
   if (page !== 'projects') OPEN_PROJECT = null;
   if (page === 'dashboard') { VIEW = { name: 'dashboard' }; return renderDashboard(); }
   if (page === 'health') { VIEW = { name: 'health' }; return showHealth(); }
@@ -2392,6 +2417,7 @@ async function renderProjectPage(projectId) {
   let d;
   try { await ensureMeta(); d = await api('GET', '/api/v2/projects/' + projectId); DETAIL_CACHE[projectId] = d; }
   catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
+  setBasePageTitle(d.name);
 
   const bidN = d.bids.length, jobN = d.jobs.length, coN = d.jobs.reduce((s, j) => s + j.change_orders.length, 0);
   const jobAddress = fmtJobAddress(d);
@@ -2430,6 +2456,10 @@ function closeFlyout() {
   FLYOUT = null;
   document.getElementById('fly-overlay')?.remove();
   document.getElementById('fly-panel')?.remove();
+  // Closing the flyout doesn't re-render whatever page is underneath it
+  // (that's the point — it preserves scroll position), so the browser tab
+  // title has to be put back by hand instead of picking it up for free.
+  setPageTitle(BASE_PAGE_TITLE);
 }
 
 function openBidFlyout(projectId, bidId) { saveScrollForCurrentHash(); FLYOUT = { kind: 'bid', projectId, id: bidId }; OPEN_PROJECT = projectId; setHash(`project/${projectId}/bid/${bidId}`); renderFlyout(true); }
@@ -2455,6 +2485,7 @@ async function renderFlyout(fresh) {
     const b = d.bids.find(x => x.id === FLYOUT.id);
     if (!b) { closeFlyout(); return; }
     title = `${b.bid_number || 'Bid'}`; sub = esc(d.name);
+    setPageTitle(`${b.bid_number || 'Bid'} ${d.name}`);
     // Not set here — bidNode() already shows the "Open in OneDrive" button
     // in the card itself, right under the bid #, so a second one up in the
     // header would just be redundant.
@@ -2466,6 +2497,7 @@ async function renderFlyout(fresh) {
     for (const j of d.jobs) { const c = j.change_orders.find(x => x.id === FLYOUT.id); if (c) { co = c; job = j; break; } }
     if (!co) { closeFlyout(); return; }
     title = `${esc(co.co_number)}`; sub = `${esc(d.name)}${job.job_number ? ' · Job ' + esc(job.job_number) : ''}`;
+    setPageTitle(`${co.co_number} ${d.name}`);
     folderUrl = job.folder_url;
     body = `<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">🏭 ${job.job_number ? 'Job ' + esc(job.job_number) : 'Job'}${job.pm ? ` · PM ${ini(job.pm)} ${esc(job.pm.name)}` : ' · <span style="color:#dc2626">no PM assigned</span>'}</div>` + coNode(co);
   }
@@ -4088,12 +4120,19 @@ function actEditProject(projectId) {
     { id: 'zip', label: 'ZIP', type: 'text', value: d.zip },
   ], data => api('PATCH', `/api/v2/admin/project/${projectId}`, data), 'Save Changes');
 }
-async function actToggleProjectOnHold(projectId, onHold) {
-  if (onHold && !confirm('Put this project on hold? Every bid and job under it will show as on-hold, and a 60-day check-in reminder will be scheduled.')) return;
-  try {
-    await api('POST', `/api/v2/projects/${projectId}/on-hold`, { on_hold: onHold });
-    await renderProjectPage(projectId);
-  } catch (e) { alert('Failed: ' + e.message); }
+function actToggleProjectOnHold(projectId, onHold) {
+  if (!onHold) {
+    if (!confirm('Take this project off hold?')) return;
+    api('POST', `/api/v2/projects/${projectId}/on-hold`, { on_hold: false }).then(() => renderProjectPage(projectId)).catch(e => alert('Failed: ' + e.message));
+    return;
+  }
+  // A specific known check-in date (funding decision expected, customer
+  // said "check back in Q2," etc.) beats always falling back to a generic
+  // 60-day nudge — per Kevin, defaults to +60 days but is fully editable.
+  showForm('⏸ Put On Hold', [
+    { id: 'until_date', label: 'Check back in on', type: 'date', required: true, value: new Date(Date.now() + 60 * 86400000).toISOString().slice(0, 10),
+      hint: 'Every bid and job under this project will show as on-hold until then.' },
+  ], data => api('POST', `/api/v2/projects/${projectId}/on-hold`, { on_hold: true, until_date: data.until_date }).then(() => renderProjectPage(projectId)), 'Put On Hold', 'amber');
 }
 
 function actEditBid(bidId) {

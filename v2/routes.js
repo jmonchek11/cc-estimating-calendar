@@ -212,7 +212,7 @@ async function actorOf(req) {
   try { return await maindb.getMember(req.session.userId); } catch { return null; }
 }
 
-router.post('/api/v2/projects/:id/on-hold', t(req => v2db.setProjectOnHold(req.params.id, req.body.on_hold, req.session.userId),
+router.post('/api/v2/projects/:id/on-hold', t(req => v2db.setProjectOnHold(req.params.id, req.body.on_hold, req.session.userId, req.body.until_date),
   async (req, r) => ({ action: 'project.on_hold', summary: `${r.on_hold ? 'Put' : 'Took'} project "${await v2db.projectLabel(r.project_id)}" ${r.on_hold ? 'on hold' : 'off hold'}`, entity_type: 'project', entity_id: r.project_id })));
 
 // Fire assignment emails for whichever of estimator_id/salesperson_id/pm_id
