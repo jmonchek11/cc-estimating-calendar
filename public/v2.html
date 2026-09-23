@@ -3539,7 +3539,15 @@ const submitYesNoOptions = (yesLabel, alreadyKnown) => alreadyKnown ? yesNoOptio
 // which have no prior opportunity to pull from. Everything the opportunity
 // already captured is prefilled here rather than asked again, so Start Bid
 // can't silently drop or overwrite it (see actStartBidManual).
-const startBidFields = (b = {}) => {
+// bidId: present when starting an ALREADY-EXISTING bid (Start Bid from
+// Queue) — sub-estimators are managed live via their own add/remove
+// endpoints (subEstimatorSectionHtml), so the real chip UI (with whatever
+// was already set at Approve to Bid) shows here. Absent for a brand-new
+// bid (+ New Bid / + Add Bid to Project) — there's no bid to attach one to
+// yet, so a single optional estimator+scope pair is offered instead,
+// chained on as its own call right after creation (see newBidForm), same
+// pattern actApproveToBid already uses.
+const startBidFields = (b = {}, bidId = null) => {
   const existingCustomerNames = (b.customers || []).map(c => typeof c === 'string' ? c : c.name).filter(Boolean);
   const fields = [
     { id: 'bid_number', label: 'Bid # (entered manually for now)', type: 'text', required: true, placeholder: 'B26-0198' },
@@ -3553,6 +3561,16 @@ const startBidFields = (b = {}) => {
     { id: 'estimator_id', label: 'Estimator', type: 'select', emptyLabel: 'TBD', options: teamOpts(['estimator', 'sales']), value: b.estimator?.id },
     { id: 'salesperson_id', label: 'Salesperson', type: 'select', emptyLabel: 'TBD', options: teamOpts(['sales']), value: b.salesperson?.id },
     { id: 'apm_id', label: 'APM', type: 'select', emptyLabel: 'None', options: apmOpts(), value: b.apm?.id },
+  );
+  if (bidId) {
+    fields.push({ id: 'sub_est_section', type: 'custom' });
+  } else {
+    fields.push(
+      { id: 'sub_estimator_id', label: 'Sub-Estimator (optional)', type: 'select', emptyLabel: 'None', options: teamOpts(['estimator', 'sales']) },
+      { id: 'sub_estimator_scope', label: 'Sub-Estimator Scope (one system — e.g. "Fire Alarm")', type: 'text', placeholder: 'e.g. Fire Alarm' },
+    );
+  }
+  fields.push(
     { id: 'date_received', label: 'Date Received', type: 'date', required: true, value: today },
     { id: 'due_date', label: 'Due Date', type: 'date', required: true, value: b.due_date },
     { id: 'due_time', label: 'Due Time (optional)', type: 'time', value: b.due_time },
@@ -3616,9 +3634,19 @@ function newBidForm({ projectId, projectName } = {}) {
       maxLength: 30, hint: 'Max 30 characters (Foundation limit). Suggested format: "Building name/# - Type of work" — e.g. "Merck B53 Controls" (customer isn\'t included — it\'s tracked separately).' });
   }
   fields.push(...startBidFields());
-  showForm(title, fields, data => {
+  showForm(title, fields, async data => {
     if (projectId) data.project_id = projectId;
-    return api('POST', '/api/v2/bids', data);
+    if (data.sub_estimator_id && !data.sub_estimator_scope) throw new Error('Required: Sub-Estimator Scope (or leave Sub-Estimator blank)');
+    const r = await api('POST', '/api/v2/bids', data);
+    // Sub-estimators are their own array (Bid.sub_estimators, added via a
+    // dedicated endpoint) rather than a plain field on the bid — folding
+    // one in here just means a second call once creation succeeds, same
+    // "chain a follow-up call" pattern as Approve to Bid's own sub-
+    // estimator field.
+    if (data.sub_estimator_id && data.sub_estimator_scope) {
+      await api('POST', `/api/v2/bids/${r.bid_id}/sub-estimators`, { estimator_id: data.sub_estimator_id, scope: data.sub_estimator_scope });
+    }
+    return r;
   }, 'Create Bid', 'green');
 }
 
@@ -3884,12 +3912,17 @@ function actStartBid(bidId) {
 function actStartBidManual(bidId) {
   const b = DETAIL_CACHE[OPEN_PROJECT]?.bids.find(x => x.id === bidId)
     || (VIEW.name === 'bidlist' ? LIST_STATE[VIEW.arg] : null)?.find(x => x.id === bidId) || {};
-  const fields = startBidFields(b);
+  const fields = startBidFields(b, bidId);
   showForm('→ Start Bid', fields, data => api('POST', `/api/v2/bids/${bidId}/start`, data), 'Start Bid');
   if (fields._existingCustomerNames?.length) {
     const el = document.getElementById('custom-existing_customers_note');
     if (el) el.innerHTML = `<div class="v2-field"><label>Customer(s)</label><div style="font-size:12px;color:var(--text-muted)">Already on this bid: <strong>${esc(fields._existingCustomerNames.join(', '))}</strong>. Use "+ Add Customer(s)" after starting to add another.</div></div>`;
   }
+  // The bid already exists at this point (still 'opportunity' stage), so
+  // whatever sub-estimator was set at Approve to Bid is real, live data —
+  // show it the same way Edit Bid does, not just a plain form field.
+  const subEstContainer = document.getElementById('custom-sub_est_section');
+  if (subEstContainer) subEstContainer.outerHTML = subEstimatorSectionHtml(bidId, b);
 }
 
 // Customers on a bid → dropdown options

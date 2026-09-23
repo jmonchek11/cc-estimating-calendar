@@ -916,7 +916,13 @@ async function startBid(id, data, actorId) {
     estimator_id: data.estimator_id ? Number(data.estimator_id) : null,
     salesperson_id: data.salesperson_id ? Number(data.salesperson_id) : null,
     apm_id: data.apm_id ? Number(data.apm_id) : null,
-    sub_estimators: data.sub_estimators || [],
+    // sub_estimators is deliberately NOT touched here — it's managed
+    // through its own add/remove endpoints (addSubEstimator/
+    // removeSubEstimator), not collected on this form. This used to
+    // unconditionally overwrite it with `data.sub_estimators || []`, which
+    // is always [] since Start Bid never sends that field — silently
+    // wiping out any sub-estimator assigned earlier at Approve to Bid the
+    // moment someone started the bid (confirmed happening in prod).
     date_received: data.date_received,
     due_date: data.due_date,
     due_time: data.due_time || null,
