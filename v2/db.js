@@ -4324,7 +4324,22 @@ async function getEstimatorAvailability(startDate, endDate) {
     const fullMatches = namedMembers.filter(m => m.name && ev.summary.toLowerCase().includes(m.name.toLowerCase()));
     const matched = fullMatches.length ? fullMatches : namedMembers.filter(m => {
       const escaped = m.first.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      return new RegExp(`\\b${escaped}\\b`, 'i').test(ev.summary);
+      // A whole-word first-name hit isn't enough on its own — "Pat" matches
+      // both "Pat McCreesh - Out" AND "Pat Bray - Out" (a field guy who
+      // isn't even in this roster), and used to silently flag Pat McCreesh
+      // for someone else's time off (confirmed happening for Pat McCreesh/
+      // Pat Bray and Darren Delaney/Darren Kelly). If a name-shaped word
+      // immediately follows the matched first name — almost always a real
+      // surname, per the "First Last - Reason" convention — only accept the
+      // match when it's actually THIS member's own last name; a bare first
+      // name with nothing (or just the reason) following it, like
+      // "Ray - Vacation", still matches as before.
+      const hit = new RegExp(`\\b${escaped}\\b(?:\\s+([A-Za-z][\\w'-]*))?`, 'i').exec(ev.summary);
+      if (!hit) return false;
+      const following = hit[1];
+      if (!following) return true;
+      const last = (m.name || '').trim().split(/\s+/).slice(1).join(' ');
+      return !last || following.toLowerCase() === last.toLowerCase();
     });
     if (!matched.length) continue;
     // end is exclusive per Graph/iCalendar convention for all-day events —
