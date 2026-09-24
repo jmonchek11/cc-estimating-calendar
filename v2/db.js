@@ -4361,6 +4361,84 @@ async function getEstimatorAvailability(startDate, endDate) {
   return byDate;
 }
 
+// ── TV Kiosk (v2) — replaces the old v1-only /api/tv/data aggregation.
+// Same response shape the existing tv.js already renders (bids/wins/stats),
+// just sourced from v2's Bid + ChangeOrder instead of v1's single Bid
+// collection (which conflated a CO into `stage: 'active_co'` on the same
+// document — v2 keeps them as genuinely separate entities, so this merges
+// them back into one list with that same stage string tv.js already
+// branches on). `customer` is a single display string, not a real field in
+// v2 (a bid can have several) — joined from BidCustomer for a Bid, or the
+// awarded company for a CO (COs don't have their own customer roster,
+// they belong to a Job that's already been awarded to one).
+async function getTvData() {
+  const M = getModels();
+  const [bids, cos, jobs, projects, companies, bidCustomers, members] = await Promise.all([
+    M.Bid.find({ stage: { $in: ['active_bid', 'awarded'] }, superseded: { $ne: 1 } }).lean(),
+    M.ChangeOrder.find({ stage: 'active_co', superseded: { $ne: 1 } }).lean(),
+    M.Job.find().lean(),
+    M.Project.find().lean(),
+    M.Company.find().lean(),
+    M.BidCustomer.find().lean(),
+    M.TeamMember.find().lean(),
+  ]);
+  const pName = {}; projects.forEach(p => pName[p._id] = p.name);
+  const coName = {}; companies.forEach(c => coName[c._id] = c.name);
+  const jobById = {}; jobs.forEach(j => jobById[j._id] = j);
+  const tm = {}; members.forEach(m => tm[m._id] = m);
+  const custNamesByBid = {};
+  bidCustomers.forEach(bc => (custNamesByBid[bc.bid_id] = custNamesByBid[bc.bid_id] || []).push(coName[bc.company_id]));
+
+  const activeBids = bids.filter(b => b.stage === 'active_bid');
+  const fmtBid = b => ({
+    id: b._id, bid_number: b.bid_number || null, stage: b.stage,
+    project_name: pName[b.project_id] || '—',
+    customer: (custNamesByBid[b._id] || []).filter(Boolean).join(', ') || null,
+    estimate_due_date: b.due_date || null, estimate_amount: b.estimate_amount || null,
+    estimate_pct_complete: 0, award_date: b.award_date || null,
+    estimator_id: b.estimator_id || null, estimator_initials: tm[b.estimator_id]?.initials || null,
+    estimator_name: tm[b.estimator_id]?.name || null, salesperson_initials: tm[b.salesperson_id]?.initials || null,
+  });
+  const fmtCo = c => {
+    const job = jobById[c.job_id];
+    return {
+      id: c._id, bid_number: c.co_number || null, stage: 'active_co',
+      project_name: job ? (pName[job.project_id] || '—') : '—',
+      customer: job?.awarded_company_id ? coName[job.awarded_company_id] : null,
+      estimate_due_date: c.due_date || null, estimate_amount: c.estimate_amount || null,
+      estimate_pct_complete: 0, award_date: null,
+      estimator_id: c.estimator_id || null, estimator_initials: tm[c.estimator_id]?.initials || null,
+      estimator_name: tm[c.estimator_id]?.name || null, salesperson_initials: null,
+    };
+  };
+  const merged = [...activeBids.map(fmtBid), ...cos.map(fmtCo)];
+
+  const since = new Date(); since.setDate(since.getDate() - 60);
+  const sinceStr = since.toISOString().slice(0, 10);
+  const wins = bids
+    .filter(b => b.stage === 'awarded' && b.award_date && b.award_date >= sinceStr)
+    .sort((a, b) => (b.award_date || '').localeCompare(a.award_date || ''))
+    .slice(0, 15)
+    .map(fmtBid);
+
+  const today = new Date().toISOString().slice(0, 10);
+  const in7 = new Date(); in7.setDate(in7.getDate() + 7);
+  const weekEnd = in7.toISOString().slice(0, 10);
+
+  return {
+    bids: merged,
+    wins,
+    stats: {
+      activeBids: activeBids.length,
+      activeCOs: cos.length,
+      pipelineValue: merged.reduce((s, b) => s + (b.estimate_amount || 0), 0),
+      dueThisWeek: merged.filter(b => b.estimate_due_date >= today && b.estimate_due_date <= weekEnd).length,
+      overdueCount: merged.filter(b => b.estimate_due_date && b.estimate_due_date < today).length,
+    },
+    timestamp: new Date().toISOString(),
+  };
+}
+
 async function buildIcsFeed(teamMemberId) {
   const M = getModels();
   const id = Number(teamMemberId);
@@ -4591,5 +4669,5 @@ module.exports = {
   mergeContacts, deleteCompany, deleteChangeOrder,
   getVendors, VENDOR_CATEGORIES,
   getReports, getReportsBidDrilldown, getReportsCustomerDrilldown, getGcAwardReviewQueue, setSubmissionGcAwarded, setGcOutcome, setAwaitingPo, projectLabel,
-  getOrCreateCalendarToken, resetCalendarToken, getTeamMemberIdByCalendarToken, buildIcsFeed, getEstimatorAvailability,
+  getOrCreateCalendarToken, resetCalendarToken, getTeamMemberIdByCalendarToken, buildIcsFeed, getEstimatorAvailability, getTvData,
 };
