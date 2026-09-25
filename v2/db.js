@@ -2534,6 +2534,61 @@ async function getNotesFor(parentType, parentId) {
   return M.Note.find({ parent_type: parentType, parent_id: Number(parentId) }).sort({ created_at: -1 }).lean();
 }
 
+// Out of Office — "I'll be out but still working" check-in, per the
+// estimating team's Teams discussion (2026-09-25): a fillable reason (too
+// varied to enum — walkthroughs, meetings, personal), all-day or a single
+// time, logged by anyone for anyone (not locked to "self" only) so a future
+// shared kiosk (an iPad at Carrie's desk was floated) needs no schema
+// change to work the same way. Shown on the TV board's "Out of the Office
+// Today" section (getTvData) and manageable from the same modal that logs
+// it (see actLogOutOfOffice in v2.html).
+async function logOutOfOffice(data, actorId) {
+  const M = getModels();
+  const teamMemberId = Number(data.team_member_id);
+  if (!teamMemberId) throw new Error('Who is out is required');
+  const member = await M.TeamMember.findById(teamMemberId).lean();
+  if (!member) throw new Error('Team member not found');
+  const reason = (data.reason || '').trim();
+  if (!reason) throw new Error('Reason is required');
+  const date = data.date || today();
+  const allDay = data.all_day !== false;
+  const id = await nextId('out_of_office');
+  await M.OutOfOffice.create({
+    _id: id, team_member_id: teamMemberId, date, all_day: allDay,
+    time: allDay ? null : (data.time || null), reason, created_by: actorId || null,
+  });
+  return { id };
+}
+// Upcoming = today onward, not just today — logging a few days ahead (e.g.
+// a dentist appointment next Tuesday) is a real use case, same as bid
+// walk-throughs already support future dates.
+async function getOutOfOfficeUpcoming() {
+  const M = getModels();
+  const [rows, members] = await Promise.all([
+    M.OutOfOffice.find({ date: { $gte: today() } }).sort({ date: 1, time: 1 }).lean(),
+    M.TeamMember.find().lean(),
+  ]);
+  const tm = {}; members.forEach(m => tm[m._id] = m);
+  return rows.map(o => ({
+    id: o._id, team_member_id: o.team_member_id,
+    name: tm[o.team_member_id]?.name || 'Unknown', initials: tm[o.team_member_id]?.initials || '?',
+    date: o.date, all_day: o.all_day, time: o.time, reason: o.reason, created_by: o.created_by,
+  }));
+}
+async function deleteOutOfOffice(id, actorId, isAdmin) {
+  const M = getModels();
+  const row = await M.OutOfOffice.findById(Number(id)).lean();
+  if (!row) throw new Error('Not found');
+  // Anyone can delete an entry they logged (about themselves or someone
+  // else) or one logged about them; admins can delete anything — same
+  // "your own work or admin" boundary as e.g. Note editing elsewhere.
+  if (!isAdmin && row.created_by !== actorId && row.team_member_id !== actorId) {
+    throw new Error('You can only remove an entry you logged or that is about you');
+  }
+  await M.OutOfOffice.deleteOne({ _id: Number(id) });
+  return { ok: true };
+}
+
 // Job # format is Foundation's: digits only, 5-6 chars (customer # + 3-digit
 // sequence). Clearing to null is always allowed; existing stored numbers are
 // NOT retro-validated (only enforced when a number is being SET).
@@ -4383,7 +4438,8 @@ async function getTvData() {
   // active_bid, and stays relevant through submitted too — so bids are
   // fetched broadly (any non-superseded stage) rather than the narrower
   // active_bid/awarded set the due-date list itself still uses.
-  const [bids, cos, jobs, projects, companies, bidCustomers, members] = await Promise.all([
+  const todayStr0 = new Date().toISOString().slice(0, 10);
+  const [bids, cos, jobs, projects, companies, bidCustomers, members, oooToday] = await Promise.all([
     M.Bid.find({ superseded: { $ne: 1 } }).lean(),
     M.ChangeOrder.find({ stage: 'active_co', superseded: { $ne: 1 } }).lean(),
     M.Job.find().lean(),
@@ -4391,6 +4447,7 @@ async function getTvData() {
     M.Company.find().lean(),
     M.BidCustomer.find().lean(),
     M.TeamMember.find().lean(),
+    M.OutOfOffice.find({ date: todayStr0 }).lean(),
   ]);
   const pName = {}; const pOnHold = {};
   projects.forEach(p => { pName[p._id] = p.name; pOnHold[p._id] = !!p.on_hold; });
@@ -4440,7 +4497,7 @@ async function getTvData() {
       const siteCompany = w.company_id ? coName[w.company_id] : null;
       const projectName = pName[b.project_id] || '—';
       if (w.date === today) {
-        outToday.push({ project_name: projectName, company: siteCompany, time: w.time || null, assignees });
+        outToday.push({ type: 'walkthrough', project_name: projectName, company: siteCompany, time: w.time || null, all_day: false, assignees });
       }
       if (w.date >= today && w.date <= lookaheadStr) {
         walkthroughRows.push({
@@ -4459,6 +4516,19 @@ async function getTvData() {
       }
     }
   }
+  // Logged "out of office" entries (2026-09-25) — a person working
+  // somewhere other than their desk for any reason (walkthrough, meeting,
+  // site visit, personal), not just the walkthrough-specific case above.
+  // Same outToday list, so "if you don't see someone, check the board"
+  // covers every reason someone might be away, not only walk-throughs.
+  oooToday.forEach(o => {
+    const member = tm[o.team_member_id];
+    if (!member) return;
+    outToday.push({
+      type: 'ooo', reason: o.reason, all_day: !!o.all_day, time: o.all_day ? null : (o.time || null),
+      assignees: [{ id: o.team_member_id, name: member.name, initials: member.initials }],
+    });
+  });
   outToday.sort((a, b) => (a.time || '99:99').localeCompare(b.time || '99:99'));
 
   const fmtBid = b => ({
@@ -4748,6 +4818,7 @@ module.exports = {
   addReminder, dismissReminder, deleteReminder, getRemindersFor, getDueReminders, markReminderEmailed, setProjectOnHold,
   addWalkthrough, updateWalkthrough, removeWalkthrough, getBidsNeedingWalkthroughReminder, markWalkthroughReminderSent, setWalkthroughRsvp,
   addNote, updateNote, deleteNote, getNotesFor,
+  logOutOfOffice, getOutOfOfficeUpcoming, deleteOutOfOffice,
   getDigest,
   getTeamV2, createTeamMemberV2, updateTeamMemberV2, updateMyNotificationPrefs, updateSettingsV2, getSettings,
   removeBidCustomer, createCompanyV2, deleteBid, addSubEstimator, removeSubEstimator,

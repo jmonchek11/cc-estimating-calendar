@@ -243,7 +243,11 @@ function renderRows(bids) {
   startPager(sorted.length);
 }
 
-// ── Out on Walkthrough Today ────────────────────────────────────────────────
+// ── Out of the Office Today ──────────────────────────────────────────────────
+// Two kinds of entry share this banner: a scheduled bid walk-through, and a
+// general "I'm out but working" check-in (2026-09-25) — anything from a
+// meeting off-site to a personal appointment. Both render as the same
+// avatar+name+meta chip; only the meta line's content differs by type.
 function renderOutToday(list) {
   const wrap = document.getElementById('tv-outtoday');
   const listEl = document.getElementById('tv-outtoday-list');
@@ -253,7 +257,9 @@ function renderOutToday(list) {
     const names = (w.assignees || []).map(a => a.name).join(' & ') || 'Unassigned';
     const avatars = (w.assignees || []).map(a =>
       `<div class="tv-outtoday-avatar" style="background:${estimatorColor(a.id)}">${esc(a.initials || '?')}</div>`).join('');
-    const meta = [w.project_name, w.company, w.time ? fmtTime(w.time) : null].filter(Boolean).join(' · ');
+    const meta = w.type === 'ooo'
+      ? [w.reason, w.all_day ? 'All day' : (w.time ? fmtTime(w.time) : null)].filter(Boolean).join(' · ')
+      : [w.project_name, w.company, w.time ? fmtTime(w.time) : null].filter(Boolean).join(' · ');
     return `
       <div class="tv-outtoday-chip">
         <div class="tv-outtoday-avatars">${avatars}</div>

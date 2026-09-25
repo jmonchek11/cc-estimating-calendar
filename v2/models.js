@@ -429,6 +429,27 @@ const NoteSchema = new mongoose.Schema({
   edited_at:   { type: String, default: null },
 }, opts);
 
+// Check-in/check-out — a team member logging that they'll be out of the
+// office (working from a site, at a walkthrough, a meeting, etc.) but still
+// working, distinct from a scheduled Bid.walkthrough (which is tied to a
+// specific bid). Anyone can log an entry for anyone (not just themselves) —
+// the same "log it for someone else" pattern walkthrough assignees already
+// use — so a shared kiosk (e.g. an iPad at the front desk) can work later
+// without a schema change. `time` is a single point-in-time (e.g. "2pm
+// walkthrough"), not a start/end range — matches how walkthroughs already
+// record just one time, not a duration.
+const OutOfOfficeSchema = new mongoose.Schema({
+  _id:            Number,
+  team_member_id: { type: Number, required: true },   // FK → TeamMember — who's out
+  date:           { type: String, required: true },   // YYYY-MM-DD
+  all_day:        { type: Boolean, default: true },
+  time:           { type: String, default: null },    // "HH:MM", 24-hour — only meaningful when all_day is false
+  reason:         { type: String, required: true },   // free text — varies too much to enum ("dentist", "job walkthrough", "sick", …)
+  created_by:     { type: Number, default: null },     // FK → TeamMember — who logged it (may differ from team_member_id)
+  created_at:     { type: String, default: ts },
+}, opts);
+OutOfOfficeSchema.index({ date: 1 });
+
 // TeamMember is v1's ACTUAL model (not a v2-isolated copy). v1 and v2 used to
 // have independently-assigned TeamMember ids in two separate databases —
 // merged in July 2026 (v2/merge-team-ids.js) after that silently broke
@@ -610,6 +631,7 @@ function getModels() {
     Followup:    c.model('Followup', FollowupSchema, 'followups'),
     Reminder:    c.model('Reminder', ReminderSchema, 'reminders'),
     Note:        c.model('Note', NoteSchema, 'notes'),
+    OutOfOffice: c.model('OutOfOffice', OutOfOfficeSchema, 'out_of_office'),
     TeamMember:  V1TeamMember,
     Idea:        V1Idea,
     ReleaseNote: c.model('ReleaseNote', ReleaseNoteSchema, 'release_notes'),

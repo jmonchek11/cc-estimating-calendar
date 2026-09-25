@@ -237,6 +237,22 @@
   #mobile-fab:hover { box-shadow: 0 10px 24px rgba(37,99,235,.48), 0 3px 8px rgba(37,99,235,.35); }
   #mobile-fab:active { transform: scale(.96); }
 
+  /* Out-of-Office FAB — same one-click-from-anywhere idea as Log a Call
+     (2026-09-25), stacked directly above it so both are always reachable.
+     Amber/orange so it doesn't get mistaken for the call button. */
+  #ooo-fab {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    position: fixed; right: 20px; bottom: 80px;
+    height: 46px; padding: 0 18px 0 16px; border-radius: 23px; border: none; z-index: 55;
+    background: #d97706; color: #fff; box-shadow: 0 8px 20px rgba(217,119,6,.4), 0 2px 6px rgba(217,119,6,.3);
+    cursor: pointer; -webkit-tap-highlight-color: transparent;
+    font-family: inherit; font-size: 13px; font-weight: 700; white-space: nowrap;
+    transition: transform .1s ease, box-shadow .15s ease;
+  }
+  #ooo-fab svg { width: 19px; height: 19px; flex-shrink: 0; }
+  #ooo-fab:hover { box-shadow: 0 10px 24px rgba(217,119,6,.48), 0 3px 8px rgba(217,119,6,.35); }
+  #ooo-fab:active { transform: scale(.96); }
+
   @media (max-width: 860px) {
     #app { display: block; height: auto; min-height: 100dvh; }
     /* Flat, restrained bar — no cutouts, badges, or overhangs. Same color
@@ -295,6 +311,7 @@
     /* Sits above the bottom tab bar here — the always-on base rule above
        covers everything else (color, shape, shadow). */
     #mobile-fab { right: 16px; bottom: calc(80px + env(safe-area-inset-bottom)); }
+    #ooo-fab { right: 16px; bottom: calc(136px + env(safe-area-inset-bottom)); }
 
     /* Forms/dialogs become bottom sheets on mobile — a native-feeling
        pattern instead of a small centered dialog with awkward margins. */
@@ -428,6 +445,10 @@
     <button id="mobile-fab" onclick="actQuickFollowup()" title="Log a call" aria-label="Log a call">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.362 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
       <span>Log a Call</span>
+    </button>
+    <button id="ooo-fab" onclick="actLogOutOfOffice()" title="I'm out of the office" aria-label="I'm out of the office">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+      <span>I'm Out</span>
     </button>
     <nav id="mobile-tabbar">
       <a class="mtab" data-page="dashboard" href="#dashboard" onclick="navigate('dashboard');return false">
@@ -6852,6 +6873,97 @@ async function openOnlinePanel() {
       </div>
     </div>`;
   document.body.appendChild(ov);
+}
+
+// ── Out of Office — "I'll be out but still working" check-in ────────────
+// (2026-09-25). One-click from anywhere via the FAB next to Log a Call —
+// fillable reason (too varied to enum: walkthrough, meeting, personal),
+// all-day or a single time. Logged by anyone for anyone, not locked to
+// "yourself" — the same "log it for someone else" pattern walk-through
+// assignees already use, so a future shared kiosk (an iPad at Carrie's
+// desk was floated) needs no change to work. Shown on the TV board's "Out
+// of the Office Today" section.
+function fmtOooDateLabel(dateStr) {
+  if (dateStr === today) return 'Today';
+  const d = new Date(dateStr + 'T00:00:00');
+  const tmrw = new Date(); tmrw.setDate(tmrw.getDate() + 1);
+  if (dateStr === tmrw.toISOString().slice(0, 10)) return 'Tomorrow';
+  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+async function actLogOutOfOffice() {
+  let upcoming = [];
+  try { upcoming = await api('GET', '/api/v2/out-of-office'); } catch { /* list just comes up empty */ }
+  renderOooModal(upcoming);
+}
+function renderOooModal(upcoming) {
+  document.getElementById('v2-form-overlay')?.remove();
+  const ov = document.createElement('div');
+  ov.className = 'v2-overlay'; ov.id = 'v2-form-overlay';
+  const memberOptions = teamOpts().map(o => `<option value="${o.value}" ${CURRENT_USER && o.value === CURRENT_USER.id ? 'selected' : ''}>${esc(o.label)}</option>`).join('');
+  ov.innerHTML = `
+    <div class="v2-modal" style="max-width:440px">
+      <div class="v2-modal-hd">🚪 I'm Out of the Office<button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">✕</button></div>
+      <div class="v2-modal-bd">
+        <div class="v2-field"><label>Who's out? <span class="req">*</span></label><select id="ooo-member">${memberOptions}</select></div>
+        <div class="v2-field"><label>Date <span class="req">*</span></label><input id="ooo-date" type="date" value="${today}"></div>
+        <div class="v2-field"><label class="v2-check"><input type="checkbox" id="ooo-all-day" checked onchange="toggleOooTimeField()"> All day</label></div>
+        <div class="v2-field" id="ooo-time-field" style="display:none"><label>Time</label><input id="ooo-time" type="time"></div>
+        <div class="v2-field"><label>What for? <span class="req">*</span></label><textarea id="ooo-reason" rows="2" placeholder="Job walkthrough, dentist, meeting off-site…"></textarea></div>
+      </div>
+      <div class="v2-modal-err" id="ooo-err"></div>
+      <div class="v2-modal-ft">
+        <button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">Cancel</button>
+        <button class="v2-btn blue" id="ooo-submit" onclick="submitOutOfOffice()">Log It</button>
+      </div>
+      <div style="padding:14px 20px 18px;border-top:1px solid var(--border)">
+        <div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px">Currently Logged</div>
+        <div id="ooo-list">${renderOooList(upcoming)}</div>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+}
+function renderOooList(upcoming) {
+  if (!upcoming.length) return '<div style="font-size:13px;color:var(--text-muted)">Nobody has logged time out.</div>';
+  return upcoming.map(o => `
+    <div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border)">
+      <span class="initials-pill">${esc(o.initials)}</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:600">${esc(o.name)} <span style="font-weight:500;color:var(--text-muted)">— ${esc(o.reason)}</span></div>
+        <div style="font-size:11px;color:var(--text-muted)">${fmtOooDateLabel(o.date)}${o.all_day ? ' · All day' : (o.time ? ' · ' + o.time : '')}</div>
+      </div>
+      <button class="v2-btn outline" style="flex-shrink:0;padding:2px 8px;font-size:11px" onclick="deleteOutOfOfficeEntry(${o.id})" title="Remove">✕</button>
+    </div>`).join('');
+}
+function toggleOooTimeField() {
+  document.getElementById('ooo-time-field').style.display = document.getElementById('ooo-all-day').checked ? 'none' : '';
+}
+async function submitOutOfOffice() {
+  const errEl = document.getElementById('ooo-err');
+  const team_member_id = Number(document.getElementById('ooo-member').value) || null;
+  const date = document.getElementById('ooo-date').value;
+  const all_day = document.getElementById('ooo-all-day').checked;
+  const time = all_day ? null : (document.getElementById('ooo-time').value || null);
+  const reason = document.getElementById('ooo-reason').value.trim();
+  if (!team_member_id || !date || !reason) {
+    errEl.textContent = 'Who, date, and reason are all required.'; errEl.style.display = 'block'; return;
+  }
+  const btn = document.getElementById('ooo-submit');
+  if (btn.disabled) return;
+  btn.disabled = true; const label = btn.textContent; btn.textContent = 'Saving…';
+  try {
+    await api('POST', '/api/v2/out-of-office', { team_member_id, date, all_day, time, reason });
+    document.getElementById('v2-form-overlay')?.remove();
+  } catch (e) {
+    errEl.textContent = e.message; errEl.style.display = 'block';
+    btn.disabled = false; btn.textContent = label;
+  }
+}
+async function deleteOutOfOfficeEntry(id) {
+  if (!confirm('Remove this entry?')) return;
+  try {
+    await api('DELETE', '/api/v2/out-of-office/' + id);
+    actLogOutOfOffice();
+  } catch (e) { alert(e.message); }
 }
 
 // ── Ideas / Issues — reuses v1's /api/ideas (global) ─────────────────────

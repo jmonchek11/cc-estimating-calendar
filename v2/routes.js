@@ -549,6 +549,19 @@ router.post('/api/v2/notes',                   t(req => v2db.addNote(req.body.pa
 router.patch('/api/v2/notes/:id',              t(req => v2db.updateNote(req.params.id, req.body.text)));
 router.delete('/api/v2/notes/:id',             t(req => v2db.deleteNote(req.params.id)));
 
+// Out of Office — check-in/check-out for "I'll be out but still working"
+// (2026-09-25). GET returns today-onward so the log-it modal can also show
+// what's upcoming, not just today.
+router.get('/api/v2/out-of-office',            async (req, res) => { try { res.json(await v2db.getOutOfOfficeUpcoming()); } catch (e) { res.status(500).json({ error: e.message }); } });
+router.post('/api/v2/out-of-office',           t(req => v2db.logOutOfOffice(req.body, req.session.userId)));
+router.delete('/api/v2/out-of-office/:id',     async (req, res) => {
+  try {
+    const actor = await maindb.getMember(req.session.userId);
+    await v2db.deleteOutOfOffice(req.params.id, req.session.userId, !!actor?.is_admin);
+    res.json({ ok: true });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 // ── Jobs ──────────────────────────────────────────────────────────────────────
 router.post('/api/v2/jobs',                   t(req => v2db.createLegacyJob({ ...req.body, created_by: req.session.userId }),
   (req, r) => ({ action: 'job.create_legacy', summary: `Created legacy job #${r.job_id || r.id}`, entity_type: 'job', entity_id: r.job_id || r.id })));
