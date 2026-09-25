@@ -118,7 +118,8 @@ html, body {
 /* ── Table Header ────────────────────────────────────────────────── */
 .tv-table-head {
   display: grid;
-  grid-template-columns: 96px 1fr 90px 120px 150px 150px 170px;
+  grid-template-columns: 72px 1fr 90px 100px 130px 260px 170px;
+  column-gap: 16px;
   align-items: center;
   padding: 0 24px;
   height: 40px;
@@ -151,10 +152,11 @@ html, body {
 /* ── Bid Row ─────────────────────────────────────────────────────── */
 .tv-row {
   display: grid;
-  grid-template-columns: 96px 1fr 90px 120px 150px 150px 170px;
+  grid-template-columns: 72px 1fr 90px 100px 130px 260px 170px;
+  column-gap: 16px;
   align-items: center;
-  padding: 18px 24px;
-  height: 128px;
+  padding: 12px 24px;
+  height: 108px;
   border-bottom: 1px solid var(--border);
   border-left: 5px solid transparent;
   transition: background .2s;
@@ -176,11 +178,14 @@ html, body {
   flex-shrink: 0;
 }
 
-/* Project name */
+/* Project name + sub-estimator chips, side by side — the chips fill the
+   gap between the project name and the Type column instead of leaving it
+   dead, and instead of stacking below the name and growing the row. */
 .tv-proj {
-  padding-right: 20px;
+  display: flex; align-items: center; gap: 28px;
   overflow: hidden;
 }
+.tv-proj-main { flex-shrink: 0; max-width: 340px; overflow: hidden; }
 .tv-proj-name {
   font-size: 22px; font-weight: 700; color: var(--text);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -224,42 +229,34 @@ html, body {
   flex-shrink: 0; margin-left: -13px;
 }
 
-/* Lead + sub-estimator avatar cluster — lead at full 44px, each sub-
-   estimator's own avatar at ~3/4 that size, slightly overlapped, per Joe. */
-.tv-avatars-lead { display: flex; align-items: center; flex-shrink: 0; }
-.tv-avatar-sub {
-  width: 33px; height: 33px; border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 11px; font-weight: 900; color: #fff;
-  border: 2px solid var(--row-a); flex-shrink: 0;
-  margin-left: -10px;
-}
-
-/* Sub-estimators, listed below the project/customer line as a real
-   avatar + name + scope block (not a small note-like chip). */
+/* Sub-estimators — every one, as compact avatar+name+scope chips filling
+   the gap between the project name and the Type column. Wraps to a second
+   line within the row on the rare bid with several sub-estimators rather
+   than truncating anyone off the board. */
 .tv-subest {
-  display: flex; flex-direction: column; gap: 6px; margin-top: 8px;
+  display: flex; flex-wrap: wrap; align-items: center;
+  gap: 8px 18px; flex: 1; min-width: 0;
 }
-.tv-subest-row { display: flex; align-items: center; gap: 8px; }
+.tv-subest-chip { display: flex; align-items: center; gap: 7px; flex-shrink: 0; }
 .tv-subest-avatar {
-  width: 24px; height: 24px; border-radius: 50%;
+  width: 26px; height: 26px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   font-size: 10px; font-weight: 900; color: #fff; flex-shrink: 0;
 }
-.tv-subest-text { line-height: 1.25; overflow: hidden; }
+.tv-subest-text { line-height: 1.2; }
 .tv-subest-name {
   font-size: 13px; font-weight: 700; color: var(--text);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .tv-subest-scope {
   font-size: 11px; font-weight: 600; color: var(--sub); margin-top: 1px;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Amount */
 .tv-amount {
   font-size: 18px; font-weight: 700; color: var(--sub);
-  text-align: right; padding-right: 20px;
+  text-align: right;
   font-variant-numeric: tabular-nums;
   overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
 }
@@ -267,13 +264,13 @@ html, body {
 /* RFI Due / Walkthrough columns — real dedicated deadline columns, not
    folded into one catch-all Details cell. */
 .tv-rfi-cell {
-  font-size: 15px; font-weight: 700; color: #c4b5fd;
-  text-align: right; padding-right: 16px;
+  font-size: 14px; font-weight: 700; color: #c4b5fd;
+  text-align: right;
   font-variant-numeric: tabular-nums;
   overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
 }
 .tv-rfi-cell.empty { color: var(--sub); font-weight: 500; opacity: .5; }
-.tv-walk-cell { display: flex; justify-content: flex-end; padding-right: 12px; }
+.tv-walk-cell { display: flex; justify-content: flex-end; }
 .tv-walk-pill-sm {
   background: rgba(34,211,238,.14); color: #67e8f9; border: 1px solid rgba(34,211,238,.4);
   font-size: 13px; font-weight: 800; line-height: 1.15; padding: 5px 10px;
@@ -281,6 +278,15 @@ html, body {
   white-space: nowrap;
 }
 .tv-walk-pill-sm .tv-walk-pill-time { font-size: 10px; font-weight: 700; color: #a5f3fc; }
+
+/* Details — its own left-aligned column with real width, so it lines up
+   cleanly under its header and site-company names don't need to truncate
+   into an unreadable "…". */
+.tv-details-cell {
+  font-size: 15px; font-weight: 600; color: var(--sub);
+  text-align: left;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
 
 /* Due date */
 .tv-due {

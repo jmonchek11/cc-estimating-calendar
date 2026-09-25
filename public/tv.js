@@ -2,8 +2,7 @@
 const REFRESH_INTERVAL   = 60 * 1000;  // re-fetch every 60 s
 const WIN_CYCLE_INTERVAL =  7 * 1000;  // cycle wins every 7 s
 const PAGE_INTERVAL      =  8 * 1000;  // scroll to next page every 8 s
-const ROW_HEIGHT         = 128;        // px — must match .tv-row height in CSS
-const LOOKAHEAD_DAYS     = 14;         // show bids due within this many days
+const ROW_HEIGHT         = 108;        // px — must match .tv-row height in CSS
 
 const PALETTE = ['#2563eb','#16a34a','#dc2626','#d97706','#7c3aed','#0891b2','#be185d','#ea580c'];
 function estimatorColor(id) {
@@ -134,34 +133,28 @@ function startPager(totalRows) {
 function renderRows(bids) {
   const rowsEl = document.getElementById('tv-rows');
 
-  // Build date window: today → today + LOOKAHEAD_DAYS
-  const today  = new Date(); today.setHours(0, 0, 0, 0);
-  const cutoff = new Date(today); cutoff.setDate(cutoff.getDate() + LOOKAHEAD_DAYS);
-  const todayStr  = today.toISOString().split('T')[0];
-  const cutoffStr = cutoff.toISOString().split('T')[0];
+  // Every active bid/CO shows, regardless of due date — the old 14-day
+  // lookahead window (still used for walk-throughs, which arrive already
+  // pre-filtered from the backend) hid anything without a near-term date,
+  // which per Joe is no longer what this board should do: "we now want to
+  // display ALL active bids regardless of when they're due."
+  const all = bids || [];
 
-  // Filter to only bids with a due date inside the window (no overdue, no far-future)
-  const filtered = (bids || []).filter(b =>
-    b.estimate_due_date && b.estimate_due_date >= todayStr && b.estimate_due_date <= cutoffStr
-  );
-
-  // Update the window label in the table header
-  const rangeEl = document.getElementById('tv-date-range');
-  if (rangeEl) {
-    const fmt = d => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-    rangeEl.textContent = `${fmt(today)} – ${fmt(cutoff)}`;
-  }
-
-  if (!filtered.length) {
-    rowsEl.innerHTML = '<div class="tv-empty">Nothing due in the next ' + LOOKAHEAD_DAYS + ' days 🎉</div>';
+  if (!all.length) {
+    rowsEl.innerHTML = '<div class="tv-empty">Nothing active right now 🎉</div>';
     startPager(0);
     return;
   }
 
-  // Sort by due date ascending
-  const sorted = [...filtered].sort((a, b) =>
-    a.estimate_due_date < b.estimate_due_date ? -1 : a.estimate_due_date > b.estimate_due_date ? 1 : 0
-  );
+  // Sort by due date ascending; anything without a due date sorts to the
+  // end (alphabetically among itself) rather than disappearing.
+  const sorted = [...all].sort((a, b) => {
+    const ad = a.estimate_due_date, bd = b.estimate_due_date;
+    if (ad && bd) return ad < bd ? -1 : ad > bd ? 1 : 0;
+    if (ad) return -1;
+    if (bd) return 1;
+    return (a.project_name || '').localeCompare(b.project_name || '');
+  });
 
   rowsEl.innerHTML = sorted.map(b => {
     const isWalk = b.stage === 'walkthrough';
@@ -170,9 +163,10 @@ function renderRows(bids) {
       : '<span class="tv-type bid">BID</span>';
 
     // Walk-throughs can have several assignees — stack up to 3 avatars,
-    // "+N" beyond that. A bid/CO row shows the lead estimator at full size
-    // plus each sub-estimator's own avatar at ~3/4 size next to it, per Joe
-    // — not just a note at the bottom of the project.
+    // "+N" beyond that. A bid/CO row shows just the lead estimator here;
+    // every sub-estimator gets their own avatar+name+scope chip in the
+    // project column instead (see subEstHtml below), so they're not
+    // duplicated in two places.
     let avatarsHtml;
     if (isWalk && (b.assignees || []).length) {
       const shown = b.assignees.slice(0, 3);
@@ -181,28 +175,22 @@ function renderRows(bids) {
         `<div class="tv-avatar-sm" style="background:${estimatorColor(a.id)}">${esc(a.initials || '?')}</div>`).join('')}${
         extra > 0 ? `<div class="tv-avatar-more">+${extra}</div>` : ''}</div>`;
     } else {
-      const subAvatars = (b.sub_estimators || []).slice(0, 1).map(s =>
-        `<div class="tv-avatar-sub" style="background:${estimatorColor(s.id)}">${esc(s.initials || '?')}</div>`).join('');
-      avatarsHtml = `<div class="tv-avatars-lead">
-        <div class="tv-avatar" style="background:${estimatorColor(b.estimator_id)}">${esc(b.estimator_initials || '?')}</div>
-        ${subAvatars}
-      </div>`;
+      avatarsHtml = `<div class="tv-avatar" style="background:${estimatorColor(b.estimator_id)}">${esc(b.estimator_initials || '?')}</div>`;
     }
 
-    // Sub-estimators — a real avatar + name + scope-below-name block, per
-    // Joe, rather than a small note-like chip at the bottom of the card.
-    // Capped to the first one (row height is fixed for the pager's transform
-    // math, so a second/third full name+scope block doesn't fit) — the rest
-    // fold into a "+N more" note rather than overflowing into the next row
-    // (a real collision hit in preview before this cap was added).
+    // Sub-estimators — every one of them, per Joe ("we need to be able to
+    // see all of them... know exactly what's on their plate"), as compact
+    // avatar+name+scope chips laid out in the wide gap between the project
+    // name and the Type column — filling that dead space rather than
+    // stacking below the name and growing the row.
     const subEsts = b.sub_estimators || [];
     const subEstHtml = subEsts.length
-      ? `<div class="tv-subest">${subEsts.slice(0, 1).map(s => `
-          <div class="tv-subest-row">
+      ? `<div class="tv-subest">${subEsts.map(s => `
+          <div class="tv-subest-chip">
             <div class="tv-subest-avatar" style="background:${estimatorColor(s.id)}">${esc(s.initials || '?')}</div>
             <div class="tv-subest-text">
               <div class="tv-subest-name">${esc(s.name || '')}</div>
-              ${s.scope ? `<div class="tv-subest-scope">${esc(s.scope)}${subEsts.length > 1 ? ` · +${subEsts.length - 1} more` : ''}</div>` : ''}
+              ${s.scope ? `<div class="tv-subest-scope">${esc(s.scope)}</div>` : ''}
             </div>
           </div>`).join('')}</div>` : '';
 
@@ -220,22 +208,28 @@ function renderRows(bids) {
       ? `<div class="tv-walk-cell">${walkPill(b.next_walkthrough_date, b.next_walkthrough_time, true)}</div>`
       : `<div class="tv-walk-cell"></div>`;
 
+    // Details is its own left-aligned column now (was reusing the
+    // right-aligned .tv-amount styling, which visually read as out of step
+    // with the header above it) with real width, so site-company names
+    // don't need to truncate into an unreadable "…".
     let detailCell;
     if (isWalk) {
-      detailCell = `<div class="tv-amount" style="color:var(--sub);font-size:15px">${b.customer ? esc(b.customer) : '—'}</div>`;
+      detailCell = `<div class="tv-details-cell">${b.customer ? esc(b.customer) : '—'}</div>`;
     } else if (b.stage === 'active_co') {
-      detailCell = `<div class="tv-amount" style="color:var(--sub);font-size:14px;font-weight:600">${esc(b.bid_number || '')}${b.description ? ` · ${esc(b.description)}` : ''}</div>`;
+      detailCell = `<div class="tv-details-cell">${esc(b.bid_number || '')}${b.description ? ` · ${esc(b.description)}` : ''}</div>`;
     } else {
-      detailCell = `<div class="tv-amount"></div>`;
+      detailCell = `<div class="tv-details-cell"></div>`;
     }
 
     return `
       <div class="tv-row${overdue ? ' overdue' : ''}" style="border-left-color:${isWalk ? '#22d3ee' : estimatorColor(b.estimator_id)}">
         ${avatarsHtml}
         <div class="tv-proj">
-          <div class="tv-proj-name">${esc(b.project_name)}</div>
-          ${!isWalk && b.customer ? `<div class="tv-proj-cust">${esc(b.customer)}</div>` : ''}
-          ${!isWalk && b.project_type ? `<div class="tv-proj-type">${esc(b.project_type)}</div>` : ''}
+          <div class="tv-proj-main">
+            <div class="tv-proj-name">${esc(b.project_name)}</div>
+            ${!isWalk && b.customer ? `<div class="tv-proj-cust">${esc(b.customer)}</div>` : ''}
+            ${!isWalk && b.project_type ? `<div class="tv-proj-type">${esc(b.project_type)}</div>` : ''}
+          </div>
           ${!isWalk ? subEstHtml : ''}
         </div>
         <div style="display:flex;align-items:center;justify-content:center">${typeBadge}</div>
