@@ -2567,7 +2567,7 @@ function renderHierarchy(d) {
 // Merged: name/contact, amount, approver, follow-up date, and that
 // customer's own pending-decision buttons all live in one place. "+ Add
 // customer" lives in this section's own header, not a shared bottom bar.
-function customerRowHtml(b, cust) {
+function customerRowHtml(b, cust, dead) {
   const subs = (b.submissions || []).filter(s => s.company?.id === cust.id)
     .sort((x, y) => (y.date_submitted || '').localeCompare(x.date_submitted || ''));
   const current = subs.find(s => s.is_current);
@@ -2628,7 +2628,7 @@ function customerRowHtml(b, cust) {
 
   const subLine = current ? `${SUB_TYPE[current.submission_type] || esc(current.submission_type)} · ${fmtD(current.date_submitted)}${current.approved_by ? ` · approved by ${esc(current.approved_by)}` : ''}${subMetaExtra}` : '';
 
-  return `<div class="bc-row">
+  return `<div class="bc-row"${dead ? ' style="opacity:.55"' : ''}>
     <div class="bc-row-main">
       <div class="bc-co-name" onclick="openCompanyProfile(${cust.id})">${esc(cust.name)}${outcomeBadge}</div>
       ${subLine ? `<div class="bc-co-sub">${subLine}${current && canEditSub ? ` <a href="#" onclick="event.preventDefault();actEditSubmission(${current.id})" style="font-size:11px">✏️</a>` : ''}</div>` : ''}
@@ -2645,7 +2645,16 @@ function customerRowHtml(b, cust) {
 }
 function customersSectionHtml(b) {
   const canAddCustomer = !b.superseded && ['opportunity', 'active_bid', 'submitted'].includes(b.stage);
-  const list = b.customers.length ? `<div class="bc-grouped">${b.customers.map(cust => customerRowHtml(b, cust)).join('')}</div>` : '<div style="font-size:12px;color:#dc2626">No customer yet</div>';
+  // Per Keegan: once we've learned the GC itself never even won the job
+  // (gc_awarded === false on that customer's current submission), there's
+  // nothing left to chase there — sink it to the bottom and grey it out,
+  // so whoever's still actually in the running is what you see first.
+  const isDead = (cust) => {
+    const current = (b.submissions || []).find(s => s.company?.id === cust.id && s.is_current);
+    return current?.gc_awarded === false;
+  };
+  const sortedCustomers = [...b.customers].sort((a, c) => (isDead(a) ? 1 : 0) - (isDead(c) ? 1 : 0));
+  const list = sortedCustomers.length ? `<div class="bc-grouped">${sortedCustomers.map(cust => customerRowHtml(b, cust, isDead(cust))).join('')}</div>` : '<div style="font-size:12px;color:#dc2626">No customer yet</div>';
   const addBtn = canAddCustomer ? `<button class="bc-quiet-link" onclick="actAddCustomers(${b.id})">+ Add customer</button>` : '';
   return `<div class="bc-section">
     <div class="bc-sec-hd"><span class="bc-sec-title">Customers</span>${addBtn}</div>
@@ -3024,6 +3033,12 @@ function bidActions(b) {
       menu.push({ label: '↻ Reactivate', fn: `actReactivateBid(${b.id})` });
     }
     if (canEditBid && BID_EDITABLE_STAGES.includes(b.stage)) menu.push({ label: '✏️ Edit bid', fn: `actEditBid(${b.id})` });
+    // For a genuinely separate second bid on a project we've already bid
+    // before (not a revision — e.g. a totally different scope/round),
+    // rather than only ever being auto-superseded by "+ Add Bid to
+    // Project" — per Keegan/Connor, so the old one stops cluttering Bids
+    // to Follow Up On without deleting its real history.
+    if (canEditBid && BID_EDITABLE_STAGES.includes(b.stage)) menu.push({ label: '⊘ Mark Superseded', fn: `actMarkSuperseded(${b.id},'${escJs(b.bid_number || 'this bid')}')`, danger: true });
   }
   if (!primary && !menu.length) return '';
   const menuId = `bcmenu-${++BC_MENU_SEQ}`;
@@ -4136,6 +4151,10 @@ function actToggleProjectOnHold(projectId, onHold) {
   ], data => api('POST', `/api/v2/projects/${projectId}/on-hold`, { on_hold: true, until_date: data.until_date }).then(() => renderProjectPage(projectId)), 'Put On Hold', 'amber');
 }
 
+function actMarkSuperseded(bidId, label) {
+  if (!confirm(`Mark ${label} as superseded? It'll stop showing in Bids to Follow Up On (and everywhere else active bids are tracked) but stays in the system as real history — use this for a genuinely separate second bid on a project you've already bid before, not for a revision to the same round.`)) return;
+  api('PATCH', `/api/v2/admin/bid/${bidId}`, { superseded: 1 }).then(refresh).catch(e => alert('Failed: ' + e.message));
+}
 function actEditBid(bidId) {
   const b = DETAIL_CACHE[OPEN_PROJECT]?.bids.find(x => x.id === bidId) || {};
   // Sub-estimator management moved here from the bid card (was a small
@@ -4585,7 +4604,11 @@ function actSetGcOutcome(submissionId) {
       options: [{ value: '1', label: 'Yes — they won the job' }, { value: '0', label: "No — they didn't win it" }] },
   ], async data => {
     const r = await api('POST', `/api/v2/submissions/${submissionId}/gc-outcome`, data);
+    // Per Keegan — marking a GC as having won the job (and picked someone
+    // else) used to save silently, with nothing confirming it actually
+    // registered. Both real outcomes now get an explicit confirmation.
     if (r.settled_our_outcome) alert(`Since ${s?.company?.name || 'this GC'} didn't win the job, this submission has been set to Not Awarded too.`);
+    else if (data.gc_awarded === '1') alert(`Got it — ${s?.company?.name || 'this GC'} won the job. Marked as GC Awarded (picked someone else).`);
     return r;
   }, 'Save', 'blue');
 }

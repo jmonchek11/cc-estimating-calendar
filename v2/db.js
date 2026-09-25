@@ -4488,6 +4488,14 @@ async function getTvData() {
   }
   outToday.sort((a, b) => (a.time || '99:99').localeCompare(b.time || '99:99'));
 
+  // "How much did we push out the door this month" — Joe asked for
+  // something more dynamic than Pipeline Value (a mostly-static backlog
+  // total that barely moves day to day). Counts every bid submitted in
+  // the current calendar month regardless of where it stands now
+  // (awarded/lost/still pending) — a submission is a submission.
+  const monthStart = today.slice(0, 7) + '-01';
+  const submittedThisMonth = bids.filter(b => b.date_submitted && b.date_submitted >= monthStart && b.date_submitted <= today);
+
   return {
     bids: [...merged, ...walkthroughRows],
     wins,
@@ -4499,6 +4507,8 @@ async function getTvData() {
       dueThisWeek: merged.filter(b => b.estimate_due_date >= today && b.estimate_due_date <= weekEnd).length,
       overdueCount: merged.filter(b => b.estimate_due_date && b.estimate_due_date < today).length,
       walkthroughsToday: outToday.length,
+      submittedThisMonthCount: submittedThisMonth.length,
+      submittedThisMonthValue: submittedThisMonth.reduce((s, b) => s + (b.estimate_amount || 0), 0),
     },
     timestamp: new Date().toISOString(),
   };

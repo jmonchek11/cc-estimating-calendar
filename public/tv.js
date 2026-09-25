@@ -235,7 +235,10 @@ function renderOutToday(list) {
 function renderStats(stats, timestamp) {
   document.getElementById('stat-bids').textContent  = stats.activeBids;
   document.getElementById('stat-cos').textContent   = stats.activeCOs;
-  document.getElementById('stat-value').textContent = fmtCurrency(stats.pipelineValue);
+  // Replaced Pipeline Value (a mostly-static backlog total) with a live
+  // team-activity number — per Joe, something that actually moves day to
+  // day is more motivating to glance at than a number that barely changes.
+  document.getElementById('stat-value').textContent = fmtCurrency(stats.submittedThisMonthValue);
 
   const weekEl = document.getElementById('stat-week');
   weekEl.textContent = stats.dueThisWeek;
