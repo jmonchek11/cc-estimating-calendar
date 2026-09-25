@@ -2554,11 +2554,11 @@ async function logOutOfOffice(data, actorId) {
   const allDay = data.all_day !== false;
   let parentType = null, parentId = null;
   if (data.parent_type) {
-    if (!['bid', 'change_order'].includes(data.parent_type)) throw new Error('Invalid related-to type');
+    if (!['bid', 'job', 'change_order'].includes(data.parent_type)) throw new Error('Invalid related-to type');
     parentId = Number(data.parent_id);
     if (!parentId) throw new Error('Related-to id is required when a type is given');
-    const M2 = data.parent_type === 'bid' ? M.Bid : M.ChangeOrder;
-    if (!(await M2.exists({ _id: parentId }))) throw new Error('Related bid/change order not found');
+    const M2 = data.parent_type === 'bid' ? M.Bid : data.parent_type === 'job' ? M.Job : M.ChangeOrder;
+    if (!(await M2.exists({ _id: parentId }))) throw new Error('Related bid/job/change order not found');
     parentType = data.parent_type;
   }
   const id = await nextId('out_of_office');
@@ -2574,13 +2574,16 @@ async function logOutOfOffice(data, actorId) {
 // could have several entries linked to bids/COs at once.
 async function resolveOooParents(M, rows) {
   const bidIds = [...new Set(rows.filter(r => r.parent_type === 'bid').map(r => r.parent_id))];
+  const jobIds0 = [...new Set(rows.filter(r => r.parent_type === 'job').map(r => r.parent_id))];
   const coIds = [...new Set(rows.filter(r => r.parent_type === 'change_order').map(r => r.parent_id))];
-  const [bids, cos] = await Promise.all([
+  const [bids, jobs0, cos] = await Promise.all([
     bidIds.length ? M.Bid.find({ _id: { $in: bidIds } }).lean() : [],
+    jobIds0.length ? M.Job.find({ _id: { $in: jobIds0 } }).lean() : [],
     coIds.length ? M.ChangeOrder.find({ _id: { $in: coIds } }).lean() : [],
   ]);
-  const jobIds = [...new Set(cos.map(c => c.job_id))];
-  const jobs = jobIds.length ? await M.Job.find({ _id: { $in: jobIds } }).lean() : [];
+  const coJobIds = [...new Set(cos.map(c => c.job_id))];
+  const coJobs = coJobIds.length ? await M.Job.find({ _id: { $in: coJobIds } }).lean() : [];
+  const jobs = [...jobs0, ...coJobs];
   const jobById = {}; jobs.forEach(j => jobById[j._id] = j);
   const projectIds = [...new Set([...bids.map(b => b.project_id), ...jobs.map(j => j.project_id)])];
   const projects = projectIds.length ? await M.Project.find({ _id: { $in: projectIds } }).lean() : [];
@@ -2591,6 +2594,10 @@ async function resolveOooParents(M, rows) {
     if (parentType === 'bid') {
       const b = bidById[parentId]; if (!b) return null;
       return { label: b.bid_number || 'Bid (no #)', project_name: pName[b.project_id] || null };
+    }
+    if (parentType === 'job') {
+      const j = jobById[parentId]; if (!j) return null;
+      return { label: j.job_number || 'Job (no #)', project_name: pName[j.project_id] || null };
     }
     if (parentType === 'change_order') {
       const c = coById[parentId]; if (!c) return null;
@@ -3057,7 +3064,7 @@ function _clusterSimilar(items, ignore, opts = {}) {
 async function getSearchResults(q) {
   const M = getModels();
   const needle = String(q || '').trim().toLowerCase();
-  if (needle.length < 2) return { bids: [], change_orders: [] };
+  if (needle.length < 2) return { bids: [], change_orders: [], jobs: [] };
 
   const [bids, cos, jobs, projects, companies, members, bidCustomers] = await Promise.all([
     M.Bid.find({ superseded: { $ne: 1 } }).lean(),
@@ -3108,7 +3115,19 @@ async function getSearchResults(q) {
       };
     });
 
-  return { bids: matchedBids, change_orders: matchedCos };
+  // Jobs, as their own result — a job # search (e.g. "34001") previously
+  // only ever surfaced its change orders, not the job itself, so there was
+  // no way to pick "the job" when no CO happened to match too (or attach
+  // to the job rather than one specific CO on it). Every Job matches, not
+  // just legacy ones — job_number is the thing people actually search by.
+  const matchedJobs = jobs
+    .filter(j => hit(j.job_number, pName[j.project_id]))
+    .map(j => ({
+      id: j._id, job_number: j.job_number, project: pName[j.project_id] || '—', project_id: j.project_id,
+      pm: tm[j.pm_id] || null,
+    }));
+
+  return { bids: matchedBids, change_orders: matchedCos, jobs: matchedJobs };
 }
 
 async function getBidList(stage) {

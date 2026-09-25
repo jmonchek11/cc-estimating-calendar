@@ -6919,7 +6919,7 @@ function renderOooModal(upcoming) {
             <button class="v2-btn outline" style="flex-shrink:0;padding:2px 8px;font-size:11px" onclick="clearOooParent()">✕</button>
           </div>
           <input id="ooo-parent-input" type="text" autocomplete="off" placeholder="Project name, bid #, CO #, job #…" oninput="oooParentSearch()">
-          <div id="ooo-parent-results" style="display:flex;flex-direction:column;gap:6px;margin-top:6px"></div>
+          <div id="ooo-parent-results" style="display:flex;flex-direction:column;gap:6px;margin-top:6px;max-height:220px;overflow-y:auto"></div>
         </div>
       </div>
       <div class="v2-modal-err" id="ooo-err"></div>
@@ -6964,14 +6964,19 @@ function oooParentSearch() {
   oooParentTimer = setTimeout(async () => {
     let res;
     try { res = await api('GET', '/api/v2/search?q=' + encodeURIComponent(q)); } catch { return; }
+    // Jobs first — a job # search (e.g. "34001") is the most common way
+    // someone looks this up once a project is awarded, and per Joe the job
+    // itself should be selectable, not just its change orders.
     OOO_PARENT_RESULTS = [
+      ...(res.jobs || []).map(j => ({ kind: 'job', id: j.id, label: j.job_number || 'No job #', project: j.project, sub: j.pm ? 'PM: ' + j.pm.name : '' })),
       ...(res.bids || []).map(b => ({ kind: 'bid', id: b.id, label: b.bid_number || 'No bid #', project: b.project, sub: (b.customers || []).join(', ') })),
       ...(res.change_orders || []).map(c => ({ kind: 'change_order', id: c.id, label: c.co_number, project: c.project, sub: c.name })),
-    ].slice(0, 10);
+    ].slice(0, 30);
+    const kindTag = k => k === 'job' ? 'JOB' : k === 'bid' ? 'BID' : 'CO';
     results.innerHTML = OOO_PARENT_RESULTS.length
       ? OOO_PARENT_RESULTS.map((r, i) => `
         <div onclick="pickOooParent(${i})" style="padding:9px 11px;border:1px solid var(--border);border-radius:9px;cursor:pointer">
-          <div style="font-weight:700;font-size:13px">${esc(r.label)} <span style="font-weight:400;color:var(--text-muted)">— ${esc(r.project || '—')}</span></div>
+          <div style="font-weight:700;font-size:13px"><span style="font-size:10px;font-weight:800;letter-spacing:.04em;color:var(--text-muted)">${kindTag(r.kind)}</span> ${esc(r.label)} <span style="font-weight:400;color:var(--text-muted)">— ${esc(r.project || '—')}</span></div>
           ${r.sub ? `<div style="font-size:11.5px;color:var(--text-muted);margin-top:1px">${esc(r.sub)}</div>` : ''}
         </div>`).join('')
       : '<div style="padding:8px 2px;font-size:13px;color:var(--text-muted)">No matches</div>';
