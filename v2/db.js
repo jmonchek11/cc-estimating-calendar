@@ -4400,6 +4400,13 @@ async function getTvData() {
   const custNamesByBid = {};
   bidCustomers.forEach(bc => (custNamesByBid[bc.bid_id] = custNamesByBid[bc.bid_id] || []).push(coName[bc.company_id]));
 
+  const today = new Date().toISOString().slice(0, 10);
+  const in7 = new Date(); in7.setDate(in7.getDate() + 7);
+  const weekEnd = in7.toISOString().slice(0, 10);
+  const lookaheadCutoff = new Date(); lookaheadCutoff.setDate(lookaheadCutoff.getDate() + TV_WALKTHROUGH_LOOKAHEAD_DAYS);
+  const lookaheadStr = lookaheadCutoff.toISOString().slice(0, 10);
+  const pType = {}; projects.forEach(p => pType[p._id] = p.type_of_work || null);
+
   // An on-hold project's bids/COs shouldn't show as due/overdue on a shared
   // TV board any more than they should on the Dashboard (same bug, same
   // fix as getDashboard's pOnHold guard) — walk-throughs stay visible
@@ -4407,25 +4414,65 @@ async function getTvData() {
   // whether the bid itself is paused.
   const activeBids = bids.filter(b => b.stage === 'active_bid' && !pOnHold[b.project_id]);
   // Sub-estimators, shaped the same way walk-through assignees are (id/
-  // name/initials/scope) — the TV row shows them as small chips next to
-  // the primary estimator's avatar, per Joe: "sub estimators should
-  // definitely be listed."
+  // name/initials/scope) — per Joe, shown as a real named line with their
+  // scope (not just a small chip) plus their own avatar next to the lead
+  // estimator's.
   const subEstimatorsFor = (b) => (b.sub_estimators || [])
     .map(s => tm[s.estimator_id] ? { id: s.estimator_id, name: tm[s.estimator_id].name, initials: tm[s.estimator_id].initials, scope: s.scope } : null)
     .filter(Boolean);
+
+  // Walk-throughs — computed up front so each bid can carry its own
+  // nearest upcoming one as real column data (see fmtBid's
+  // next_walkthrough_date), not just as a separate row that might be
+  // pages away by the time it scrolls past. "if you don't see someone at
+  // their desk, check the board" (per Joe) still gets outToday (always
+  // visible, never paged away) and walkthroughRows (its own row in the
+  // table, for anything in the lookahead window).
+  const outToday = [];
+  const walkthroughRows = [];
+  const nextWalkthroughByBid = {};
+  for (const b of bids) {
+    for (const w of (b.walkthroughs || [])) {
+      if (!w.date) continue;
+      const assignees = (w.assignees || [])
+        .map(a => tm[a.member_id] ? { id: a.member_id, name: tm[a.member_id].name, initials: tm[a.member_id].initials } : null)
+        .filter(Boolean);
+      const siteCompany = w.company_id ? coName[w.company_id] : null;
+      const projectName = pName[b.project_id] || '—';
+      if (w.date === today) {
+        outToday.push({ project_name: projectName, company: siteCompany, time: w.time || null, assignees });
+      }
+      if (w.date >= today && w.date <= lookaheadStr) {
+        walkthroughRows.push({
+          id: `wt-${b._id}-${w._id}`, bid_number: b.bid_number || null, stage: 'walkthrough',
+          project_name: projectName, project_type: pType[b.project_id] || null, customer: siteCompany,
+          estimate_due_date: w.date, due_time: w.time || null, estimate_amount: null,
+          estimate_pct_complete: 0, award_date: null, rfi_due_date: null, next_walkthrough_date: null, next_walkthrough_time: null,
+          estimator_id: assignees[0]?.id || null, estimator_initials: assignees[0]?.initials || null,
+          estimator_name: assignees[0]?.name || null, salesperson_initials: null,
+          sub_estimators: [], assignees,
+        });
+        const existing = nextWalkthroughByBid[b._id];
+        if (!existing || w.date < existing.date || (w.date === existing.date && (w.time || '99:99') < (existing.time || '99:99'))) {
+          nextWalkthroughByBid[b._id] = { date: w.date, time: w.time || null };
+        }
+      }
+    }
+  }
+  outToday.sort((a, b) => (a.time || '99:99').localeCompare(b.time || '99:99'));
+
   const fmtBid = b => ({
     id: b._id, bid_number: b.bid_number || null, stage: b.stage,
-    project_name: pName[b.project_id] || '—',
+    project_name: pName[b.project_id] || '—', project_type: pType[b.project_id] || null,
     customer: (custNamesByBid[b._id] || []).filter(Boolean).join(', ') || null,
     estimate_due_date: b.due_date || null, estimate_amount: b.estimate_amount || null,
     estimate_pct_complete: 0, award_date: b.award_date || null,
-    // Not shown on the main table anymore — a $ figure genuinely doesn't
-    // exist until a submission is logged, so it was blank on most active
-    // rows (per Joe). rfi_due_date fills that spot instead: a real
-    // deadline that DOES exist pre-submission and actually matters (miss
-    // it and the whole bid is blocked). Still returned for the Wins
-    // carousel, where the award amount is real.
+    // RFI Due and Walkthrough are their own columns now, not crammed into
+    // one catch-all "Details" cell — per Joe, that made it unclear which
+    // was which and left no room for anything else.
     rfi_due_date: b.rfi_due_date || null,
+    next_walkthrough_date: nextWalkthroughByBid[b._id]?.date || null,
+    next_walkthrough_time: nextWalkthroughByBid[b._id]?.time || null,
     estimator_id: b.estimator_id || null, estimator_initials: tm[b.estimator_id]?.initials || null,
     estimator_name: tm[b.estimator_id]?.name || null, salesperson_initials: tm[b.salesperson_id]?.initials || null,
     sub_estimators: subEstimatorsFor(b),
@@ -4434,11 +4481,11 @@ async function getTvData() {
     const job = jobById[c.job_id];
     return {
       id: c._id, bid_number: c.co_number || null, stage: 'active_co',
-      project_name: job ? (pName[job.project_id] || '—') : '—',
+      project_name: job ? (pName[job.project_id] || '—') : '—', project_type: job ? (pType[job.project_id] || null) : null,
       customer: job?.awarded_company_id ? coName[job.awarded_company_id] : null,
       description: c.name || null,
       estimate_due_date: c.due_date || null, estimate_amount: c.estimate_amount || null,
-      estimate_pct_complete: 0, award_date: null, rfi_due_date: null,
+      estimate_pct_complete: 0, award_date: null, rfi_due_date: null, next_walkthrough_date: null, next_walkthrough_time: null,
       estimator_id: c.estimator_id || null, estimator_initials: tm[c.estimator_id]?.initials || null,
       estimator_name: tm[c.estimator_id]?.name || null, salesperson_initials: null,
       sub_estimators: [],
@@ -4454,47 +4501,6 @@ async function getTvData() {
     .sort((a, b) => (b.award_date || '').localeCompare(a.award_date || ''))
     .slice(0, 15)
     .map(fmtBid);
-
-  const today = new Date().toISOString().slice(0, 10);
-  const in7 = new Date(); in7.setDate(in7.getDate() + 7);
-  const weekEnd = in7.toISOString().slice(0, 10);
-  const lookaheadCutoff = new Date(); lookaheadCutoff.setDate(lookaheadCutoff.getDate() + TV_WALKTHROUGH_LOOKAHEAD_DAYS);
-  const lookaheadStr = lookaheadCutoff.toISOString().slice(0, 10);
-
-  // Walk-throughs — "if you don't see someone at their desk, check the
-  // board" (per Joe). Two views of the same underlying data: `outToday`
-  // is a standalone, always-visible list (not paged away in the scrolling
-  // table) so the answer to "where's Doug" is immediate, and
-  // `walkthroughRows` folds every walk-through in the lookahead window
-  // into the same due-date table as bids/COs (tagged stage:'walkthrough')
-  // so upcoming ones are a visible reminder, not just today's.
-  const outToday = [];
-  const walkthroughRows = [];
-  for (const b of bids) {
-    for (const w of (b.walkthroughs || [])) {
-      if (!w.date) continue;
-      const assignees = (w.assignees || [])
-        .map(a => tm[a.member_id] ? { id: a.member_id, name: tm[a.member_id].name, initials: tm[a.member_id].initials } : null)
-        .filter(Boolean);
-      const siteCompany = w.company_id ? coName[w.company_id] : null;
-      const projectName = pName[b.project_id] || '—';
-      if (w.date === today) {
-        outToday.push({ project_name: projectName, company: siteCompany, time: w.time || null, assignees });
-      }
-      if (w.date >= today && w.date <= lookaheadStr) {
-        walkthroughRows.push({
-          id: `wt-${b._id}-${w._id}`, bid_number: b.bid_number || null, stage: 'walkthrough',
-          project_name: projectName, customer: siteCompany,
-          estimate_due_date: w.date, due_time: w.time || null, estimate_amount: null,
-          estimate_pct_complete: 0, award_date: null,
-          estimator_id: assignees[0]?.id || null, estimator_initials: assignees[0]?.initials || null,
-          estimator_name: assignees[0]?.name || null, salesperson_initials: null,
-          sub_estimators: [], assignees,
-        });
-      }
-    }
-  }
-  outToday.sort((a, b) => (a.time || '99:99').localeCompare(b.time || '99:99'));
 
   // RFI cutoffs are a real, currently-missing deadline for a bid still
   // being priced — unlike a dollar figure (which doesn't exist yet pre-

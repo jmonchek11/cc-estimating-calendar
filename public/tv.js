@@ -2,7 +2,7 @@
 const REFRESH_INTERVAL   = 60 * 1000;  // re-fetch every 60 s
 const WIN_CYCLE_INTERVAL =  7 * 1000;  // cycle wins every 7 s
 const PAGE_INTERVAL      =  8 * 1000;  // scroll to next page every 8 s
-const ROW_HEIGHT         = 72;         // px — must match .tv-row height in CSS
+const ROW_HEIGHT         = 128;        // px — must match .tv-row height in CSS
 const LOOKAHEAD_DAYS     = 14;         // show bids due within this many days
 
 const PALETTE = ['#2563eb','#16a34a','#dc2626','#d97706','#7c3aed','#0891b2','#be185d','#ea580c'];
@@ -78,8 +78,8 @@ function fmtTime(t) {
 // urgency coloring or overdue pulsing the way a bid's due date gets (see
 // duePill below); just a neutral "when" that reads clearly from across
 // the room.
-function walkPill(dateStr, timeStr) {
-  if (!dateStr) return '<span class="tv-due-pill none">No Date</span>';
+function walkPill(dateStr, timeStr, small) {
+  if (!dateStr) return small ? '' : '<span class="tv-due-pill none">No Date</span>';
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const d = new Date(dateStr + 'T00:00:00');
   const days = Math.round((d - today) / 86400000);
@@ -88,7 +88,8 @@ function walkPill(dateStr, timeStr) {
   // Date + time stacked on two lines, not side by side — "Wed, Oct 1 ·
   // 10:00 AM" as one line was wide enough to overflow the fixed due-date
   // column on the actual board (confirmed in preview).
-  return `<span class="tv-due-pill tv-walk-pill">${label}${timeStr ? `<span class="tv-walk-pill-time">${fmtTime(timeStr)}</span>` : ''}</span>`;
+  const cls = small ? 'tv-walk-pill-sm' : 'tv-due-pill tv-walk-pill';
+  return `<span class="${cls}">${label}${timeStr ? `<span class="tv-walk-pill-time">${fmtTime(timeStr)}</span>` : ''}</span>`;
 }
 
 // ── Pager / Auto-scroll ───────────────────────────────────────────────────────
@@ -169,8 +170,9 @@ function renderRows(bids) {
       : '<span class="tv-type bid">BID</span>';
 
     // Walk-throughs can have several assignees — stack up to 3 avatars,
-    // "+N" beyond that. Everything else is still the single primary-
-    // estimator avatar it's always been.
+    // "+N" beyond that. A bid/CO row shows the lead estimator at full size
+    // plus each sub-estimator's own avatar at ~3/4 size next to it, per Joe
+    // — not just a note at the bottom of the project.
     let avatarsHtml;
     if (isWalk && (b.assignees || []).length) {
       const shown = b.assignees.slice(0, 3);
@@ -179,31 +181,52 @@ function renderRows(bids) {
         `<div class="tv-avatar-sm" style="background:${estimatorColor(a.id)}">${esc(a.initials || '?')}</div>`).join('')}${
         extra > 0 ? `<div class="tv-avatar-more">+${extra}</div>` : ''}</div>`;
     } else {
-      avatarsHtml = `<div class="tv-avatar" style="background:${estimatorColor(b.estimator_id)}">${esc(b.estimator_initials || '?')}</div>`;
+      const subAvatars = (b.sub_estimators || []).slice(0, 1).map(s =>
+        `<div class="tv-avatar-sub" style="background:${estimatorColor(s.id)}">${esc(s.initials || '?')}</div>`).join('');
+      avatarsHtml = `<div class="tv-avatars-lead">
+        <div class="tv-avatar" style="background:${estimatorColor(b.estimator_id)}">${esc(b.estimator_initials || '?')}</div>
+        ${subAvatars}
+      </div>`;
     }
 
-    // Sub-estimators — per Joe, these should definitely be listed rather
-    // than only the primary estimator ever showing.
-    const subEstHtml = (b.sub_estimators || []).length
-      ? `<div class="tv-subest">${b.sub_estimators.map(s => `<span class="tv-subest-chip">${esc(s.initials)} ${esc(s.scope)}</span>`).join('')}</div>` : '';
+    // Sub-estimators — a real avatar + name + scope-below-name block, per
+    // Joe, rather than a small note-like chip at the bottom of the card.
+    // Capped to the first one (row height is fixed for the pager's transform
+    // math, so a second/third full name+scope block doesn't fit) — the rest
+    // fold into a "+N more" note rather than overflowing into the next row
+    // (a real collision hit in preview before this cap was added).
+    const subEsts = b.sub_estimators || [];
+    const subEstHtml = subEsts.length
+      ? `<div class="tv-subest">${subEsts.slice(0, 1).map(s => `
+          <div class="tv-subest-row">
+            <div class="tv-subest-avatar" style="background:${estimatorColor(s.id)}">${esc(s.initials || '?')}</div>
+            <div class="tv-subest-text">
+              <div class="tv-subest-name">${esc(s.name || '')}</div>
+              ${s.scope ? `<div class="tv-subest-scope">${esc(s.scope)}${subEsts.length > 1 ? ` · +${subEsts.length - 1} more` : ''}</div>` : ''}
+            </div>
+          </div>`).join('')}</div>` : '';
 
     const { html: pillHtml, overdue } = isWalk ? { html: walkPill(b.estimate_due_date, b.due_time), overdue: false } : duePill(b.estimate_due_date);
-    // A dollar amount genuinely doesn't exist yet for an active (not yet
-    // submitted) bid — showing "—" on most rows wasn't useful (per Joe).
-    // Each row type gets whatever real, actionable detail actually exists
-    // at that stage instead: site company for a walk-through, CO # +
-    // description for a change order (already priced, so those are known),
-    // RFI cutoff for a still-being-priced bid — the one real deadline that
-    // exists pre-submission and actually blocks the whole bid if missed.
+
+    // RFI Due and Walkthrough are their own dedicated columns now — not
+    // folded into one catch-all Details cell, per Joe. Details itself goes
+    // back to showing only what's genuinely detail: CO # + description for
+    // a change order, and site company for a walk-through row; a plain bid
+    // row has nothing left to show there.
+    const rfiCell = (!isWalk && b.stage !== 'active_co' && b.rfi_due_date)
+      ? `<div class="tv-rfi-cell">${new Date(b.rfi_due_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</div>`
+      : `<div class="tv-rfi-cell empty">—</div>`;
+    const walkCell = (!isWalk && b.stage !== 'active_co' && b.next_walkthrough_date)
+      ? `<div class="tv-walk-cell">${walkPill(b.next_walkthrough_date, b.next_walkthrough_time, true)}</div>`
+      : `<div class="tv-walk-cell"></div>`;
+
     let detailCell;
     if (isWalk) {
       detailCell = `<div class="tv-amount" style="color:var(--sub);font-size:15px">${b.customer ? esc(b.customer) : '—'}</div>`;
     } else if (b.stage === 'active_co') {
       detailCell = `<div class="tv-amount" style="color:var(--sub);font-size:14px;font-weight:600">${esc(b.bid_number || '')}${b.description ? ` · ${esc(b.description)}` : ''}</div>`;
-    } else if (b.rfi_due_date) {
-      detailCell = `<div class="tv-amount" style="color:#c4b5fd;font-size:15px">RFI ${new Date(b.rfi_due_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</div>`;
     } else {
-      detailCell = `<div class="tv-amount" style="color:var(--sub);font-size:14px">${esc(b.bid_number || '—')}</div>`;
+      detailCell = `<div class="tv-amount"></div>`;
     }
 
     return `
@@ -212,9 +235,12 @@ function renderRows(bids) {
         <div class="tv-proj">
           <div class="tv-proj-name">${esc(b.project_name)}</div>
           ${!isWalk && b.customer ? `<div class="tv-proj-cust">${esc(b.customer)}</div>` : ''}
+          ${!isWalk && b.project_type ? `<div class="tv-proj-type">${esc(b.project_type)}</div>` : ''}
           ${!isWalk ? subEstHtml : ''}
         </div>
         <div style="display:flex;align-items:center;justify-content:center">${typeBadge}</div>
+        ${rfiCell}
+        ${walkCell}
         ${detailCell}
         <div class="tv-due">${pillHtml}</div>
       </div>`;

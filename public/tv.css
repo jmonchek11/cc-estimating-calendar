@@ -118,7 +118,7 @@ html, body {
 /* ── Table Header ────────────────────────────────────────────────── */
 .tv-table-head {
   display: grid;
-  grid-template-columns: 72px 1fr 90px 200px 180px;
+  grid-template-columns: 96px 1fr 90px 120px 150px 150px 170px;
   align-items: center;
   padding: 0 24px;
   height: 40px;
@@ -151,10 +151,10 @@ html, body {
 /* ── Bid Row ─────────────────────────────────────────────────────── */
 .tv-row {
   display: grid;
-  grid-template-columns: 72px 1fr 90px 200px 180px;
+  grid-template-columns: 96px 1fr 90px 120px 150px 150px 170px;
   align-items: center;
-  padding: 0 24px;
-  height: 72px;
+  padding: 18px 24px;
+  height: 128px;
   border-bottom: 1px solid var(--border);
   border-left: 5px solid transparent;
   transition: background .2s;
@@ -190,6 +190,11 @@ html, body {
   font-size: 14px; color: var(--sub); margin-top: 3px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+.tv-proj-type {
+  font-size: 12px; color: var(--primary); margin-top: 3px;
+  font-weight: 700; letter-spacing: .02em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 
 /* Type badge */
 .tv-type {
@@ -202,7 +207,7 @@ html, body {
 .tv-type.walk { background: rgba(34,211,238,.18); color: #67e8f9; border: 1px solid rgba(34,211,238,.4); }
 
 /* Multiple avatars in one row (walk-through with several assignees) —
-   sized/overlapped to still fit inside the 72px avatar column even at 3. */
+   sized/overlapped to still fit inside the 96px avatar column even at 3. */
 .tv-avatars { display: flex; flex-shrink: 0; width: 72px; }
 .tv-avatar-sm {
   width: 34px; height: 34px; border-radius: 50%;
@@ -219,14 +224,36 @@ html, body {
   flex-shrink: 0; margin-left: -13px;
 }
 
-/* Sub-estimator chips, next to the primary estimator avatar */
-.tv-subest {
-  display: flex; gap: 4px; margin-top: 4px; flex-wrap: wrap;
+/* Lead + sub-estimator avatar cluster — lead at full 44px, each sub-
+   estimator's own avatar at ~3/4 that size, slightly overlapped, per Joe. */
+.tv-avatars-lead { display: flex; align-items: center; flex-shrink: 0; }
+.tv-avatar-sub {
+  width: 33px; height: 33px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 900; color: #fff;
+  border: 2px solid var(--row-a); flex-shrink: 0;
+  margin-left: -10px;
 }
-.tv-subest-chip {
-  font-size: 11px; font-weight: 700; color: var(--sub);
-  background: rgba(148,163,184,.12); border: 1px solid var(--border);
-  border-radius: 5px; padding: 2px 7px;
+
+/* Sub-estimators, listed below the project/customer line as a real
+   avatar + name + scope block (not a small note-like chip). */
+.tv-subest {
+  display: flex; flex-direction: column; gap: 6px; margin-top: 8px;
+}
+.tv-subest-row { display: flex; align-items: center; gap: 8px; }
+.tv-subest-avatar {
+  width: 24px; height: 24px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 900; color: #fff; flex-shrink: 0;
+}
+.tv-subest-text { line-height: 1.25; overflow: hidden; }
+.tv-subest-name {
+  font-size: 13px; font-weight: 700; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tv-subest-scope {
+  font-size: 11px; font-weight: 600; color: var(--sub); margin-top: 1px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
 /* Amount */
@@ -236,6 +263,24 @@ html, body {
   font-variant-numeric: tabular-nums;
   overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
 }
+
+/* RFI Due / Walkthrough columns — real dedicated deadline columns, not
+   folded into one catch-all Details cell. */
+.tv-rfi-cell {
+  font-size: 15px; font-weight: 700; color: #c4b5fd;
+  text-align: right; padding-right: 16px;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.tv-rfi-cell.empty { color: var(--sub); font-weight: 500; opacity: .5; }
+.tv-walk-cell { display: flex; justify-content: flex-end; padding-right: 12px; }
+.tv-walk-pill-sm {
+  background: rgba(34,211,238,.14); color: #67e8f9; border: 1px solid rgba(34,211,238,.4);
+  font-size: 13px; font-weight: 800; line-height: 1.15; padding: 5px 10px;
+  border-radius: 8px; display: flex; flex-direction: column; align-items: center;
+  white-space: nowrap;
+}
+.tv-walk-pill-sm .tv-walk-pill-time { font-size: 10px; font-weight: 700; color: #a5f3fc; }
 
 /* Due date */
 .tv-due {
