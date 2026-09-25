@@ -4419,6 +4419,13 @@ async function getTvData() {
     customer: (custNamesByBid[b._id] || []).filter(Boolean).join(', ') || null,
     estimate_due_date: b.due_date || null, estimate_amount: b.estimate_amount || null,
     estimate_pct_complete: 0, award_date: b.award_date || null,
+    // Not shown on the main table anymore — a $ figure genuinely doesn't
+    // exist until a submission is logged, so it was blank on most active
+    // rows (per Joe). rfi_due_date fills that spot instead: a real
+    // deadline that DOES exist pre-submission and actually matters (miss
+    // it and the whole bid is blocked). Still returned for the Wins
+    // carousel, where the award amount is real.
+    rfi_due_date: b.rfi_due_date || null,
     estimator_id: b.estimator_id || null, estimator_initials: tm[b.estimator_id]?.initials || null,
     estimator_name: tm[b.estimator_id]?.name || null, salesperson_initials: tm[b.salesperson_id]?.initials || null,
     sub_estimators: subEstimatorsFor(b),
@@ -4429,8 +4436,9 @@ async function getTvData() {
       id: c._id, bid_number: c.co_number || null, stage: 'active_co',
       project_name: job ? (pName[job.project_id] || '—') : '—',
       customer: job?.awarded_company_id ? coName[job.awarded_company_id] : null,
+      description: c.name || null,
       estimate_due_date: c.due_date || null, estimate_amount: c.estimate_amount || null,
-      estimate_pct_complete: 0, award_date: null,
+      estimate_pct_complete: 0, award_date: null, rfi_due_date: null,
       estimator_id: c.estimator_id || null, estimator_initials: tm[c.estimator_id]?.initials || null,
       estimator_name: tm[c.estimator_id]?.name || null, salesperson_initials: null,
       sub_estimators: [],
@@ -4488,13 +4496,13 @@ async function getTvData() {
   }
   outToday.sort((a, b) => (a.time || '99:99').localeCompare(b.time || '99:99'));
 
-  // "How much did we push out the door this month" — Joe asked for
-  // something more dynamic than Pipeline Value (a mostly-static backlog
-  // total that barely moves day to day). Counts every bid submitted in
-  // the current calendar month regardless of where it stands now
-  // (awarded/lost/still pending) — a submission is a submission.
-  const monthStart = today.slice(0, 7) + '-01';
-  const submittedThisMonth = bids.filter(b => b.date_submitted && b.date_submitted >= monthStart && b.date_submitted <= today);
+  // RFI cutoffs are a real, currently-missing deadline for a bid still
+  // being priced — unlike a dollar figure (which doesn't exist yet pre-
+  // submission and was mostly blank on the board), this is genuine,
+  // forward-looking, actionable data at exactly the stage this board is
+  // actually about. Reports (not this board) is where monthly $ totals
+  // belong — that page already has real drill-down for it.
+  const rfisDueThisWeek = activeBids.filter(b => b.rfi_due_date && b.rfi_due_date >= today && b.rfi_due_date <= weekEnd).length;
 
   return {
     bids: [...merged, ...walkthroughRows],
@@ -4503,12 +4511,10 @@ async function getTvData() {
     stats: {
       activeBids: activeBids.length,
       activeCOs: activeCos.length,
-      pipelineValue: merged.reduce((s, b) => s + (b.estimate_amount || 0), 0),
+      rfisDueThisWeek,
       dueThisWeek: merged.filter(b => b.estimate_due_date >= today && b.estimate_due_date <= weekEnd).length,
       overdueCount: merged.filter(b => b.estimate_due_date && b.estimate_due_date < today).length,
       walkthroughsToday: outToday.length,
-      submittedThisMonthCount: submittedThisMonth.length,
-      submittedThisMonthValue: submittedThisMonth.reduce((s, b) => s + (b.estimate_amount || 0), 0),
     },
     timestamp: new Date().toISOString(),
   };

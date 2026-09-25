@@ -188,9 +188,23 @@ function renderRows(bids) {
       ? `<div class="tv-subest">${b.sub_estimators.map(s => `<span class="tv-subest-chip">${esc(s.initials)} ${esc(s.scope)}</span>`).join('')}</div>` : '';
 
     const { html: pillHtml, overdue } = isWalk ? { html: walkPill(b.estimate_due_date, b.due_time), overdue: false } : duePill(b.estimate_due_date);
-    const amountCell = isWalk
-      ? `<div class="tv-amount" style="color:var(--sub);font-size:15px">${b.customer ? esc(b.customer) : '—'}</div>`
-      : `<div class="tv-amount">${fmtCurrency(b.estimate_amount)}</div>`;
+    // A dollar amount genuinely doesn't exist yet for an active (not yet
+    // submitted) bid — showing "—" on most rows wasn't useful (per Joe).
+    // Each row type gets whatever real, actionable detail actually exists
+    // at that stage instead: site company for a walk-through, CO # +
+    // description for a change order (already priced, so those are known),
+    // RFI cutoff for a still-being-priced bid — the one real deadline that
+    // exists pre-submission and actually blocks the whole bid if missed.
+    let detailCell;
+    if (isWalk) {
+      detailCell = `<div class="tv-amount" style="color:var(--sub);font-size:15px">${b.customer ? esc(b.customer) : '—'}</div>`;
+    } else if (b.stage === 'active_co') {
+      detailCell = `<div class="tv-amount" style="color:var(--sub);font-size:14px;font-weight:600">${esc(b.bid_number || '')}${b.description ? ` · ${esc(b.description)}` : ''}</div>`;
+    } else if (b.rfi_due_date) {
+      detailCell = `<div class="tv-amount" style="color:#c4b5fd;font-size:15px">RFI ${new Date(b.rfi_due_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</div>`;
+    } else {
+      detailCell = `<div class="tv-amount" style="color:var(--sub);font-size:14px">${esc(b.bid_number || '—')}</div>`;
+    }
 
     return `
       <div class="tv-row${overdue ? ' overdue' : ''}" style="border-left-color:${isWalk ? '#22d3ee' : estimatorColor(b.estimator_id)}">
@@ -201,7 +215,7 @@ function renderRows(bids) {
           ${!isWalk ? subEstHtml : ''}
         </div>
         <div style="display:flex;align-items:center;justify-content:center">${typeBadge}</div>
-        ${amountCell}
+        ${detailCell}
         <div class="tv-due">${pillHtml}</div>
       </div>`;
   }).join('');
@@ -235,10 +249,14 @@ function renderOutToday(list) {
 function renderStats(stats, timestamp) {
   document.getElementById('stat-bids').textContent  = stats.activeBids;
   document.getElementById('stat-cos').textContent   = stats.activeCOs;
-  // Replaced Pipeline Value (a mostly-static backlog total) with a live
-  // team-activity number — per Joe, something that actually moves day to
-  // day is more motivating to glance at than a number that barely changes.
-  document.getElementById('stat-value').textContent = fmtCurrency(stats.submittedThisMonthValue);
+  // RFIs Due This Week — replaced Pipeline Value, then briefly Submitted
+  // This Month (a real number, but retrospective — belongs on Reports,
+  // which has real drill-down, not this board). A missed RFI cutoff blocks
+  // the whole bid, and this is the one real deadline that exists before a
+  // bid is even submitted, unlike a dollar figure.
+  const rfiEl = document.getElementById('stat-value');
+  rfiEl.textContent = stats.rfisDueThisWeek || 0;
+  rfiEl.className = 'tv-stat-val' + (stats.rfisDueThisWeek > 0 ? ' warn' : '');
 
   const weekEl = document.getElementById('stat-week');
   weekEl.textContent = stats.dueThisWeek;
