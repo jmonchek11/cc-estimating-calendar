@@ -6890,9 +6890,13 @@ function fmtOooDateLabel(dateStr) {
   if (dateStr === tmrw.toISOString().slice(0, 10)) return 'Tomorrow';
   return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 }
+let OOO_PARENT = null;   // { kind: 'bid'|'change_order', id, label } — cleared each time the modal opens
+let OOO_PARENT_RESULTS = [];
+let oooParentTimer;
 async function actLogOutOfOffice() {
   let upcoming = [];
   try { upcoming = await api('GET', '/api/v2/out-of-office'); } catch { /* list just comes up empty */ }
+  OOO_PARENT = null;
   renderOooModal(upcoming);
 }
 function renderOooModal(upcoming) {
@@ -6909,6 +6913,14 @@ function renderOooModal(upcoming) {
         <div class="v2-field"><label class="v2-check"><input type="checkbox" id="ooo-all-day" checked onchange="toggleOooTimeField()"> All day</label></div>
         <div class="v2-field" id="ooo-time-field" style="display:none"><label>Time</label><input id="ooo-time" type="time"></div>
         <div class="v2-field"><label>What for? <span class="req">*</span></label><textarea id="ooo-reason" rows="2" placeholder="Job walkthrough, dentist, meeting off-site…"></textarea></div>
+        <div class="v2-field"><label>Related bid or job (optional)</label>
+          <div id="ooo-parent-picked" style="display:none;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:9px;background:var(--bg)">
+            <span style="flex:1;min-width:0;font-size:13px;font-weight:600" id="ooo-parent-label"></span>
+            <button class="v2-btn outline" style="flex-shrink:0;padding:2px 8px;font-size:11px" onclick="clearOooParent()">✕</button>
+          </div>
+          <input id="ooo-parent-input" type="text" autocomplete="off" placeholder="Project name, bid #, CO #, job #…" oninput="oooParentSearch()">
+          <div id="ooo-parent-results" style="display:flex;flex-direction:column;gap:6px;margin-top:6px"></div>
+        </div>
       </div>
       <div class="v2-modal-err" id="ooo-err"></div>
       <div class="v2-modal-ft">
@@ -6929,13 +6941,56 @@ function renderOooList(upcoming) {
       <span class="initials-pill">${esc(o.initials)}</span>
       <div style="flex:1;min-width:0">
         <div style="font-size:13px;font-weight:600">${esc(o.name)} <span style="font-weight:500;color:var(--text-muted)">— ${esc(o.reason)}</span></div>
-        <div style="font-size:11px;color:var(--text-muted)">${fmtOooDateLabel(o.date)}${o.all_day ? ' · All day' : (o.time ? ' · ' + o.time : '')}</div>
+        <div style="font-size:11px;color:var(--text-muted)">${fmtOooDateLabel(o.date)}${o.all_day ? ' · All day' : (o.time ? ' · ' + o.time : '')}${o.parent ? ` · ${esc(o.parent.label)}${o.parent.project_name ? ' — ' + esc(o.parent.project_name) : ''}` : ''}</div>
       </div>
       <button class="v2-btn outline" style="flex-shrink:0;padding:2px 8px;font-size:11px" onclick="deleteOutOfOfficeEntry(${o.id})" title="Remove">✕</button>
     </div>`).join('');
 }
 function toggleOooTimeField() {
   document.getElementById('ooo-time-field').style.display = document.getElementById('ooo-all-day').checked ? 'none' : '';
+}
+// Same search box/results pattern as the Log-a-Call FAB's bid/CO picker
+// (quickFollowupSearch) — reuses the same /api/v2/search endpoint rather
+// than a separate lookup. "Job" here means a Change Order (tied to an
+// awarded job) since that's how the team already refers to ongoing job
+// work; a pre-award bid is picked directly.
+function oooParentSearch() {
+  clearTimeout(oooParentTimer);
+  const input = document.getElementById('ooo-parent-input');
+  const results = document.getElementById('ooo-parent-results');
+  if (!input || !results) return;
+  const q = input.value.trim();
+  if (q.length < 2) { results.innerHTML = ''; OOO_PARENT_RESULTS = []; return; }
+  oooParentTimer = setTimeout(async () => {
+    let res;
+    try { res = await api('GET', '/api/v2/search?q=' + encodeURIComponent(q)); } catch { return; }
+    OOO_PARENT_RESULTS = [
+      ...(res.bids || []).map(b => ({ kind: 'bid', id: b.id, label: b.bid_number || 'No bid #', project: b.project, sub: (b.customers || []).join(', ') })),
+      ...(res.change_orders || []).map(c => ({ kind: 'change_order', id: c.id, label: c.co_number, project: c.project, sub: c.name })),
+    ].slice(0, 10);
+    results.innerHTML = OOO_PARENT_RESULTS.length
+      ? OOO_PARENT_RESULTS.map((r, i) => `
+        <div onclick="pickOooParent(${i})" style="padding:9px 11px;border:1px solid var(--border);border-radius:9px;cursor:pointer">
+          <div style="font-weight:700;font-size:13px">${esc(r.label)} <span style="font-weight:400;color:var(--text-muted)">— ${esc(r.project || '—')}</span></div>
+          ${r.sub ? `<div style="font-size:11.5px;color:var(--text-muted);margin-top:1px">${esc(r.sub)}</div>` : ''}
+        </div>`).join('')
+      : '<div style="padding:8px 2px;font-size:13px;color:var(--text-muted)">No matches</div>';
+  }, 220);
+}
+function pickOooParent(i) {
+  const r = OOO_PARENT_RESULTS[i];
+  if (!r) return;
+  OOO_PARENT = r;
+  document.getElementById('ooo-parent-input').value = '';
+  document.getElementById('ooo-parent-input').style.display = 'none';
+  document.getElementById('ooo-parent-results').innerHTML = '';
+  document.getElementById('ooo-parent-picked').style.display = 'flex';
+  document.getElementById('ooo-parent-label').textContent = `${r.label} — ${r.project || '—'}`;
+}
+function clearOooParent() {
+  OOO_PARENT = null;
+  document.getElementById('ooo-parent-picked').style.display = 'none';
+  document.getElementById('ooo-parent-input').style.display = '';
 }
 async function submitOutOfOffice() {
   const errEl = document.getElementById('ooo-err');
@@ -6944,6 +6999,8 @@ async function submitOutOfOffice() {
   const all_day = document.getElementById('ooo-all-day').checked;
   const time = all_day ? null : (document.getElementById('ooo-time').value || null);
   const reason = document.getElementById('ooo-reason').value.trim();
+  const parent_type = OOO_PARENT?.kind || null;
+  const parent_id = OOO_PARENT?.id || null;
   if (!team_member_id || !date || !reason) {
     errEl.textContent = 'Who, date, and reason are all required.'; errEl.style.display = 'block'; return;
   }
@@ -6951,7 +7008,7 @@ async function submitOutOfOffice() {
   if (btn.disabled) return;
   btn.disabled = true; const label = btn.textContent; btn.textContent = 'Saving…';
   try {
-    await api('POST', '/api/v2/out-of-office', { team_member_id, date, all_day, time, reason });
+    await api('POST', '/api/v2/out-of-office', { team_member_id, date, all_day, time, reason, parent_type, parent_id });
     document.getElementById('v2-form-overlay')?.remove();
   } catch (e) {
     errEl.textContent = e.message; errEl.style.display = 'block';

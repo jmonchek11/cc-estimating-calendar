@@ -445,6 +445,12 @@ const OutOfOfficeSchema = new mongoose.Schema({
   all_day:        { type: Boolean, default: true },
   time:           { type: String, default: null },    // "HH:MM", 24-hour — only meaningful when all_day is false
   reason:         { type: String, required: true },   // free text — varies too much to enum ("dentist", "job walkthrough", "sick", …)
+  // Optional link to what they're out FOR — same polymorphic pattern as
+  // Reminder above. 'change_order' covers "job" in the sense the team uses
+  // it day to day (a CO is tied to a specific awarded job); a pre-award
+  // bid is linked directly via 'bid'.
+  parent_type:    { type: String, enum: ['bid', 'change_order'], default: null },
+  parent_id:      { type: Number, default: null },
   created_by:     { type: Number, default: null },     // FK → TeamMember — who logged it (may differ from team_member_id)
   created_at:     { type: String, default: ts },
 }, opts);

@@ -257,8 +257,9 @@ function renderOutToday(list) {
     const names = (w.assignees || []).map(a => a.name).join(' & ') || 'Unassigned';
     const avatars = (w.assignees || []).map(a =>
       `<div class="tv-outtoday-avatar" style="background:${estimatorColor(a.id)}">${esc(a.initials || '?')}</div>`).join('');
+    const oooParent = w.parent_label ? `${w.parent_label}${w.parent_project ? ' · ' + w.parent_project : ''}` : null;
     const meta = w.type === 'ooo'
-      ? [w.reason, w.all_day ? 'All day' : (w.time ? fmtTime(w.time) : null)].filter(Boolean).join(' · ')
+      ? [w.reason, oooParent, w.all_day ? 'All day' : (w.time ? fmtTime(w.time) : null)].filter(Boolean).join(' · ')
       : [w.project_name, w.company, w.time ? fmtTime(w.time) : null].filter(Boolean).join(' · ');
     return `
       <div class="tv-outtoday-chip">

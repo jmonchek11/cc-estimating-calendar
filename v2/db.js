@@ -2552,12 +2552,53 @@ async function logOutOfOffice(data, actorId) {
   if (!reason) throw new Error('Reason is required');
   const date = data.date || today();
   const allDay = data.all_day !== false;
+  let parentType = null, parentId = null;
+  if (data.parent_type) {
+    if (!['bid', 'change_order'].includes(data.parent_type)) throw new Error('Invalid related-to type');
+    parentId = Number(data.parent_id);
+    if (!parentId) throw new Error('Related-to id is required when a type is given');
+    const M2 = data.parent_type === 'bid' ? M.Bid : M.ChangeOrder;
+    if (!(await M2.exists({ _id: parentId }))) throw new Error('Related bid/change order not found');
+    parentType = data.parent_type;
+  }
   const id = await nextId('out_of_office');
   await M.OutOfOffice.create({
     _id: id, team_member_id: teamMemberId, date, all_day: allDay,
-    time: allDay ? null : (data.time || null), reason, created_by: actorId || null,
+    time: allDay ? null : (data.time || null), reason,
+    parent_type: parentType, parent_id: parentId, created_by: actorId || null,
   });
   return { id };
+}
+// Resolves each { parent_type, parent_id } to a short display label + the
+// project it's under, batched (not one query per row) since a busy day
+// could have several entries linked to bids/COs at once.
+async function resolveOooParents(M, rows) {
+  const bidIds = [...new Set(rows.filter(r => r.parent_type === 'bid').map(r => r.parent_id))];
+  const coIds = [...new Set(rows.filter(r => r.parent_type === 'change_order').map(r => r.parent_id))];
+  const [bids, cos] = await Promise.all([
+    bidIds.length ? M.Bid.find({ _id: { $in: bidIds } }).lean() : [],
+    coIds.length ? M.ChangeOrder.find({ _id: { $in: coIds } }).lean() : [],
+  ]);
+  const jobIds = [...new Set(cos.map(c => c.job_id))];
+  const jobs = jobIds.length ? await M.Job.find({ _id: { $in: jobIds } }).lean() : [];
+  const jobById = {}; jobs.forEach(j => jobById[j._id] = j);
+  const projectIds = [...new Set([...bids.map(b => b.project_id), ...jobs.map(j => j.project_id)])];
+  const projects = projectIds.length ? await M.Project.find({ _id: { $in: projectIds } }).lean() : [];
+  const pName = {}; projects.forEach(p => pName[p._id] = p.name);
+  const bidById = {}; bids.forEach(b => bidById[b._id] = b);
+  const coById = {}; cos.forEach(c => coById[c._id] = c);
+  return (parentType, parentId) => {
+    if (parentType === 'bid') {
+      const b = bidById[parentId]; if (!b) return null;
+      return { label: b.bid_number || 'Bid (no #)', project_name: pName[b.project_id] || null };
+    }
+    if (parentType === 'change_order') {
+      const c = coById[parentId]; if (!c) return null;
+      const job = jobById[c.job_id];
+      return { label: c.co_number, project_name: job ? (pName[job.project_id] || null) : null };
+    }
+    return null;
+  };
 }
 // Upcoming = today onward, not just today — logging a few days ahead (e.g.
 // a dentist appointment next Tuesday) is a real use case, same as bid
@@ -2569,10 +2610,12 @@ async function getOutOfOfficeUpcoming() {
     M.TeamMember.find().lean(),
   ]);
   const tm = {}; members.forEach(m => tm[m._id] = m);
+  const resolveParent = await resolveOooParents(M, rows);
   return rows.map(o => ({
     id: o._id, team_member_id: o.team_member_id,
     name: tm[o.team_member_id]?.name || 'Unknown', initials: tm[o.team_member_id]?.initials || '?',
     date: o.date, all_day: o.all_day, time: o.time, reason: o.reason, created_by: o.created_by,
+    parent: o.parent_type ? resolveParent(o.parent_type, o.parent_id) : null,
   }));
 }
 async function deleteOutOfOffice(id, actorId, isAdmin) {
@@ -4521,11 +4564,14 @@ async function getTvData() {
   // site visit, personal), not just the walkthrough-specific case above.
   // Same outToday list, so "if you don't see someone, check the board"
   // covers every reason someone might be away, not only walk-throughs.
+  const resolveOooParent = await resolveOooParents(M, oooToday);
   oooToday.forEach(o => {
     const member = tm[o.team_member_id];
     if (!member) return;
+    const parent = o.parent_type ? resolveOooParent(o.parent_type, o.parent_id) : null;
     outToday.push({
       type: 'ooo', reason: o.reason, all_day: !!o.all_day, time: o.all_day ? null : (o.time || null),
+      parent_label: parent?.label || null, parent_project: parent?.project_name || null,
       assignees: [{ id: o.team_member_id, name: member.name, initials: member.initials }],
     });
   });
