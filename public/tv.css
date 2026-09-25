@@ -283,9 +283,10 @@ html, body {
    cleanly under its header and site-company names don't need to truncate
    into an unreadable "…". */
 .tv-details-cell {
-  font-size: 15px; font-weight: 600; color: var(--sub);
-  text-align: left;
-  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  font-size: 14px; font-weight: 600; color: var(--sub);
+  text-align: left; line-height: 1.3;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 /* Due date */
