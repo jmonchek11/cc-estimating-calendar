@@ -4371,10 +4371,20 @@ async function getEstimatorAvailability(startDate, endDate) {
 // v2 (a bid can have several) — joined from BidCustomer for a Bid, or the
 // awarded company for a CO (COs don't have their own customer roster,
 // they belong to a Job that's already been awarded to one).
+// LOOKAHEAD_DAYS mirrors tv.js's own client-side window (renderRows filters
+// to the same 14 days) — kept in sync here so the walkthrough rows this
+// sends actually fall inside what the table will show.
+const TV_WALKTHROUGH_LOOKAHEAD_DAYS = 14;
 async function getTvData() {
   const M = getModels();
+  // Unlike the old v1 board (a due-date list only), this also needs every
+  // upcoming/today walk-through regardless of the bid's own stage — a
+  // walk-through is usually scheduled well before a bid even reaches
+  // active_bid, and stays relevant through submitted too — so bids are
+  // fetched broadly (any non-superseded stage) rather than the narrower
+  // active_bid/awarded set the due-date list itself still uses.
   const [bids, cos, jobs, projects, companies, bidCustomers, members] = await Promise.all([
-    M.Bid.find({ stage: { $in: ['active_bid', 'awarded'] }, superseded: { $ne: 1 } }).lean(),
+    M.Bid.find({ superseded: { $ne: 1 } }).lean(),
     M.ChangeOrder.find({ stage: 'active_co', superseded: { $ne: 1 } }).lean(),
     M.Job.find().lean(),
     M.Project.find().lean(),
@@ -4382,14 +4392,27 @@ async function getTvData() {
     M.BidCustomer.find().lean(),
     M.TeamMember.find().lean(),
   ]);
-  const pName = {}; projects.forEach(p => pName[p._id] = p.name);
+  const pName = {}; const pOnHold = {};
+  projects.forEach(p => { pName[p._id] = p.name; pOnHold[p._id] = !!p.on_hold; });
   const coName = {}; companies.forEach(c => coName[c._id] = c.name);
   const jobById = {}; jobs.forEach(j => jobById[j._id] = j);
   const tm = {}; members.forEach(m => tm[m._id] = m);
   const custNamesByBid = {};
   bidCustomers.forEach(bc => (custNamesByBid[bc.bid_id] = custNamesByBid[bc.bid_id] || []).push(coName[bc.company_id]));
 
-  const activeBids = bids.filter(b => b.stage === 'active_bid');
+  // An on-hold project's bids/COs shouldn't show as due/overdue on a shared
+  // TV board any more than they should on the Dashboard (same bug, same
+  // fix as getDashboard's pOnHold guard) — walk-throughs stay visible
+  // either way, since those are real scheduled commitments regardless of
+  // whether the bid itself is paused.
+  const activeBids = bids.filter(b => b.stage === 'active_bid' && !pOnHold[b.project_id]);
+  // Sub-estimators, shaped the same way walk-through assignees are (id/
+  // name/initials/scope) — the TV row shows them as small chips next to
+  // the primary estimator's avatar, per Joe: "sub estimators should
+  // definitely be listed."
+  const subEstimatorsFor = (b) => (b.sub_estimators || [])
+    .map(s => tm[s.estimator_id] ? { id: s.estimator_id, name: tm[s.estimator_id].name, initials: tm[s.estimator_id].initials, scope: s.scope } : null)
+    .filter(Boolean);
   const fmtBid = b => ({
     id: b._id, bid_number: b.bid_number || null, stage: b.stage,
     project_name: pName[b.project_id] || '—',
@@ -4398,6 +4421,7 @@ async function getTvData() {
     estimate_pct_complete: 0, award_date: b.award_date || null,
     estimator_id: b.estimator_id || null, estimator_initials: tm[b.estimator_id]?.initials || null,
     estimator_name: tm[b.estimator_id]?.name || null, salesperson_initials: tm[b.salesperson_id]?.initials || null,
+    sub_estimators: subEstimatorsFor(b),
   });
   const fmtCo = c => {
     const job = jobById[c.job_id];
@@ -4409,9 +4433,11 @@ async function getTvData() {
       estimate_pct_complete: 0, award_date: null,
       estimator_id: c.estimator_id || null, estimator_initials: tm[c.estimator_id]?.initials || null,
       estimator_name: tm[c.estimator_id]?.name || null, salesperson_initials: null,
+      sub_estimators: [],
     };
   };
-  const merged = [...activeBids.map(fmtBid), ...cos.map(fmtCo)];
+  const activeCos = cos.filter(c => { const job = jobById[c.job_id]; return !job || !pOnHold[job.project_id]; });
+  const merged = [...activeBids.map(fmtBid), ...activeCos.map(fmtCo)];
 
   const since = new Date(); since.setDate(since.getDate() - 60);
   const sinceStr = since.toISOString().slice(0, 10);
@@ -4424,16 +4450,55 @@ async function getTvData() {
   const today = new Date().toISOString().slice(0, 10);
   const in7 = new Date(); in7.setDate(in7.getDate() + 7);
   const weekEnd = in7.toISOString().slice(0, 10);
+  const lookaheadCutoff = new Date(); lookaheadCutoff.setDate(lookaheadCutoff.getDate() + TV_WALKTHROUGH_LOOKAHEAD_DAYS);
+  const lookaheadStr = lookaheadCutoff.toISOString().slice(0, 10);
+
+  // Walk-throughs — "if you don't see someone at their desk, check the
+  // board" (per Joe). Two views of the same underlying data: `outToday`
+  // is a standalone, always-visible list (not paged away in the scrolling
+  // table) so the answer to "where's Doug" is immediate, and
+  // `walkthroughRows` folds every walk-through in the lookahead window
+  // into the same due-date table as bids/COs (tagged stage:'walkthrough')
+  // so upcoming ones are a visible reminder, not just today's.
+  const outToday = [];
+  const walkthroughRows = [];
+  for (const b of bids) {
+    for (const w of (b.walkthroughs || [])) {
+      if (!w.date) continue;
+      const assignees = (w.assignees || [])
+        .map(a => tm[a.member_id] ? { id: a.member_id, name: tm[a.member_id].name, initials: tm[a.member_id].initials } : null)
+        .filter(Boolean);
+      const siteCompany = w.company_id ? coName[w.company_id] : null;
+      const projectName = pName[b.project_id] || '—';
+      if (w.date === today) {
+        outToday.push({ project_name: projectName, company: siteCompany, time: w.time || null, assignees });
+      }
+      if (w.date >= today && w.date <= lookaheadStr) {
+        walkthroughRows.push({
+          id: `wt-${b._id}-${w._id}`, bid_number: b.bid_number || null, stage: 'walkthrough',
+          project_name: projectName, customer: siteCompany,
+          estimate_due_date: w.date, due_time: w.time || null, estimate_amount: null,
+          estimate_pct_complete: 0, award_date: null,
+          estimator_id: assignees[0]?.id || null, estimator_initials: assignees[0]?.initials || null,
+          estimator_name: assignees[0]?.name || null, salesperson_initials: null,
+          sub_estimators: [], assignees,
+        });
+      }
+    }
+  }
+  outToday.sort((a, b) => (a.time || '99:99').localeCompare(b.time || '99:99'));
 
   return {
-    bids: merged,
+    bids: [...merged, ...walkthroughRows],
     wins,
+    outToday,
     stats: {
       activeBids: activeBids.length,
-      activeCOs: cos.length,
+      activeCOs: activeCos.length,
       pipelineValue: merged.reduce((s, b) => s + (b.estimate_amount || 0), 0),
       dueThisWeek: merged.filter(b => b.estimate_due_date >= today && b.estimate_due_date <= weekEnd).length,
       overdueCount: merged.filter(b => b.estimate_due_date && b.estimate_due_date < today).length,
+      walkthroughsToday: outToday.length,
     },
     timestamp: new Date().toISOString(),
   };

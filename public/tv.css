@@ -84,6 +84,37 @@ html, body {
   text-transform: uppercase; color: var(--sub);
 }
 
+/* ── Out on Walkthrough Today ────────────────────────────────────── */
+.tv-outtoday {
+  flex-shrink: 0;
+  background: linear-gradient(135deg, #00191c 0%, #002a30 45%, #00191c 100%);
+  border-bottom: 2px solid #0e7490;
+  padding: 10px 36px 12px;
+}
+.tv-outtoday-lbl {
+  font-size: 11px; font-weight: 800; letter-spacing: .16em;
+  color: #22d3ee; text-transform: uppercase; margin-bottom: 8px;
+}
+.tv-outtoday-list {
+  display: flex; flex-wrap: wrap; gap: 12px;
+}
+.tv-outtoday-chip {
+  display: flex; align-items: center; gap: 10px;
+  background: rgba(34,211,238,.08); border: 1px solid rgba(34,211,238,.3);
+  border-radius: 10px; padding: 7px 16px 7px 8px;
+}
+.tv-outtoday-avatars { display: flex; }
+.tv-outtoday-avatar {
+  width: 32px; height: 32px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 900; color: #fff;
+  border: 2px solid #00191c; flex-shrink: 0;
+}
+.tv-outtoday-avatar + .tv-outtoday-avatar { margin-left: -6px; }
+.tv-outtoday-body { line-height: 1.25; }
+.tv-outtoday-names { font-size: 15px; font-weight: 800; color: #ecfeff; }
+.tv-outtoday-meta { font-size: 12.5px; color: #67e8f9; font-weight: 600; }
+
 /* ── Table Header ────────────────────────────────────────────────── */
 .tv-table-head {
   display: grid;
@@ -166,14 +197,44 @@ html, body {
   padding: 5px 12px; border-radius: 6px;
   display: inline-block; text-align: center;
 }
-.tv-type.bid { background: rgba(59,130,246,.2); color: #93c5fd; border: 1px solid rgba(59,130,246,.4); }
-.tv-type.co  { background: rgba(251,191,36,.2);  color: #fde68a; border: 1px solid rgba(251,191,36,.4); }
+.tv-type.bid  { background: rgba(59,130,246,.2); color: #93c5fd; border: 1px solid rgba(59,130,246,.4); }
+.tv-type.co   { background: rgba(251,191,36,.2);  color: #fde68a; border: 1px solid rgba(251,191,36,.4); }
+.tv-type.walk { background: rgba(34,211,238,.18); color: #67e8f9; border: 1px solid rgba(34,211,238,.4); }
+
+/* Multiple avatars in one row (walk-through with several assignees) —
+   sized/overlapped to still fit inside the 72px avatar column even at 3. */
+.tv-avatars { display: flex; flex-shrink: 0; width: 72px; }
+.tv-avatar-sm {
+  width: 34px; height: 34px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 900; color: #fff;
+  border: 2px solid var(--row-a); flex-shrink: 0;
+}
+.tv-avatars .tv-avatar-sm + .tv-avatar-sm { margin-left: -13px; }
+.tv-avatar-more {
+  width: 34px; height: 34px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 800; color: var(--sub);
+  background: var(--border); border: 2px solid var(--row-a);
+  flex-shrink: 0; margin-left: -13px;
+}
+
+/* Sub-estimator chips, next to the primary estimator avatar */
+.tv-subest {
+  display: flex; gap: 4px; margin-top: 4px; flex-wrap: wrap;
+}
+.tv-subest-chip {
+  font-size: 11px; font-weight: 700; color: var(--sub);
+  background: rgba(148,163,184,.12); border: 1px solid var(--border);
+  border-radius: 5px; padding: 2px 7px;
+}
 
 /* Amount */
 .tv-amount {
   font-size: 18px; font-weight: 700; color: var(--sub);
   text-align: right; padding-right: 20px;
   font-variant-numeric: tabular-nums;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
 }
 
 /* Due date */
@@ -191,6 +252,12 @@ html, body {
 .tv-due-pill.amber  { background: var(--amber-bg); color: var(--amber); border: 1px solid rgba(251,191,36,.4); }
 .tv-due-pill.green  { background: var(--green-bg); color: var(--green); border: 1px solid rgba(74,222,128,.3); }
 .tv-due-pill.none   { background: transparent;     color: var(--sub);   border: 1px solid var(--border); }
+.tv-walk-pill {
+  background: rgba(34,211,238,.14); color: #67e8f9; border: 1px solid rgba(34,211,238,.4);
+  font-size: 16px; line-height: 1.15; padding: 6px 14px;
+  display: flex; flex-direction: column; align-items: center;
+}
+.tv-walk-pill-time { font-size: 12px; font-weight: 700; color: #a5f3fc; }
 
 /* Empty state */
 .tv-empty {

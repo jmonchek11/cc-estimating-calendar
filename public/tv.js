@@ -65,6 +65,32 @@ function fmtAwardDate(dateStr) {
     { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+// "10:00" (24h, as stored) -> "10:00 AM" for display.
+function fmtTime(t) {
+  if (!t) return '';
+  const [h, m] = t.split(':').map(Number);
+  const period = h >= 12 ? 'PM' : 'AM';
+  const h12 = h % 12 || 12;
+  return `${h12}:${String(m).padStart(2, '0')} ${period}`;
+}
+
+// A walk-through date is informational, not a deadline — no red/amber
+// urgency coloring or overdue pulsing the way a bid's due date gets (see
+// duePill below); just a neutral "when" that reads clearly from across
+// the room.
+function walkPill(dateStr, timeStr) {
+  if (!dateStr) return '<span class="tv-due-pill none">No Date</span>';
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const d = new Date(dateStr + 'T00:00:00');
+  const days = Math.round((d - today) / 86400000);
+  const label = days === 0 ? 'TODAY' : days === 1 ? 'TOMORROW'
+    : d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  // Date + time stacked on two lines, not side by side — "Wed, Oct 1 ·
+  // 10:00 AM" as one line was wide enough to overflow the fixed due-date
+  // column on the actual board (confirmed in preview).
+  return `<span class="tv-due-pill tv-walk-pill">${label}${timeStr ? `<span class="tv-walk-pill-time">${fmtTime(timeStr)}</span>` : ''}</span>`;
+}
+
 // ── Pager / Auto-scroll ───────────────────────────────────────────────────────
 let _pageInterval = null;
 let _currentPage  = 0;
@@ -137,27 +163,72 @@ function renderRows(bids) {
   );
 
   rowsEl.innerHTML = sorted.map(b => {
-    const color   = estimatorColor(b.estimator_id);
-    const initials = esc(b.estimator_initials || '?');
-    const { html: pillHtml, overdue } = duePill(b.estimate_due_date);
-    const typeBadge = b.stage === 'active_co'
-      ? '<span class="tv-type co">CO</span>'
+    const isWalk = b.stage === 'walkthrough';
+    const typeBadge = isWalk ? '<span class="tv-type walk">WALK</span>'
+      : b.stage === 'active_co' ? '<span class="tv-type co">CO</span>'
       : '<span class="tv-type bid">BID</span>';
 
+    // Walk-throughs can have several assignees — stack up to 3 avatars,
+    // "+N" beyond that. Everything else is still the single primary-
+    // estimator avatar it's always been.
+    let avatarsHtml;
+    if (isWalk && (b.assignees || []).length) {
+      const shown = b.assignees.slice(0, 3);
+      const extra = b.assignees.length - shown.length;
+      avatarsHtml = `<div class="tv-avatars">${shown.map(a =>
+        `<div class="tv-avatar-sm" style="background:${estimatorColor(a.id)}">${esc(a.initials || '?')}</div>`).join('')}${
+        extra > 0 ? `<div class="tv-avatar-more">+${extra}</div>` : ''}</div>`;
+    } else {
+      avatarsHtml = `<div class="tv-avatar" style="background:${estimatorColor(b.estimator_id)}">${esc(b.estimator_initials || '?')}</div>`;
+    }
+
+    // Sub-estimators — per Joe, these should definitely be listed rather
+    // than only the primary estimator ever showing.
+    const subEstHtml = (b.sub_estimators || []).length
+      ? `<div class="tv-subest">${b.sub_estimators.map(s => `<span class="tv-subest-chip">${esc(s.initials)} ${esc(s.scope)}</span>`).join('')}</div>` : '';
+
+    const { html: pillHtml, overdue } = isWalk ? { html: walkPill(b.estimate_due_date, b.due_time), overdue: false } : duePill(b.estimate_due_date);
+    const amountCell = isWalk
+      ? `<div class="tv-amount" style="color:var(--sub);font-size:15px">${b.customer ? esc(b.customer) : '—'}</div>`
+      : `<div class="tv-amount">${fmtCurrency(b.estimate_amount)}</div>`;
+
     return `
-      <div class="tv-row${overdue ? ' overdue' : ''}" style="border-left-color:${color}">
-        <div class="tv-avatar" style="background:${color}">${initials}</div>
+      <div class="tv-row${overdue ? ' overdue' : ''}" style="border-left-color:${isWalk ? '#22d3ee' : estimatorColor(b.estimator_id)}">
+        ${avatarsHtml}
         <div class="tv-proj">
           <div class="tv-proj-name">${esc(b.project_name)}</div>
-          ${b.customer ? `<div class="tv-proj-cust">${esc(b.customer)}</div>` : ''}
+          ${!isWalk && b.customer ? `<div class="tv-proj-cust">${esc(b.customer)}</div>` : ''}
+          ${!isWalk ? subEstHtml : ''}
         </div>
         <div style="display:flex;align-items:center;justify-content:center">${typeBadge}</div>
-        <div class="tv-amount">${fmtCurrency(b.estimate_amount)}</div>
+        ${amountCell}
         <div class="tv-due">${pillHtml}</div>
       </div>`;
   }).join('');
 
   startPager(sorted.length);
+}
+
+// ── Out on Walkthrough Today ────────────────────────────────────────────────
+function renderOutToday(list) {
+  const wrap = document.getElementById('tv-outtoday');
+  const listEl = document.getElementById('tv-outtoday-list');
+  if (!list || !list.length) { wrap.style.display = 'none'; return; }
+  wrap.style.display = '';
+  listEl.innerHTML = list.map(w => {
+    const names = (w.assignees || []).map(a => a.name).join(' & ') || 'Unassigned';
+    const avatars = (w.assignees || []).map(a =>
+      `<div class="tv-outtoday-avatar" style="background:${estimatorColor(a.id)}">${esc(a.initials || '?')}</div>`).join('');
+    const meta = [w.project_name, w.company, w.time ? fmtTime(w.time) : null].filter(Boolean).join(' · ');
+    return `
+      <div class="tv-outtoday-chip">
+        <div class="tv-outtoday-avatars">${avatars}</div>
+        <div class="tv-outtoday-body">
+          <div class="tv-outtoday-names">${esc(names)}</div>
+          <div class="tv-outtoday-meta">${esc(meta)}</div>
+        </div>
+      </div>`;
+  }).join('');
 }
 
 // ── Render Stats ──────────────────────────────────────────────────────────────
@@ -173,6 +244,8 @@ function renderStats(stats, timestamp) {
   const odEl = document.getElementById('stat-overdue');
   odEl.textContent = stats.overdueCount || 0;
   odEl.className   = 'tv-stat-val' + (stats.overdueCount > 0 ? ' warn' : '');
+
+  document.getElementById('stat-walkthroughs').textContent = stats.walkthroughsToday || 0;
 
   if (timestamp) {
     document.getElementById('stat-refresh').textContent =
@@ -243,6 +316,7 @@ async function fetchData() {
     if (data.error) { console.error('TV data error:', data.error); return; }
 
     renderStats(data.stats, data.timestamp);
+    renderOutToday(data.outToday);
     renderRows(data.bids);
     renderWins(data.wins);
   } catch (e) {

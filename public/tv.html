@@ -42,9 +42,19 @@
       <span class="tv-stat-label">Overdue</span>
     </div>
     <div class="tv-stat">
+      <span class="tv-stat-val" id="stat-walkthroughs">—</span>
+      <span class="tv-stat-label">Walkthroughs Today</span>
+    </div>
+    <div class="tv-stat">
       <span class="tv-stat-val" id="stat-refresh">—</span>
       <span class="tv-stat-label">Last Update</span>
     </div>
+  </div>
+
+  <!-- OUT ON WALKTHROUGH TODAY -->
+  <div class="tv-outtoday" id="tv-outtoday" style="display:none">
+    <div class="tv-outtoday-lbl">🚶 Out on Walkthrough Today</div>
+    <div class="tv-outtoday-list" id="tv-outtoday-list"></div>
   </div>
 
   <!-- TABLE HEADER -->
@@ -52,7 +62,7 @@
     <div class="tv-th"></div>
     <div class="tv-th">Project <span class="tv-th-range" id="tv-date-range"></span></div>
     <div class="tv-th center">Type</div>
-    <div class="tv-th right">Amount</div>
+    <div class="tv-th right">Amount / Site</div>
     <div class="tv-th right">Due Date</div>
   </div>
 
