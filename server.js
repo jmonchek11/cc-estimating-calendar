@@ -63,10 +63,16 @@ app.get('/tv/:token', (req, res) => res.sendFile(path.join(__dirname, 'public', 
 // so the kiosk showed stale data disconnected from what the team actually
 // works in day to day. getTvData() (v2/db.js) returns the same shape this
 // route always has, so tv.html/tv.js needed no changes.
+// Two ways in: the TV_TOKEN query param (the unattended physical kiosk,
+// which is never logged in — it's just a bookmarked URL on a screen) OR an
+// already-logged-in app session (the sidebar's TV Board link, added
+// 2026-09-25 — no reason to make someone who's already signed in go dig up
+// the token separately).
 app.get('/api/tv/data', async (req, res) => {
   const token = req.query.token;
   const expected = process.env.TV_TOKEN;
-  if (!expected || token !== expected) return res.status(401).json({ error: 'Invalid TV token' });
+  const tokenOk = expected && token === expected;
+  if (!tokenOk && !req.session.userId) return res.status(401).json({ error: 'Invalid TV token' });
   try { res.json(await v2db.getTvData()); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });

@@ -252,9 +252,9 @@ async function fetchData() {
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
-if (!TV_TOKEN) {
-  document.getElementById('tv-error').style.display = 'flex';
-} else {
-  fetchData();
-  setInterval(fetchData, REFRESH_INTERVAL);
-}
+// No TV_TOKEN in the URL isn't necessarily an error anymore — the sidebar's
+// TV Board link (added 2026-09-25) opens this with no token at all, relying
+// on the viewer's own logged-in session instead (the API route accepts
+// either). fetchData() itself shows tv-error if that session check fails too.
+fetchData();
+setInterval(fetchData, REFRESH_INTERVAL);
