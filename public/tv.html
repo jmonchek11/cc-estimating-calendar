@@ -2,7 +2,14 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=1920" />
+  <!-- target-densitydpi=device-dpi is an Android-WebView-only extension —
+       Fully Kiosk (and most Android kiosk browsers) is a WebView, and
+       without this it applies its own DPI-based auto-zoom on a TV-class
+       high-density display, which is what makes the board render zoomed
+       in even with every in-app Fully Kiosk zoom setting at default. This
+       pins the page to actual device pixels instead. Ignored harmlessly by
+       real desktop/mobile browsers. -->
+  <meta name="viewport" content="width=1920, target-densitydpi=device-dpi, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>Liberty Estimating — Live Board</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/tv.css" />

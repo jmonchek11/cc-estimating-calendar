@@ -27,6 +27,11 @@ html, body {
   font-family: 'Inter', sans-serif;
   display: flex;
   flex-direction: column;
+  /* Some Android WebViews (Fully Kiosk's underlying engine included) boost
+     text size independent of the viewport zoom fix in tv.html — belt and
+     suspenders against the same "why is this zoomed in" symptom. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 /* ── Header ──────────────────────────────────────────────────────── */
