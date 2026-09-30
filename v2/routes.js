@@ -521,6 +521,7 @@ router.post('/api/v2/companies',         t(req => v2db.createCompanyV2(req.body)
 // Per-bid-customer contact linking (bid flyout's per-customer contact list)
 router.post('/api/v2/bid-customers/:id/contacts',              t(req => v2db.addBidCustomerContact(req.params.id, req.body.contact_id)));
 router.delete('/api/v2/bid-customers/:id/contacts/:contactId', t(req => v2db.removeBidCustomerContact(req.params.id, req.params.contactId)));
+router.patch('/api/v2/bid-customers/:id/portal-url',           t(req => v2db.setBidCustomerPortalUrl(req.params.id, req.body.portal_url)));
 
 // ── Follow-ups (bid_submission or change_order parent) ────────────────────────
 router.post('/api/v2/followups', async (req, res) => {
@@ -552,8 +553,16 @@ router.delete('/api/v2/notes/:id',             t(req => v2db.deleteNote(req.para
 // Out of Office — check-in/check-out for "I'll be out but still working"
 // (2026-09-25). GET returns today-onward so the log-it modal can also show
 // what's upcoming, not just today.
+router.get('/api/v2/out-of-office/history',    async (req, res) => { try { res.json(await v2db.getOutOfOfficeHistory()); } catch (e) { res.status(500).json({ error: e.message }); } });
 router.get('/api/v2/out-of-office',            async (req, res) => { try { res.json(await v2db.getOutOfOfficeUpcoming()); } catch (e) { res.status(500).json({ error: e.message }); } });
 router.post('/api/v2/out-of-office',           t(req => v2db.logOutOfOffice(req.body, req.session.userId)));
+router.post('/api/v2/out-of-office/:id/check-in', async (req, res) => {
+  try {
+    const actor = await maindb.getMember(req.session.userId);
+    await v2db.checkInOutOfOffice(req.params.id, req.session.userId, !!actor?.is_admin);
+    res.json({ ok: true });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
 router.delete('/api/v2/out-of-office/:id',     async (req, res) => {
   try {
     const actor = await maindb.getMember(req.session.userId);
@@ -569,6 +578,8 @@ router.patch('/api/v2/jobs/:id',              t(req => v2db.updateJob(req.params
   (req) => ({ action: 'job.update', summary: `Edited job #${req.params.id} (${Object.keys(req.body).join(', ')})`, entity_type: 'job', entity_id: Number(req.params.id) })));
 router.patch('/api/v2/jobs/:id/permits',      t(req => v2db.updateJobPermits(req.params.id, req.body),
   (req) => ({ action: 'job.update_permits', summary: `Edited permits on job #${req.params.id} (${Object.keys(req.body).join(', ')})`, entity_type: 'job', entity_id: Number(req.params.id) })));
+// Company-wide Permits view — every job needing a permit, grouped by status.
+router.get('/api/v2/permits',                 async (req, res) => { try { res.json(await v2db.getPermitsOverview()); } catch (e) { res.status(500).json({ error: e.message }); } });
 router.post('/api/v2/jobs/:id/change-orders', t(req => v2db.createChangeOrder(req.params.id, req.body, req.session.userId),
   async (req, r) => ({ action: 'co.create', summary: `Created CO ${await v2db.coLabel(r.co_id)} on job #${req.params.id}`, entity_type: 'change_order', entity_id: r.co_id })));
 

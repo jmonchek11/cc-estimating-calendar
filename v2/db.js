@@ -307,10 +307,11 @@ async function getProjectDetail(projectId) {
     pm: tm[b.pm_id] || null,
     owner: tm[b.owner_id] || null,
     source: b.source,
+    who_will_bid: b.who_will_bid || null,
     sub_estimators: (b.sub_estimators || []).map(s => ({ ...(tm[s.estimator_id] || {}), scope: s.scope })),
     customers: bidCustomers.filter(bc => bc.bid_id === b._id).map(bc => {
       const co = companyById[bc.company_id]; if (!co) return null;
-      return { ...co, bid_customer_id: bc._id, contacts: (bc.contact_ids || []).map(id => contactById[id]).filter(Boolean) };
+      return { ...co, bid_customer_id: bc._id, contacts: (bc.contact_ids || []).map(id => contactById[id]).filter(Boolean), portal_url: bc.portal_url || null };
     }).filter(Boolean),
     start_date: b.start_date,
     date_received: b.date_received,
@@ -786,9 +787,14 @@ async function updateSettingsV2(data) {
 // stage (real substance — a contact, plans, worth reviewing daily). Same
 // creation path for both since the fields captured are identical; only the
 // starting stage differs.
-async function createOpportunity({ project_id, project_name, notes, description, location, size_bucket, type_of_work, due_date, due_time, rfi_due_date, rfi_due_time, owner_id, source, cm_portal_url, company_ids, new_companies, contact_ids_by_company, new_contacts_by_company, created_by, stage }) {
+async function createOpportunity({ project_id, project_name, notes, description, location, size_bucket, type_of_work, due_date, due_time, rfi_due_date, rfi_due_time, owner_id, source, cm_portal_url, who_will_bid, company_ids, new_companies, contact_ids_by_company, new_contacts_by_company, created_by, stage }) {
   const M = getModels();
   const startStage = stage === 'lead' ? 'lead' : 'opportunity';
+  // Required for a real opportunity (per Connor — bids were getting
+  // assigned to the wrong people because this only ever lived as an
+  // easily-missed note); a bare lead is still fine without it, same as
+  // location/type_of_work/description below.
+  if (startStage !== 'lead') require_({ who_will_bid }, ['who_will_bid']);
   let pid = project_id ? Number(project_id) : null;
   let isNewProject = false;
   if (!pid) {
@@ -813,7 +819,7 @@ async function createOpportunity({ project_id, project_name, notes, description,
   }
   const bidId = await nextId('bids');
   const ownerId = owner_id ? Number(owner_id) : (created_by ? Number(created_by) : null);
-  await M.Bid.create({ _id: bidId, project_id: pid, stage: startStage, notes: notes || null, due_date: due_date || null, due_time: due_time || null, rfi_due_date: rfi_due_date || null, rfi_due_time: rfi_due_time || null, owner_id: ownerId, source: source || null, cm_portal_url: cm_portal_url || null });
+  await M.Bid.create({ _id: bidId, project_id: pid, stage: startStage, notes: notes || null, due_date: due_date || null, due_time: due_time || null, rfi_due_date: rfi_due_date || null, rfi_due_time: rfi_due_time || null, owner_id: ownerId, source: source || null, cm_portal_url: cm_portal_url || null, who_will_bid: who_will_bid || null });
 
   const { newContacts } = await attachCustomersAndContacts(bidId, { company_ids, new_companies, contact_ids_by_company, new_contacts_by_company });
 
@@ -844,7 +850,7 @@ async function promoteLead(id, data, actorId) {
   const M = getModels();
   const bid = await loadBid(id);
   if (bid.stage !== 'lead') throw new Error(`Cannot promote from stage '${bid.stage}' — only leads can be promoted to an opportunity`);
-  require_(data, ['location', 'type_of_work', 'description', 'due_date', 'notes', 'source', 'owner_id']);
+  require_(data, ['location', 'type_of_work', 'description', 'due_date', 'notes', 'source', 'owner_id', 'who_will_bid']);
 
   await M.Project.updateOne({ _id: bid.project_id }, { $set: {
     description: data.description, location: data.location,
@@ -854,7 +860,7 @@ async function promoteLead(id, data, actorId) {
     stage: 'opportunity', updated_at: ts(),
     notes: data.notes, due_date: data.due_date, due_time: data.due_time || null,
     rfi_due_date: data.rfi_due_date || null, rfi_due_time: data.rfi_due_time || null,
-    owner_id: Number(data.owner_id), source: data.source,
+    owner_id: Number(data.owner_id), source: data.source, who_will_bid: data.who_will_bid,
   } });
 
   const { newContacts } = await attachCustomersAndContacts(bid._id, data);
@@ -1250,6 +1256,14 @@ async function removeBidCustomerContact(bidCustomerId, contactId) {
   await M.BidCustomer.updateOne({ _id: Number(bidCustomerId) }, { $pull: { contact_ids: Number(contactId) } });
   return { ok: true };
 }
+// Per-customer CM/GC bid portal link (2026-09-30) — see BidCustomerSchema's
+// portal_url for why this replaced the old single bid-level field.
+async function setBidCustomerPortalUrl(bidCustomerId, url) {
+  const M = getModels();
+  const r = await M.BidCustomer.updateOne({ _id: Number(bidCustomerId) }, { $set: { portal_url: (url || '').trim() || null } });
+  if (!r.matchedCount) throw new Error('Bid customer row not found');
+  return { ok: true };
+}
 
 // Add one or more customers to a bid's roster — independent of any submission.
 // Accepts existing company_ids and/or new_companies (names to find-or-create).
@@ -1304,6 +1318,7 @@ async function updateOpportunity(id, data) {
   if ('salesperson_id' in data) upd.salesperson_id = data.salesperson_id ? Number(data.salesperson_id) : null;
   if ('apm_id' in data) upd.apm_id = data.apm_id ? Number(data.apm_id) : null;
   if ('pm_id' in data) upd.pm_id = data.pm_id ? Number(data.pm_id) : null;
+  if ('who_will_bid' in data) upd.who_will_bid = data.who_will_bid || null;
   await M.Bid.updateOne({ _id: bid._id }, { $set: upd });
   return { bid_id: bid._id };
 }
@@ -2612,23 +2627,45 @@ async function resolveOooParents(M, rows) {
     return null;
   };
 }
+function fmtOooRow(o, tm, resolveParent) {
+  return {
+    id: o._id, team_member_id: o.team_member_id,
+    name: tm[o.team_member_id]?.name || 'Unknown', initials: tm[o.team_member_id]?.initials || '?',
+    date: o.date, all_day: o.all_day, time: o.time, reason: o.reason, created_by: o.created_by,
+    checked_in_at: o.checked_in_at || null,
+    parent: o.parent_type ? resolveParent(o.parent_type, o.parent_id) : null,
+  };
+}
 // Upcoming = today onward, not just today — logging a few days ahead (e.g.
 // a dentist appointment next Tuesday) is a real use case, same as bid
-// walk-throughs already support future dates.
+// walk-throughs already support future dates. Checked-in entries are
+// excluded — this list is "who's still out," not a history (see
+// getOutOfOfficeHistory for that, on the dedicated Out of Office page).
 async function getOutOfOfficeUpcoming() {
   const M = getModels();
   const [rows, members] = await Promise.all([
-    M.OutOfOffice.find({ date: { $gte: today() } }).sort({ date: 1, time: 1 }).lean(),
+    M.OutOfOffice.find({ date: { $gte: today() }, checked_in_at: null }).sort({ date: 1, time: 1 }).lean(),
     M.TeamMember.find().lean(),
   ]);
   const tm = {}; members.forEach(m => tm[m._id] = m);
   const resolveParent = await resolveOooParents(M, rows);
-  return rows.map(o => ({
-    id: o._id, team_member_id: o.team_member_id,
-    name: tm[o.team_member_id]?.name || 'Unknown', initials: tm[o.team_member_id]?.initials || '?',
-    date: o.date, all_day: o.all_day, time: o.time, reason: o.reason, created_by: o.created_by,
-    parent: o.parent_type ? resolveParent(o.parent_type, o.parent_id) : null,
-  }));
+  return rows.map(o => fmtOooRow(o, tm, resolveParent));
+}
+// Full history for the dedicated Out of Office page (2026-09-30) — everyone
+// currently out (any date, not checked in) plus the last 60 days of
+// checked-in/past entries, newest first. Not paged — this is a low-volume
+// log (one team's worth of entries), not something that needs it.
+async function getOutOfOfficeHistory() {
+  const M = getModels();
+  const since = new Date(); since.setDate(since.getDate() - 60);
+  const sinceStr = since.toISOString().slice(0, 10);
+  const [rows, members] = await Promise.all([
+    M.OutOfOffice.find({ $or: [{ checked_in_at: null }, { date: { $gte: sinceStr } }] }).sort({ date: -1, _id: -1 }).lean(),
+    M.TeamMember.find().lean(),
+  ]);
+  const tm = {}; members.forEach(m => tm[m._id] = m);
+  const resolveParent = await resolveOooParents(M, rows);
+  return rows.map(o => fmtOooRow(o, tm, resolveParent));
 }
 async function deleteOutOfOffice(id, actorId, isAdmin) {
   const M = getModels();
@@ -2641,6 +2678,20 @@ async function deleteOutOfOffice(id, actorId, isAdmin) {
     throw new Error('You can only remove an entry you logged or that is about you');
   }
   await M.OutOfOffice.deleteOne({ _id: Number(id) });
+  return { ok: true };
+}
+// Check back in — "I'm back," a real completion kept for history, distinct
+// from delete ("this entry shouldn't have existed"). Same permission
+// boundary as delete.
+async function checkInOutOfOffice(id, actorId, isAdmin) {
+  const M = getModels();
+  const row = await M.OutOfOffice.findById(Number(id)).lean();
+  if (!row) throw new Error('Not found');
+  if (!isAdmin && row.created_by !== actorId && row.team_member_id !== actorId) {
+    throw new Error('You can only check in an entry you logged or that is about you');
+  }
+  if (row.checked_in_at) return { ok: true };
+  await M.OutOfOffice.updateOne({ _id: Number(id) }, { $set: { checked_in_at: new Date().toISOString() } });
   return { ok: true };
 }
 
@@ -2775,6 +2826,38 @@ async function updateJobPermits(id, data) {
   }
   await M.Job.updateOne({ _id: jobId }, { $set: upd });
   return { job_id: jobId };
+}
+
+// Company-wide Permits view (2026-09-30, per Joe) — every job that needs a
+// permit, grouped by where it stands: not yet applied, applied and waiting,
+// approved/current, or closed out (COA received). Jobs never marked as
+// needing a permit (false or still TBD/null) have nothing to track here, so
+// they're excluded rather than cluttering the list.
+async function getPermitsOverview() {
+  const M = getModels();
+  const [jobs, projects, companies] = await Promise.all([
+    M.Job.find({ needs_permit: true }).lean(),
+    M.Project.find().lean(),
+    M.Company.find().lean(),
+  ]);
+  const pName = {}; projects.forEach(p => pName[p._id] = p.name);
+  const coName = {}; companies.forEach(c => coName[c._id] = c.name);
+  const rows = jobs.map(j => {
+    const status = j.permit_date_coa_received ? 'closed'
+      : j.permit_date_approved ? 'approved'
+      : j.permit_date_applied ? 'applied'
+      : 'not_applied';
+    return {
+      id: j._id, job_number: j.job_number, project_id: j.project_id, project_name: pName[j.project_id] || '—',
+      awarded_company: j.awarded_company_id ? (coName[j.awarded_company_id] || null) : null,
+      needs_rough_in_permit: j.needs_rough_in_permit, needs_accelerated_permit: j.needs_accelerated_permit,
+      permit_date_applied: j.permit_date_applied, permit_date_approved: j.permit_date_approved, permit_date_coa_received: j.permit_date_coa_received,
+      status,
+    };
+  }).sort((a, b) => (a.job_number || '').localeCompare(b.job_number || ''));
+  const counts = { not_applied: 0, applied: 0, approved: 0, closed: 0 };
+  rows.forEach(r => counts[r.status]++);
+  return { rows, counts };
 }
 
 // ── Change Orders ─────────────────────────────────────────────────────────────
@@ -3179,7 +3262,7 @@ async function getBidList(stage) {
       type_of_work: pType[b.project_id] || null, project_on_hold: !!pOnHold[b.project_id],
       bid_number: b.bid_number, stage: b.stage, drawing_stage: b.drawing_stage,
       estimator: tm[b.estimator_id] || null, salesperson: tm[b.salesperson_id] || null, apm: tm[b.apm_id] || null,
-      owner: tm[b.owner_id] || null, source: b.source,
+      owner: tm[b.owner_id] || null, source: b.source, who_will_bid: b.who_will_bid || null,
       sub_estimators: (b.sub_estimators || []).map(s => ({ ...(tm[s.estimator_id] || {}), scope: s.scope })),
       customers: [...new Set((custByBid[b._id] || []).filter(Boolean))],
       date_received: b.date_received, due_date: b.due_date, due_time: b.due_time,
@@ -4514,7 +4597,7 @@ async function getTvData() {
     M.Company.find().lean(),
     M.BidCustomer.find().lean(),
     M.TeamMember.find().lean(),
-    M.OutOfOffice.find({ date: todayStr0 }).lean(),
+    M.OutOfOffice.find({ date: todayStr0, checked_in_at: null }).lean(),
   ]);
   const pName = {}; const pOnHold = {};
   projects.forEach(p => { pName[p._id] = p.name; pOnHold[p._id] = !!p.on_hold; });
@@ -4879,16 +4962,16 @@ module.exports = {
   getGateTasksForBid, addGateTaskUpdate,
   getContacts, getContactDetail, createContact, updateContact, deleteContact, getContactBids, getCompanyBids,
   getCompanyCommunications, getContactCommunications, getAllCommunications,
-  addBidCustomerContact, removeBidCustomerContact,
+  addBidCustomerContact, removeBidCustomerContact, setBidCustomerPortalUrl,
   awardSubmission, notAwardSubmission, revertAward, revertNotAwarded, closeBid, approveToBid, unapproveToBid, logFollowupV2, updateFollowup,
-  createLegacyJob, updateJob, updateJobPermits,
+  createLegacyJob, updateJob, updateJobPermits, getPermitsOverview,
   createChangeOrder, submitCO, approveCO, notApproveCO, voidCO, reopenCO, reviseCO,
   createCoRequest, approveCoRequest, unapproveCoRequest, startCoRequest,
   _norm, resolveCompanyByName, ensureBidCustomer, teamMap,
   addReminder, dismissReminder, deleteReminder, getRemindersFor, getDueReminders, markReminderEmailed, setProjectOnHold,
   addWalkthrough, updateWalkthrough, removeWalkthrough, getBidsNeedingWalkthroughReminder, markWalkthroughReminderSent, setWalkthroughRsvp,
   addNote, updateNote, deleteNote, getNotesFor,
-  logOutOfOffice, getOutOfOfficeUpcoming, deleteOutOfOffice,
+  logOutOfOffice, getOutOfOfficeUpcoming, getOutOfOfficeHistory, deleteOutOfOffice, checkInOutOfOffice,
   getDigest,
   getTeamV2, createTeamMemberV2, updateTeamMemberV2, updateMyNotificationPrefs, updateSettingsV2, getSettings,
   removeBidCustomer, createCompanyV2, deleteBid, addSubEstimator, removeSubEstimator,

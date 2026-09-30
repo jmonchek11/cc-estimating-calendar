@@ -86,6 +86,10 @@ const BidSchema = new mongoose.Schema({
   start_date:     { type: String, default: null },
   owner_id:       { type: Number, default: null },               // FK → TeamMember — who added this opportunity, for tracking/follow-up
   source:         { type: String, default: null },                // where it came from (iSqFt, BuildingConnected, referral, email invite location, etc.)
+  // Required on a real opportunity (2026-09-30, per Connor) — used to live
+  // only as a note in the opportunity's free-text notes, which kept getting
+  // missed and led to bids being assigned to the wrong department.
+  who_will_bid:   { type: String, enum: ['estimating', 'project_management'], default: null },
   rfi_due_date:   { type: String, default: null },               // official RFI (Request for Information) cutoff, when a project has one — independent of due_date/stage
   rfi_due_time:   { type: String, default: null },               // "HH:MM", 24-hour — optional
   folder_url:     { type: String, default: null },               // link to THIS bid's own OneDrive folder — a new folder is created per bid (not per project); at award, the team renames it from "bid# - bid name" to "job# - job name" but the link itself stays valid
@@ -287,6 +291,11 @@ const BidCustomerSchema = new mongoose.Schema({
   bid_id:      { type: Number, required: true },                 // FK → Bid
   company_id:  { type: Number, required: true },                 // FK → Company
   contact_ids: { type: [Number], default: [] },                  // FK → Contact (at this company, for this bid)
+  // This customer's own CM/GC bid portal link (2026-09-30) — moved here from
+  // a single bid-level field (Bid.cm_portal_url, kept for old data/backward
+  // compat) so a project with several GCs, each with their own portal, can
+  // have a link per customer instead of only ever one for the whole bid.
+  portal_url:  { type: String, default: null },
 }, opts);
 // One customer per bid — without this, two near-simultaneous "add this
 // customer" calls (e.g. a double form-submit) can each see the row as not
@@ -459,6 +468,10 @@ const OutOfOfficeSchema = new mongoose.Schema({
   parent_id:      { type: Number, default: null },
   created_by:     { type: Number, default: null },     // FK → TeamMember — who logged it (may differ from team_member_id)
   created_at:     { type: String, default: ts },
+  // Check back in (2026-09-30) — distinct from deleting: this is "I'm back"
+  // (a real completion, kept for history/the Out of Office page), not "this
+  // was never right" (delete). null = still out.
+  checked_in_at:  { type: String, default: null },
 }, opts);
 OutOfOfficeSchema.index({ date: 1 });
 

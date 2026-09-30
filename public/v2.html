@@ -223,10 +223,12 @@
   /* Log-a-call FAB — shown at every width (not just mobile), so logging a
      call is a one-click reach whether or not you're already looking at the
      relevant bid. Sits above the bottom tab bar on mobile (see the media
-     query below); a plain bottom-right corner on desktop. */
+     query below); bottom-LEFT corner (not right) — per Carrie, the
+     bottom-right position sat directly over each bid card's "⋯" actions
+     menu (.bc-ft is right-aligned), making that menu hard to tap. */
   #mobile-fab {
     display: flex; align-items: center; justify-content: center; gap: 8px;
-    position: fixed; right: 20px; bottom: 24px;
+    position: fixed; left: 20px; bottom: 24px;
     height: 46px; padding: 0 18px 0 16px; border-radius: 23px; border: none; z-index: 55;
     background: var(--primary); color: #fff; box-shadow: 0 8px 20px rgba(37,99,235,.4), 0 2px 6px rgba(37,99,235,.3);
     cursor: pointer; -webkit-tap-highlight-color: transparent;
@@ -242,7 +244,7 @@
      Amber/orange so it doesn't get mistaken for the call button. */
   #ooo-fab {
     display: flex; align-items: center; justify-content: center; gap: 8px;
-    position: fixed; right: 20px; bottom: 80px;
+    position: fixed; left: 20px; bottom: 80px;
     height: 46px; padding: 0 18px 0 16px; border-radius: 23px; border: none; z-index: 55;
     background: #d97706; color: #fff; box-shadow: 0 8px 20px rgba(217,119,6,.4), 0 2px 6px rgba(217,119,6,.3);
     cursor: pointer; -webkit-tap-highlight-color: transparent;
@@ -310,8 +312,8 @@
 
     /* Sits above the bottom tab bar here — the always-on base rule above
        covers everything else (color, shape, shadow). */
-    #mobile-fab { right: 16px; bottom: calc(80px + env(safe-area-inset-bottom)); }
-    #ooo-fab { right: 16px; bottom: calc(136px + env(safe-area-inset-bottom)); }
+    #mobile-fab { left: 16px; bottom: calc(80px + env(safe-area-inset-bottom)); }
+    #ooo-fab { left: 16px; bottom: calc(136px + env(safe-area-inset-bottom)); }
 
     /* Forms/dialogs become bottom sheets on mobile — a native-feeling
        pattern instead of a small centered dialog with awkward margins. */
@@ -421,9 +423,11 @@
       <a class="nav-item" data-page="not-approved-cos" href="#not-approved-cos" onclick="navigate('not-approved-cos');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg></span> Not Approved Change Orders</a>
       <div class="nav-section-label">PROJECTS</div>
       <a class="nav-item" data-page="projects" href="#projects" onclick="navigate('projects');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg></span> Projects</a>
+      <a class="nav-item" data-page="permits" href="#permits" onclick="navigate('permits');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-4"/><path d="M9 9v.01M9 12v.01M9 15v.01M9 18v.01"/></svg></span> Permits</a>
       <div class="nav-section-label">REPORTS</div>
       <a class="nav-item" data-page="reports" href="#reports" onclick="navigate('reports');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></span> Reports</a>
       <div class="nav-section-label">PEOPLE</div>
+      <a class="nav-item" data-page="out-of-office" href="#out-of-office" onclick="navigate('out-of-office');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></span> Out of Office</a>
       <a class="nav-item" data-page="contacts" href="#contacts" onclick="navigate('contacts');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span> Contacts</a>
       <a class="nav-item" data-page="vendors" href="#vendors" onclick="navigate('vendors');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg></span> Vendors</a>
       <div class="nav-section-label">DATA</div>
@@ -503,6 +507,8 @@ const PAGE_ICONS = {
   communications: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
   settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
   search: '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
+  permits: '<path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-4"/><path d="M9 9v.01M9 12v.01M9 15v.01M9 18v.01"/>',
+  'out-of-office': '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>',
 };
 function pageIcon(key, size) {
   const s = size || 22;
@@ -744,7 +750,7 @@ const NAV_PAGE_TITLES = {
   'active-cos': 'Active Change Orders', 'submitted-cos': 'Change Orders to Follow Up On',
   'approved-cos': 'Approved Change Orders', 'not-approved-cos': 'Not Approved Change Orders',
   search: 'Search', contacts: 'Contacts', vendors: 'Vendors', reports: 'Reports', digest: 'Weekly Digest',
-  calendar: 'Calendar', settings: 'Settings',
+  calendar: 'Calendar', settings: 'Settings', permits: 'Permits', 'out-of-office': 'Out of Office',
 };
 // Parses the current URL hash and renders whatever it points to — used on
 // initial load (bootstrap) and on browser back/forward (popstate), so both
@@ -829,6 +835,8 @@ function navigate(page) {
   if (page === 'digest') { VIEW = { name: 'digest' }; return renderDigest(); }
   if (page === 'calendar') { VIEW = { name: 'calendar' }; return renderCalendar(); }
   if (page === 'settings') { VIEW = { name: 'settings' }; return renderSettings(); }
+  if (page === 'permits') { VIEW = { name: 'permits' }; return renderPermits(); }
+  if (page === 'out-of-office') { VIEW = { name: 'out-of-office' }; return renderOutOfOfficePage(); }
   VIEW = { name: 'projects' }; return load();
 }
 
@@ -850,6 +858,8 @@ async function rerenderView() {
     case 'health':    return showHealth();
     case 'history':   return renderHistory();
     case 'communications': return renderCommunications();
+    case 'permits':   return renderPermits();
+    case 'out-of-office': return renderOutOfOfficePage();
   }
 }
 
@@ -2660,10 +2670,18 @@ function customerRowHtml(b, cust, dead) {
 
   const subLine = current ? `${SUB_TYPE[current.submission_type] || esc(current.submission_type)} · ${fmtD(current.date_submitted)}${current.approved_by ? ` · approved by ${esc(current.approved_by)}` : ''}${subMetaExtra}` : '';
 
+  // This customer's own CM/GC bid portal link — moved here from a single
+  // bid-level field (2026-09-30) since a project with several GCs each has
+  // its own portal to bid through.
+  const portalLine = cust.portal_url
+    ? `<div class="bc-co-sub"><a href="${esc(cust.portal_url)}" target="_blank" rel="noopener" style="color:#2563eb">🔗 Bid Portal</a> <a href="#" onclick="event.preventDefault();actSetCustomerPortalUrl(${cust.bid_customer_id},'${escJs(cust.portal_url)}','${escJs(cust.name)}')" style="font-size:11px">✏️</a></div>`
+    : `<div class="bc-co-sub"><a href="#" onclick="event.preventDefault();actSetCustomerPortalUrl(${cust.bid_customer_id},'','${escJs(cust.name)}')" style="font-size:11px;color:#2563eb">+ Add bid portal link</a></div>`;
+
   return `<div class="bc-row"${dead ? ' style="opacity:.55"' : ''}>
     <div class="bc-row-main">
       <div class="bc-co-name" onclick="openCompanyProfile(${cust.id})">${esc(cust.name)}${outcomeBadge}</div>
       ${subLine ? `<div class="bc-co-sub">${subLine}${current && canEditSub ? ` <a href="#" onclick="event.preventDefault();actEditSubmission(${current.id})" style="font-size:11px">✏️</a>` : ''}</div>` : ''}
+      ${portalLine}
       ${bidCustomerContactsHtml(cust)}
       ${historicalHtml}
       ${followupsHtml}
@@ -2831,6 +2849,8 @@ function bidNode(b, proj) {
   const metaBits = [];
   if (!b.customers.length) metaBits.push('<span style="color:#dc2626">no customer</span>');
   if (b.owner) metaBits.push(`Added by ${ini(b.owner)}`);
+  if (b.who_will_bid) metaBits.push(`<span class="badge" style="background:#eff6ff;color:#1e40af">${esc(WHO_WILL_BID_LABEL[b.who_will_bid] || b.who_will_bid)}</span>`);
+  else if (['opportunity', 'lead'].includes(b.stage)) metaBits.push(`<span style="color:#b45309">Who will bid? — not set</span>`);
   if (b.source) metaBits.push(`via ${esc(b.source)}`);
   if (b.cm_portal_url) metaBits.push(`<a href="${esc(b.cm_portal_url)}" target="_blank" rel="noopener" style="color:#2563eb">🔗 CM Portal</a>`);
   if (b.awarded_company) metaBits.push(`Won by <strong style="color:#166534">${esc(b.awarded_company.name)}</strong> ${fmtD(b.award_date)}`);
@@ -3596,6 +3616,11 @@ const PROJECT_SIZE_BUCKETS = [
 // Fixed dropdowns for the New Opportunity intake form, per the estimating
 // team's request — Source used to be freeform text; Type of Work is new.
 const OPPORTUNITY_SOURCE_OPTIONS = ['CM Platform', 'Portal', 'Email', 'Phone Call', 'Interaction'].map(v => ({ value: v, label: v }));
+// Who will actually bid this — required on a real opportunity (2026-09-30,
+// per Connor: used to be a note buried in free text, which kept getting
+// missed and bids got assigned to the wrong department).
+const WHO_WILL_BID_OPTIONS = [{ value: 'estimating', label: 'Estimating' }, { value: 'project_management', label: 'Project Management' }];
+const WHO_WILL_BID_LABEL = { estimating: 'Estimating', project_management: 'Project Management' };
 const TYPE_OF_WORK_OPTIONS = [
   'Ground-Up Construction', 'Core & Shell', 'Fit-Out/Tenant Improvement', 'Renovation/Remodel',
   'Gut Renovation', 'Adaptive Reuse', 'Build-to-Suit', 'Spec Build', 'Phased-Occupied Renovation', 'Design-Build',
@@ -3807,6 +3832,7 @@ async function actNewOpportunity() {
       newKey: 'project_name', options: projectOpts(), placeholder: 'Type project name…',
       maxLength: 30, hint: 'Max 30 characters (Foundation limit). Suggested format: "Building name/# - Type of work" — e.g. "Merck B53 Controls" (customer isn\'t included — it\'s tracked separately).' },
     { id: 'owner_id', label: 'Who Added the Opportunity', type: 'select', required: true, options: teamOpts(), value: CURRENT_USER?.id },
+    { id: 'who_will_bid', label: 'Who Will Bid?', type: 'select', required: true, options: WHO_WILL_BID_OPTIONS },
     { id: 'source', label: 'Source', type: 'select', required: true, options: OPPORTUNITY_SOURCE_OPTIONS },
     { id: 'due_date', label: 'Due Date', type: 'date', required: true },
     { id: 'due_time', label: 'Due Time (optional)', type: 'time' },
@@ -3820,7 +3846,10 @@ async function actNewOpportunity() {
     { id: 'notes', label: 'Additional Notes — why are we considering this?', type: 'textarea', required: true, placeholder: 'Why are we considering this?' },
     { id: 'rfi_due_date', label: 'RFI Due Date (not required)', type: 'date' },
     { id: 'rfi_due_time', label: 'RFI Due Time (optional)', type: 'time' },
-    { id: 'cm_portal_url', label: 'CM/GC Bid Portal Link (not required)', type: 'text', placeholder: 'https://…', hint: 'The construction manager\'s own bidding site, if the invite included one — click straight through for bid/no-bid review.' },
+    // CM/GC Bid Portal Link moved to the Customers section (per-customer,
+    // 2026-09-30) — a project with several GCs each has its own portal, so
+    // one bid-level link here wasn't enough. Set it per customer once
+    // they're added, from the bid's Customers list.
   ], data => {
     const contact_ids_by_company = {};
     const new_contacts_by_company = {};
@@ -3963,6 +3992,7 @@ async function actPromoteLead(bidId) {
   showForm('✓ Promote to Opportunity', [
     { id: 'source', label: 'Source', type: 'select', required: true, value: sourceValue, options: OPPORTUNITY_SOURCE_OPTIONS },
     { id: 'owner_id', label: 'Opportunity Owner', type: 'select', required: true, options: teamOpts(), value: bidDetail?.owner?.id },
+    { id: 'who_will_bid', label: 'Who Will Bid?', type: 'select', required: true, options: WHO_WILL_BID_OPTIONS, value: bidDetail?.who_will_bid },
     { id: 'due_date', label: 'Due Date', type: 'date', required: true, value: bidDetail?.due_date },
     { id: 'due_time', label: 'Due Time (optional)', type: 'time', value: bidDetail?.due_time },
     { id: 'location', label: 'Job Location', type: 'text', required: true, value: proj?.location, placeholder: 'City, State or site address…' },
@@ -4786,6 +4816,7 @@ function actEditOpportunityDetails(bidId) {
     { id: 'due_date', label: 'Due Date (decision expected)', type: 'date', value: b.due_date },
     { id: 'due_time', label: 'Due Time (optional)', type: 'time', value: b.due_time },
     { id: 'owner_id', label: 'Opportunity Owner', type: 'select', emptyLabel: 'TBD', options: teamOpts(), value: b.owner?.id },
+    { id: 'who_will_bid', label: 'Who Will Bid?', type: 'select', emptyLabel: 'TBD', options: WHO_WILL_BID_OPTIONS, value: b.who_will_bid },
     { id: 'source', label: 'Source (where did this come from?)', type: 'text', value: b.source, placeholder: 'iSqFt, BuildingConnected, email invite, referral, phone call…' },
     { id: 'estimator_id', label: 'Estimator (if known)', type: 'select', emptyLabel: 'TBD', options: teamOpts(['estimator', 'sales']), value: b.estimator?.id },
     { id: 'salesperson_id', label: 'Salesperson', type: 'select', emptyLabel: 'TBD', options: teamOpts(['sales']), value: b.salesperson?.id },
@@ -5199,6 +5230,57 @@ async function renderCommunications() {
   main.innerHTML = `
     <div class="page-header"><div><div class="page-title">${pageIcon('communications')} Communications</div><div class="page-subtitle">${comms.length} most recent — every follow-up and check-in, across all customers</div></div></div>
     <div class="card" style="padding:6px 16px">${communicationsTimelineHtml(comms, { showCompany: true })}</div>`;
+}
+
+// ── Permits (2026-09-30) — every job that needs a permit, grouped by where
+// it stands. Read-only overview; the actual editing stays on the job card
+// (permitsSectionHtml/actEditPermitDates) where the rest of that job's
+// context already lives — this page exists so Pat's whole permit queue is
+// visible in one place instead of having to open each job to check.
+const PERMIT_STATUS_META = {
+  not_applied: { label: 'Needs Permit — Not Yet Applied', color: '#dc2626' },
+  applied:     { label: 'Applied — Awaiting Approval',     color: '#d97706' },
+  approved:    { label: 'Approved / Current',              color: '#2563eb' },
+  closed:      { label: 'Closed (COA Received)',           color: '#16a34a' },
+};
+async function renderPermits() {
+  setActiveNav('permits');
+  const main = document.getElementById('main');
+  main.innerHTML = '<div style="padding:30px;color:var(--text-muted)">Loading…</div>';
+  let data;
+  try { data = await api('GET', '/api/v2/permits'); }
+  catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
+
+  const { rows, counts } = data;
+  const statCard = (key) => {
+    const m = PERMIT_STATUS_META[key];
+    return `<div style="flex:1;min-width:120px;border:1px solid var(--border);border-radius:8px;padding:10px 14px">
+      <div style="font-size:22px;font-weight:800;color:${m.color}">${counts[key]}</div>
+      <div style="font-size:11.5px;color:var(--text-muted);font-weight:600">${esc(m.label)}</div>
+    </div>`;
+  };
+  const rowHtml = (r) => {
+    const m = PERMIT_STATUS_META[r.status];
+    return `<div style="display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border);cursor:pointer" onclick="renderProjectPage(${r.project_id})">
+      <span class="badge" style="background:${m.color}1a;color:${m.color};flex-shrink:0">${esc(m.label)}</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:700;font-size:13px">${r.job_number ? `Job ${esc(r.job_number)}` : '<span style="color:#dc2626">Job # pending</span>'} — ${esc(r.project_name)}</div>
+        <div style="font-size:11.5px;color:var(--text-muted);margin-top:1px">${r.awarded_company ? esc(r.awarded_company) + ' · ' : ''}Rough-In: ${permitYesNo(r.needs_rough_in_permit)} · Accelerated: ${permitYesNo(r.needs_accelerated_permit)}</div>
+      </div>
+      <div style="text-align:right;flex-shrink:0;font-size:11.5px;color:var(--text-muted)">
+        ${r.permit_date_applied ? `Applied ${fmtD(r.permit_date_applied)}` : ''}
+        ${r.permit_date_approved ? `<br>Approved ${fmtD(r.permit_date_approved)}` : ''}
+        ${r.permit_date_coa_received ? `<br>COA ${fmtD(r.permit_date_coa_received)}` : ''}
+      </div>
+    </div>`;
+  };
+
+  main.innerHTML = `
+    <div class="page-header"><div><div class="page-title">${pageIcon('permits')} Permits</div><div class="page-subtitle">${rows.length} job${rows.length !== 1 ? 's' : ''} needing a permit, across every stage</div></div></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin:0 16px 16px">${Object.keys(PERMIT_STATUS_META).map(statCard).join('')}</div>
+    <div class="card" style="padding:0">
+      ${rows.length ? rows.map(rowHtml).join('') : '<div style="padding:30px;text-align:center;color:var(--text-muted);font-size:13px">No jobs currently need a permit.</div>'}
+    </div>`;
 }
 
 async function showHealth() {
@@ -6014,7 +6096,13 @@ function renderReportsBody(data) {
       },
       options: {
         responsive: true, maintainAspectRatio: false, onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
-        plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } } },
+        plugins: {
+          legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
+          // Was showing the raw underlying number with no currency
+          // formatting at all — per Joe McCreesh, every value on this chart
+          // is a dollar amount.
+          tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${fmt$(ctx.raw)}` } },
+        },
         scales: { x: { stacked: true }, y: { stacked: true, ticks: { callback: v => fmt$(v) } } },
         onClick: (evt, els, chart) => {
           if (!els.length) return;
@@ -6035,7 +6123,10 @@ function renderReportsBody(data) {
       data: { labels: top.map(c => c.name), datasets: [{ label: metricLabel, data: top.map(c => c[metricFor] ?? 0), backgroundColor: '#16a34a' }] },
       options: {
         indexAxis: 'y', responsive: true, maintainAspectRatio: false, onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
-        plugins: { legend: { display: false } },
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: ctx => metricFor === 'winRate' ? `${metricLabel}: ${ctx.raw}%` : metricFor === 'submittedCount' ? `${metricLabel}: ${ctx.raw}` : `${metricLabel}: ${fmt$(ctx.raw)}` } },
+        },
         scales: { x: { ticks: { callback: v => metricFor === 'winRate' ? v + '%' : (metricFor === 'submittedCount' ? v : fmt$(v)) } } },
         onClick: (evt, els) => { if (!els.length) return; openReportsCustomerDrilldown(top[els[0].index]); },
       },
@@ -6511,6 +6602,12 @@ async function actRemoveBidCustomer(bidCustomerId, name) {
   try { await api('DELETE', `/api/v2/bid-customers/${bidCustomerId}`); await refresh(); }
   catch (e) { alert('Failed: ' + e.message); }
 }
+function actSetCustomerPortalUrl(bidCustomerId, currentUrl, companyName) {
+  showForm(`🔗 Bid Portal Link — ${esc(companyName)}`, [
+    { id: 'portal_url', label: 'Portal URL', type: 'text', value: currentUrl, placeholder: 'https://…',
+      hint: 'This customer\'s own bidding site, if the invite included one — leave blank to remove.' },
+  ], data => api('PATCH', `/api/v2/bid-customers/${bidCustomerId}/portal-url`, data), 'Save');
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // IMPORT BID FROM JIS (Job Information Sheet) — upload → preview → apply.
@@ -6955,7 +7052,10 @@ function renderOooModal(upcoming) {
         <button class="v2-btn blue" id="ooo-submit" onclick="submitOutOfOffice()">Log It</button>
       </div>
       <div style="padding:14px 20px 18px;border-top:1px solid var(--border)">
-        <div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px">Currently Logged</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted)">Currently Logged</div>
+          <a href="#" onclick="event.preventDefault();document.getElementById('v2-form-overlay').remove();navigate('out-of-office')" style="font-size:11.5px">See full history →</a>
+        </div>
         <div id="ooo-list">${renderOooList(upcoming)}</div>
       </div>
     </div>`;
@@ -6970,6 +7070,7 @@ function renderOooList(upcoming) {
         <div style="font-size:13px;font-weight:600">${esc(o.name)} <span style="font-weight:500;color:var(--text-muted)">— ${esc(o.reason)}</span></div>
         <div style="font-size:11px;color:var(--text-muted)">${fmtOooDateLabel(o.date)}${o.all_day ? ' · All day' : (o.time ? ' · ' + o.time : '')}${o.parent ? ` · ${esc(o.parent.label)}${o.parent.project_name ? ' — ' + esc(o.parent.project_name) : ''}` : ''}</div>
       </div>
+      <button class="v2-btn outline" style="flex-shrink:0;padding:2px 8px;font-size:11px" onclick="checkInOutOfOfficeEntry(${o.id})" title="I'm back">✓ Check In</button>
       <button class="v2-btn outline" style="flex-shrink:0;padding:2px 8px;font-size:11px" onclick="deleteOutOfOfficeEntry(${o.id})" title="Remove">✕</button>
     </div>`).join('');
 }
@@ -7047,12 +7148,65 @@ async function submitOutOfOffice() {
     btn.disabled = false; btn.textContent = label;
   }
 }
+// Refreshes whichever surface is currently showing the list — the FAB
+// modal (if open) or the dedicated Out of Office page — so check-in/delete
+// work correctly from either place without needing two copies of each.
+function refreshOooSurface() {
+  if (document.getElementById('v2-form-overlay')) actLogOutOfOffice();
+  else if (VIEW.name === 'out-of-office') renderOutOfOfficePage();
+}
 async function deleteOutOfOfficeEntry(id) {
   if (!confirm('Remove this entry?')) return;
   try {
     await api('DELETE', '/api/v2/out-of-office/' + id);
-    actLogOutOfOffice();
+    refreshOooSurface();
   } catch (e) { alert(e.message); }
+}
+async function checkInOutOfOfficeEntry(id) {
+  try {
+    await api('POST', `/api/v2/out-of-office/${id}/check-in`);
+    refreshOooSurface();
+  } catch (e) { alert(e.message); }
+}
+
+// ── Out of Office page (2026-09-30) — the same data the TV board's banner
+// shows, viewable from inside the app (not just the kiosk), with real
+// history (checked-in/past entries), not just who's out right now.
+async function renderOutOfOfficePage() {
+  setActiveNav('out-of-office');
+  const main = document.getElementById('main');
+  main.innerHTML = '<div style="padding:30px;color:var(--text-muted)">Loading…</div>';
+  let rows;
+  try { await ensureMeta(); rows = await api('GET', '/api/v2/out-of-office/history'); }
+  catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
+
+  const out = rows.filter(r => !r.checked_in_at);
+  const past = rows.filter(r => r.checked_in_at);
+  const rowHtml = (o, isPast) => `
+    <div style="display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border)${isPast ? ';opacity:.6' : ''}">
+      <span class="initials-pill">${esc(o.initials)}</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:600">${esc(o.name)} <span style="font-weight:500;color:var(--text-muted)">— ${esc(o.reason)}</span></div>
+        <div style="font-size:11.5px;color:var(--text-muted)">${fmtOooDateLabel(o.date)}${o.all_day ? ' · All day' : (o.time ? ' · ' + o.time : '')}${o.parent ? ` · ${esc(o.parent.label)}${o.parent.project_name ? ' — ' + esc(o.parent.project_name) : ''}` : ''}</div>
+      </div>
+      ${isPast ? '<span class="badge" style="background:#f0fdf4;color:#166534">✓ Checked In</span>'
+        : `<button class="v2-btn outline" style="flex-shrink:0;padding:3px 9px;font-size:11px" onclick="checkInOutOfOfficeEntry(${o.id})">✓ Check In</button>
+           <button class="v2-btn outline" style="flex-shrink:0;padding:3px 9px;font-size:11px" onclick="deleteOutOfOfficeEntry(${o.id})">✕</button>`}
+    </div>`;
+
+  main.innerHTML = `
+    <div class="page-header">
+      <div><div class="page-title">${pageIcon('out-of-office')} Out of Office</div><div class="page-subtitle">${out.length} currently out · same list shown on the TV board</div></div>
+      <button class="v2-btn amber" onclick="actLogOutOfOffice()">+ Log Time Out</button>
+    </div>
+    <div class="card" style="padding:0;margin-bottom:16px">
+      <div style="padding:10px 16px;font-weight:700;font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em">Currently Out</div>
+      ${out.length ? out.map(o => rowHtml(o, false)).join('') : '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px">No one is logged out right now.</div>'}
+    </div>
+    <div class="card" style="padding:0">
+      <div style="padding:10px 16px;font-weight:700;font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em">History (last 60 days)</div>
+      ${past.length ? past.map(o => rowHtml(o, true)).join('') : '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px">No history yet.</div>'}
+    </div>`;
 }
 
 // ── Ideas / Issues — reuses v1's /api/ideas (global) ─────────────────────
@@ -7070,7 +7224,7 @@ const IDEA_PAGE_NAMES = {
   'active-cos': 'Active Change Orders', 'submitted-cos': 'Change Orders to Follow Up On',
   'approved-cos': 'Approved Change Orders', 'not-approved-cos': 'Not Approved Change Orders',
   projects: 'Projects', contacts: 'Contacts', vendors: 'Vendors', reports: 'Reports', health: 'Data Health', history: 'History', communications: 'Communications',
-  settings: 'Settings', ideas: 'Ideas & Issues',
+  settings: 'Settings', ideas: 'Ideas & Issues', permits: 'Permits', 'out-of-office': 'Out of Office',
 };
 // Visible to everyone (not just admins) — the whole point of voting is that
 // people can see what's already been suggested and back it instead of
