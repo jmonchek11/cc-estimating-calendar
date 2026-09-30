@@ -399,6 +399,11 @@ const FollowupSchema = new mongoose.Schema({
   customer_contact: { type: String, default: null },             // legacy free text — who they spoke to
   notes:            { type: String, default: null },
   outcome:          { type: String, enum: ['no_decision', 'awarded', 'not_awarded', 'approved', 'not_approved', 'other'], default: 'no_decision' },
+  // Customer/GC feedback on our number, per the estimating/sales team
+  // (2026-09-30) — only meaningful on a bid_submission (a specific price to
+  // a specific customer), but left un-enforced at the schema level same as
+  // most optional Followup fields; the UI only offers it in that context.
+  price_feedback:   { type: String, enum: ['high', 'competitive', 'low'], default: null },
   next_followup_date: { type: String, default: null },
   created_at: { type: String, default: ts },
   updated_at: { type: String, default: null },   // set only when edited after logging (updateFollowup) — stays null on entries never corrected

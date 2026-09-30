@@ -608,6 +608,17 @@ const STAGE_COLOR = {
   co_request:'#7c3aed', active_co:'#92400e', submitted_co:'#2563eb', approved:'#166534', not_approved:'#dc2626', voided:'#64748b',
 };
 const METHOD = { phone:'📞 phone', email:'✉️ email', in_person:'🤝 in person', other:'other' };
+// Customer/GC feedback on our price for a specific submission — per the
+// sales team (2026-09-30), only ever logged on a bid_submission-level
+// follow-up (one customer's read on one specific number), not a bare bid
+// or CO follow-up.
+const PRICE_FEEDBACK_META = {
+  high:        { label: 'We were high',  icon: '🔺', color: '#991b1b', bg: '#fef2f2' },
+  competitive: { label: 'Competitive',   icon: '✅', color: '#166534', bg: '#f0fdf4' },
+  low:         { label: 'We were low',   icon: '🔻', color: '#1e40af', bg: '#eff6ff' },
+};
+const priceFeedbackBadge = (pf) => pf && PRICE_FEEDBACK_META[pf]
+  ? `<span class="badge" style="background:${PRICE_FEEDBACK_META[pf].bg};color:${PRICE_FEEDBACK_META[pf].color}">${PRICE_FEEDBACK_META[pf].icon} ${esc(PRICE_FEEDBACK_META[pf].label)}</span>` : '';
 
 const stageBadge = s => `<span class="badge badge-stage" style="color:${STAGE_COLOR[s]};font-weight:700">${STAGE[s] || s}</span>`;
 const ini = m => m ? `<span class="initials-pill${m.role === 'sales' ? ' initials-pill-sales' : ''}" style="transform:scale(.85);transform-origin:center" title="${esc(m.name || '')}${m.role ? ' — ' + esc(m.role) : ''}">${esc(m.initials)}</span>` : '';
@@ -3245,7 +3256,7 @@ function fuRow(f) {
       ${canEdit ? `<a href="#" onclick="event.preventDefault();actEditFollowup(${f.id})" style="font-size:11px">✏️</a>` : ''}
     </div>
     ${f.notes ? `<div class="v2-fu-notes">${esc(f.notes)}</div>` : ''}
-    ${outcomePill}
+    ${outcomePill || f.price_feedback ? `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">${outcomePill}${priceFeedbackBadge(f.price_feedback)}</div>` : ''}
   </div>`;
 }
 
@@ -4464,14 +4475,19 @@ function actEditSubmission(subId) {
 
 // A follow-up can live on a bid, a change order, or a submission — search all
 // three rather than needing the caller to know which.
+// Server-side fmtFollowup() doesn't include parent_type (it's not needed by
+// most callers), but actEditFollowup needs to know whether this came from a
+// bid, a bid_submission, or a CO's followups[] to decide whether the price-
+// feedback field applies — tag it here from which loop found it, since
+// that's the only place that still knows.
 function findFollowup(fuId) {
   const d = DETAIL_CACHE[OPEN_PROJECT];
   if (!d) return null;
   for (const b of d.bids) {
-    const f = (b.followups || []).find(x => x.id === fuId); if (f) return f;
-    for (const s of (b.submissions || [])) { const sf = (s.followups || []).find(x => x.id === fuId); if (sf) return sf; }
+    const f = (b.followups || []).find(x => x.id === fuId); if (f) return { ...f, parent_type: 'bid' };
+    for (const s of (b.submissions || [])) { const sf = (s.followups || []).find(x => x.id === fuId); if (sf) return { ...sf, parent_type: 'bid_submission' }; }
   }
-  for (const j of d.jobs) { const f = j.change_orders.flatMap(co => co.followups || []).find(x => x.id === fuId); if (f) return f; }
+  for (const j of d.jobs) { const f = j.change_orders.flatMap(co => co.followups || []).find(x => x.id === fuId); if (f) return { ...f, parent_type: 'change_order' }; }
   return null;
 }
 
@@ -4492,6 +4508,10 @@ function actEditFollowup(fuId) {
       { value: 'no_decision', label: 'No decision yet' }, { value: 'awarded', label: 'Awarded' },
       { value: 'not_awarded', label: 'Not awarded' }, { value: 'approved', label: 'Approved' },
       { value: 'not_approved', label: 'Not approved' }, { value: 'other', label: 'Other' } ] },
+    ...(f.parent_type === 'bid_submission' ? [
+      { id: 'price_feedback', label: 'Did they say anything about our price?', type: 'select', value: f.price_feedback, emptyLabel: 'Not mentioned', options: [
+        { value: 'high', label: '🔺 We were high' }, { value: 'competitive', label: '✅ Competitive' }, { value: 'low', label: '🔻 We were low' } ] },
+    ] : []),
     { id: 'next_followup_date', label: 'Next Follow-up Date', type: 'date', value: f.next_followup_date },
   ], data => api('PATCH', `/api/v2/followups/${fuId}`, data), 'Save Changes');
 }
@@ -4825,6 +4845,12 @@ async function actLogFollowup(parentType, parentId) {
     { id: 'new_contact_name', label: 'New contact (if not listed above)', type: 'text', placeholder: 'Only if they aren’t in the list yet' },
     { id: 'followup_date', label: 'Date', type: 'date', required: true, value: today },
     { id: 'notes', label: 'What was discussed?', type: 'textarea', required: true },
+    // Only meaningful for a specific customer's specific number — a bare
+    // bid/CO follow-up has no one price to react to.
+    ...(parentType === 'bid_submission' ? [
+      { id: 'price_feedback', label: 'Did they say anything about our price?', type: 'select', emptyLabel: 'Not mentioned', options: [
+        { value: 'high', label: '🔺 We were high' }, { value: 'competitive', label: '✅ Competitive' }, { value: 'low', label: '🔻 We were low' } ] },
+    ] : []),
   ], data => api('POST', '/api/v2/followups', { ...data, parent_type: parentType, parent_id: parentId, company_id: companyId, outcome: 'no_decision' }),
   'Log (no decision yet — timer restarts)');
 }
@@ -6284,6 +6310,7 @@ function communicationRowHtml(c, isLast, opts = {}) {
         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:3px">
           <span style="font-size:11px;color:var(--text-muted)">${fmtD(c.date)}</span>
           ${projectPill}
+          ${priceFeedbackBadge(c.price_feedback)}
         </div>
         ${c.notes ? `<div style="font-size:12.5px;color:var(--text-muted);margin-top:4px;line-height:1.45">${esc(c.notes)}</div>` : ''}
       </div>

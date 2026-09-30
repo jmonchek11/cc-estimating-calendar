@@ -468,6 +468,7 @@ function fmtFollowup(f, tm, contactById) {
     customer_contact: f.customer_contact,
     notes: f.notes,
     outcome: f.outcome,
+    price_feedback: f.price_feedback || null,
     next_followup_date: f.next_followup_date,
   };
 }
@@ -2020,6 +2021,9 @@ async function logFollowupV2(data) {
   // must not inflate the gap to the next follow-up.
   const next = (tracksTimer && outcome === 'no_decision') ? addWorkingDays(data.followup_date || today(), recurringDays) : null;
 
+  if (data.price_feedback && !['high', 'competitive', 'low'].includes(data.price_feedback)) {
+    throw new Error('Invalid price feedback value');
+  }
   const fu = await M.Followup.create({
     _id: await nextId('followups'),
     parent_type: data.parent_type, parent_id: Number(data.parent_id),
@@ -2028,7 +2032,7 @@ async function logFollowupV2(data) {
     contact_method: data.contact_method,
     contact_id: contactId,
     customer_contact: customerContactText,
-    notes: data.notes, outcome, next_followup_date: next,
+    notes: data.notes, outcome, price_feedback: data.price_feedback || null, next_followup_date: next,
   });
 
   if (tracksTimer && outcome === 'no_decision') {
@@ -2044,7 +2048,7 @@ async function logFollowupV2(data) {
   return { followup_id: fu._id, next_followup_date: next };
 }
 
-const FOLLOWUP_EDITABLE = ['followup_date', 'contact_method', 'contact_id', 'customer_contact', 'notes', 'outcome', 'next_followup_date'];
+const FOLLOWUP_EDITABLE = ['followup_date', 'contact_method', 'contact_id', 'customer_contact', 'notes', 'outcome', 'price_feedback', 'next_followup_date'];
 
 // Fixing a mis-logged follow-up (wrong contact, typo in notes, wrong outcome)
 // after the fact — not exposed until now since there was no correction path
@@ -2118,6 +2122,7 @@ function shapeCommunication(f, { tm, contactById, bidById, subById, coById, jobB
     contact_name: contactName,
     notes: f.notes,
     outcome: f.outcome,
+    price_feedback: f.price_feedback || null,
     context,
     sort_key: `${f.followup_date || ''} ${f.created_at || ''}`,
   };
