@@ -223,12 +223,12 @@
   /* Log-a-call FAB — shown at every width (not just mobile), so logging a
      call is a one-click reach whether or not you're already looking at the
      relevant bid. Sits above the bottom tab bar on mobile (see the media
-     query below); bottom-LEFT corner (not right) — per Carrie, the
-     bottom-right position sat directly over each bid card's "⋯" actions
-     menu (.bc-ft is right-aligned), making that menu hard to tap. */
+     query below); a plain bottom-right corner on desktop. (Moved to the
+     left 2026-09-30 to dodge the bid card's "⋯" menu, then moved back
+     2026-10-01 per Joe — right is where the team wants it.) */
   #mobile-fab {
     display: flex; align-items: center; justify-content: center; gap: 8px;
-    position: fixed; left: 20px; bottom: 24px;
+    position: fixed; right: 20px; bottom: 24px;
     height: 46px; padding: 0 18px 0 16px; border-radius: 23px; border: none; z-index: 55;
     background: var(--primary); color: #fff; box-shadow: 0 8px 20px rgba(37,99,235,.4), 0 2px 6px rgba(37,99,235,.3);
     cursor: pointer; -webkit-tap-highlight-color: transparent;
@@ -244,7 +244,7 @@
      Amber/orange so it doesn't get mistaken for the call button. */
   #ooo-fab {
     display: flex; align-items: center; justify-content: center; gap: 8px;
-    position: fixed; left: 20px; bottom: 80px;
+    position: fixed; right: 20px; bottom: 80px;
     height: 46px; padding: 0 18px 0 16px; border-radius: 23px; border: none; z-index: 55;
     background: #d97706; color: #fff; box-shadow: 0 8px 20px rgba(217,119,6,.4), 0 2px 6px rgba(217,119,6,.3);
     cursor: pointer; -webkit-tap-highlight-color: transparent;
@@ -312,8 +312,8 @@
 
     /* Sits above the bottom tab bar here — the always-on base rule above
        covers everything else (color, shape, shadow). */
-    #mobile-fab { left: 16px; bottom: calc(80px + env(safe-area-inset-bottom)); }
-    #ooo-fab { left: 16px; bottom: calc(136px + env(safe-area-inset-bottom)); }
+    #mobile-fab { right: 16px; bottom: calc(80px + env(safe-area-inset-bottom)); }
+    #ooo-fab { right: 16px; bottom: calc(136px + env(safe-area-inset-bottom)); }
 
     /* Forms/dialogs become bottom sheets on mobile — a native-feeling
        pattern instead of a small centered dialog with awkward margins. */
