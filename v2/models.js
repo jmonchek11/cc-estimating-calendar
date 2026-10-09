@@ -321,6 +321,11 @@ const BidSubmissionSchema = new mongoose.Schema({
   submission_type: { type: String, enum: BID_SUBMISSION_TYPES, default: 'initial' },
   notes:           { type: String, default: null },
   is_current:      { type: Number, default: 1 },                 // latest submission to this customer
+  // Salesperson for THIS customer's submission (2026-10, per Keegan) — each
+  // company is getting its own assigned salesperson, so it can't live only
+  // on the Bid (one person per bid #). Defaults to Bid.salesperson_id at
+  // submit time; Bid.salesperson_id stays as the bid-level default/fallback.
+  salesperson_id:  { type: Number, default: null },              // FK → TeamMember
 
   // Per-submission win/loss + follow-up (each customer is tracked independently)
   outcome:            { type: String, enum: ['pending', 'awarded', 'not_awarded'], default: 'pending' },

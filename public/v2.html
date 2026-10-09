@@ -1000,6 +1000,7 @@ const NOTIFICATION_CATEGORIES = {
   assigned: 'Bid/CO assignment',
   followup: 'Follow-up logged',
   awarded: 'Bid awarded (team-wide)',
+  submitted: 'Bid submitted to my customer',
   reminder: 'Reminders due',
   walkthrough: 'Jobsite walk-throughs',
   digest: 'Weekly digest',
@@ -2668,7 +2669,7 @@ function customerRowHtml(b, cust, dead) {
   const historicalHtml = historical.length ? `<div style="margin-top:4px">${historical.map(s => `
     <div style="font-size:11px;color:#6b7280">Previously ${fmt$(s.amount)} · ${SUB_TYPE[s.submission_type] || esc(s.submission_type)} · ${fmtD(s.date_submitted)} (superseded)</div>`).join('')}</div>` : '';
 
-  const subLine = current ? `${SUB_TYPE[current.submission_type] || esc(current.submission_type)} · ${fmtD(current.date_submitted)}${current.approved_by ? ` · approved by ${esc(current.approved_by)}` : ''}${subMetaExtra}` : '';
+  const subLine = current ? `${SUB_TYPE[current.submission_type] || esc(current.submission_type)} · ${fmtD(current.date_submitted)}${current.approved_by ? ` · approved by ${esc(current.approved_by)}` : ''}${current.salesperson ? ` · sales: ${esc(current.salesperson.name)}` : ''}${subMetaExtra}` : '';
 
   // This customer's own CM/GC bid portal link — moved here from a single
   // bid-level field (2026-09-30) since a project with several GCs each has
@@ -4104,6 +4105,9 @@ function actSubmitBid(bidId) {
     { id: 'jurisdiction', label: 'IBEW Local Jurisdiction', type: 'text', required: true, placeholder: '98' },
     { id: 'date_submitted', label: 'Date Estimate Sent', type: 'date', required: true, value: today },
     { id: 'approved_by', label: 'Estimate Approved By', type: 'select', required: true, options: nameOpts(['estimator', 'sales']) },
+    // Each customer's submission carries its own salesperson (per Keegan) —
+    // that person gets an email when this goes out.
+    { id: 'salesperson_id', label: 'Salesperson for these customer(s)', type: 'select', emptyLabel: b.salesperson ? `Bid's salesperson (${b.salesperson.name})` : 'None', options: teamOpts(['sales']), value: b.salesperson?.id },
     // Certified Payroll / Tax Exempt / Prevailing Wage moved to Award time
     // (see actAwardSubmission) — they only actually matter once a bid wins,
     // and requiring them here just added friction to every submission,
@@ -4153,6 +4157,7 @@ function actAddSubmission(bidId) {
     { id: 'amount', label: 'Amount $', type: 'currency', required: true },
     { id: 'date_submitted', label: 'Date Submitted', type: 'date', required: true, value: today },
     { id: 'approved_by', label: 'Approved By', type: 'select', required: true, options: nameOpts(['estimator', 'sales']) },
+    { id: 'salesperson_id', label: 'Salesperson (optional)', type: 'select', emptyLabel: 'Same as this customer\'s last submission', options: teamOpts(['sales']) },
     { id: 'notes', label: 'What changed?', type: 'textarea' },
   ], data => api('POST', `/api/v2/bids/${bidId}/submissions`, data), 'Add Submission', 'amber');
 }
@@ -4487,6 +4492,7 @@ function actEditSubmission(subId) {
       { value: 'initial', label: 'Initial' }, { value: 'best_and_final', label: 'Best & Final' },
       { value: 'scope_add', label: 'Scope add' }, { value: 'scope_remove', label: 'Scope remove' },
       { value: 'revised', label: 'Revised' } ] },
+    { id: 'salesperson_id', label: 'Salesperson', type: 'select', emptyLabel: 'None', options: teamOpts(['sales']), value: s.salesperson?.id },
     { id: 'is_current', label: 'Current?', type: 'select', value: s.is_current ? 1 : 0,
       options: [{ value: 1, label: 'Yes — current' }, { value: 0, label: 'No — superseded' }] },
     { id: 'notes', label: 'Notes', type: 'textarea', value: s.notes },
@@ -5996,6 +6002,7 @@ function onReportsFilterChange() {
 }
 function clearReportsFilters() {
   REPORTS_STATE = { preset: 'ytd', from: null, to: null, granularity: 'month', personId: '', companyId: '', typeOfWork: '', sizeBucket: '', customerSort: 'awardedValue' };
+  REPORTS_EST = '';
   renderReports();
 }
 // Shared by loadReportsData and both drill-down calls — every request reads
@@ -6033,6 +6040,7 @@ function renderReportsBody(data) {
 
   const body = document.getElementById('rp-body');
   body.innerHTML = `
+    ${estimatorWinRateHtml(data)}
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
       ${card('Opportunities', summary.opportunities.count)}
       ${card('Active Bids', summary.activeBids.count)}
@@ -6115,8 +6123,10 @@ function renderReportsBody(data) {
     });
   }
   if (sortedCustomers.length) {
-    const top = sortedCustomers.slice(0, 10);
     const metricFor = { awardedValue: 'awardedValue', winRate: 'winRate', submittedValue: 'submittedValue', submittedCount: 'submittedCount' }[REPORTS_STATE.customerSort] || 'awardedValue';
+    // Customers under the 5-bid minimum have no win rate — keep them off a
+    // win-rate chart instead of plotting them as 0%.
+    const top = (metricFor === 'winRate' ? sortedCustomers.filter(c => c.winRate != null) : sortedCustomers).slice(0, 10);
     const metricLabel = { awardedValue: 'Awarded $', winRate: 'Win Rate %', submittedValue: 'Submitted $', submittedCount: '# Submitted' }[metricFor];
     REPORTS_CHARTS.customer = new Chart(document.getElementById('rp-chart-customer'), {
       type: 'bar',
@@ -6132,6 +6142,55 @@ function renderReportsBody(data) {
       },
     });
   }
+}
+// Win rate by lead estimator, at the top of Reports (per Connor): "All" shows
+// every estimator side by side, picking one narrows to just their numbers.
+// Filters the already-loaded byEstimator rows client-side — same cohort as
+// the rest of the page, so no extra fetch and it follows the date/type filters.
+let REPORTS_EST = '';
+function onReportsEstimatorChange() {
+  REPORTS_EST = document.getElementById('rp-est-pick')?.value || '';
+  if (REPORTS_DATA) renderReportsBody(REPORTS_DATA);
+}
+function estimatorWinRateHtml(data) {
+  const rows = data.byEstimator || [];
+  const min = data.winRateMinSubmitted || 5;
+  if (!rows.length) return '';
+  const shown = REPORTS_EST ? rows.filter(r => String(r.estimatorId) === REPORTS_EST) : rows;
+  const rateCell = r => r.winRate == null
+    ? `<span style="color:var(--text-muted)" title="Needs at least ${min} submitted bids to show a win rate">—</span>`
+    : `${r.winRate}%`;
+  return `<div class="card" style="padding:16px;margin-bottom:16px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+      <div>
+        <div style="font-weight:700;font-size:13px">Win Rate by Estimator</div>
+        <div style="font-size:11px;color:var(--text-muted)">Awarded ÷ (Awarded + Not Awarded) on bids submitted in this range. Shown once an estimator has ${min}+ submitted bids.</div>
+      </div>
+      <select id="rp-est-pick" onchange="onReportsEstimatorChange()" style="font-size:12px">
+        <option value="">All estimators</option>
+        ${rows.filter(r => r.estimatorId).map(r => `<option value="${r.estimatorId}" ${String(r.estimatorId) === REPORTS_EST ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}
+      </select>
+    </div>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="border-bottom:1px solid var(--border)">
+        <th style="text-align:left;padding:6px 10px;color:var(--text-muted);font-size:11px">Estimator</th>
+        <th style="text-align:right;padding:6px 10px;color:var(--text-muted);font-size:11px">Submitted</th>
+        <th style="text-align:right;padding:6px 10px;color:var(--text-muted);font-size:11px">Awarded</th>
+        <th style="text-align:right;padding:6px 10px;color:var(--text-muted);font-size:11px">Not Awarded</th>
+        <th style="text-align:right;padding:6px 10px;color:var(--text-muted);font-size:11px">Pending</th>
+        <th style="text-align:right;padding:6px 10px;color:var(--text-muted);font-size:11px">Win Rate</th>
+      </tr></thead>
+      <tbody>${shown.map(r => `
+        <tr style="border-bottom:1px solid #f1f5f9">
+          <td style="padding:6px 10px;font-weight:600">${esc(r.name)}</td>
+          <td style="padding:6px 10px;text-align:right">${r.submittedCount} · ${fmt$(r.submittedValue)}</td>
+          <td style="padding:6px 10px;text-align:right;font-weight:600;color:#166534">${r.awardedCount} · ${fmt$(r.awardedValue)}</td>
+          <td style="padding:6px 10px;text-align:right;color:#dc2626">${r.notAwardedCount}</td>
+          <td style="padding:6px 10px;text-align:right;color:#92400e">${r.pendingCount}</td>
+          <td style="padding:6px 10px;text-align:right;font-weight:700;color:#1e40af">${rateCell(r)}</td>
+        </tr>`).join('')}</tbody>
+    </table></div>
+  </div>`;
 }
 function onReportsCustomerSortChange() {
   REPORTS_STATE.customerSort = document.getElementById('rp-customer-sort')?.value || 'awardedValue';
@@ -6161,7 +6220,7 @@ function byCustomerTableHtml(rows) {
         <td style="padding:6px 10px;text-align:right;color:#dc2626">${c.notAwardedCount}</td>
         <td style="padding:6px 10px;text-align:right;color:#92400e">${c.pendingCount}</td>
         <td style="padding:6px 10px;text-align:right;color:var(--text-muted)">${c.closedCount}</td>
-        <td style="padding:6px 10px;text-align:right;font-weight:600">${c.winRate == null ? '—' : c.winRate + '%'}</td>
+        <td style="padding:6px 10px;text-align:right;font-weight:600">${c.winRate == null ? '<span style="color:var(--text-muted)" title="Needs at least 5 submitted bids to show a win rate">—</span>' : c.winRate + '%'}</td>
       </tr>`).join('')}</tbody>
   </table>`;
 }

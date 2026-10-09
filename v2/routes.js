@@ -293,7 +293,11 @@ router.post('/api/v2/bids/:id/start',         t(async req => {
     return r;
   },
   async (req) => ({ action: 'bid.start', summary: `Started bid ${await v2db.bidLabel(req.params.id)}`, entity_type: 'bid', entity_id: Number(req.params.id) })));
-router.post('/api/v2/bids/:id/submit',        t(req => v2db.submitBid(req.params.id, req.body, req.session.userId),
+router.post('/api/v2/bids/:id/submit',        t(async req => {
+    const r = await v2db.submitBid(req.params.id, req.body, req.session.userId);
+    notify.notifyBidSubmitted(Number(req.params.id), r.submission_ids, req.session.userId);
+    return r;
+  },
   async (req) => ({ action: 'bid.submit', summary: `Submitted bid ${await v2db.bidLabel(req.params.id)}`, entity_type: 'bid', entity_id: Number(req.params.id) })));
 
 // Generic edit for any entity: project | bid | job | change_order | bid_submission.
@@ -352,7 +356,11 @@ router.post('/api/v2/bids/:id/close',         t(async req => {
     return r;
   },
   async (req) => ({ action: 'bid.close', summary: `Closed bid ${await v2db.bidLabel(req.params.id)} — ${req.body.close_reason || 'no reason given'}`, entity_type: 'bid', entity_id: Number(req.params.id) })));
-router.post('/api/v2/bids/:id/submissions',   t(req => v2db.addSubmission(req.params.id, req.body, req.session.userId),
+router.post('/api/v2/bids/:id/submissions',   t(async req => {
+    const r = await v2db.addSubmission(req.params.id, req.body, req.session.userId);
+    notify.notifyBidSubmitted(Number(req.params.id), r.submission_ids, req.session.userId);
+    return r;
+  },
   async (req) => ({ action: 'bid.add_submission', summary: `Added a submission to bid ${await v2db.bidLabel(req.params.id)}`, entity_type: 'bid', entity_id: Number(req.params.id) })));
 router.post('/api/v2/bids/:id/reactivate',    t(req => v2db.reactivateBid(req.params.id, req.body, req.session.userId),
   async (req) => ({ action: 'bid.reactivate', summary: `Reactivated bid ${await v2db.bidLabel(req.params.id)} for a new round`, entity_type: 'bid', entity_id: Number(req.params.id) })));

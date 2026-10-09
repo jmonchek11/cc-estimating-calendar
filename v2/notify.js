@@ -148,6 +148,35 @@ async function notifyWalkthroughAssignees(bidId, walkthroughId, newAssigneeMembe
   } catch (e) { console.error('[v2 notify] walkthrough-assigned email failed:', e.message); }
 }
 
+// A bid was just submitted — each submission carries its OWN salesperson
+// (customers are being assigned salespeople individually), so group the new
+// submissions by that person and send each one a single email listing just
+// their customers, rather than one per submission or one to the bid's lone
+// salesperson. Never blocks the submit itself.
+async function notifyBidSubmitted(bidId, submissionIds, actorId) {
+  try {
+    if (!submissionIds?.length) return;
+    const M = getModels();
+    const [shape, subs, companies, actor] = await Promise.all([
+      bidEmailShape(bidId),
+      M.BidSubmission.find({ _id: { $in: submissionIds.map(Number) } }).lean(),
+      M.Company.find().lean(),
+      actorId ? maindb.getMember(actorId) : null,
+    ]);
+    if (!shape) return;
+    const coName = {}; companies.forEach(c => { coName[c._id] = c.name; });
+    const bySales = {};
+    subs.filter(s => s.salesperson_id).forEach(s => (bySales[s.salesperson_id] = bySales[s.salesperson_id] || []).push(s));
+    for (const [salesId, list] of Object.entries(bySales)) {
+      const recipient = await emailForV2Member(salesId);
+      if (!recipient?.email || !mailer.wantsNotification(recipient, 'submitted')) continue;
+      const lines = list.map(s => ({ customer: coName[s.company_id] || 'a customer', amount: s.amount, date: s.date_submitted }));
+      const { subject, html } = mailer.emailBidSubmitted(shape, recipient.name, actor?.name || 'A team member', lines);
+      await mailer.sendMail({ to: recipient.email, subject, html });
+    }
+  } catch (e) { console.error('[v2 notify] bid submitted email failed:', e.message); }
+}
+
 async function notifyAwarded(bidId, actorName) {
   try {
     const shape = await bidEmailShape(bidId);
@@ -383,4 +412,4 @@ async function notifyDueDateChanged(kind, id, oldDate, newDate, actorId) {
   } catch (e) { console.error('[v2 notify] due-date-changed email failed:', e.message); }
 }
 
-module.exports = { bidEmailShape, coEmailShape, emailShapeForReminder, notifyAwarded, notifyRoleAward, notifyApprovedToBid, notifyOwnerToForwardInvite, notifyAssigned, notifyWalkthroughSet, notifyWalkthroughAssignees, notifyFollowup, notifyDueDateChanged, notifyOpportunityClosed, notifyNewOpportunity, notifyCoQueued, bidRecipients, walkthroughContactInfo, emailForV2Member };
+module.exports = { bidEmailShape, coEmailShape, emailShapeForReminder, notifyBidSubmitted, notifyAwarded, notifyRoleAward, notifyApprovedToBid, notifyOwnerToForwardInvite, notifyAssigned, notifyWalkthroughSet, notifyWalkthroughAssignees, notifyFollowup, notifyDueDateChanged, notifyOpportunityClosed, notifyNewOpportunity, notifyCoQueued, bidRecipients, walkthroughContactInfo, emailForV2Member };

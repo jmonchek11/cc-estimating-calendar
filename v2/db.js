@@ -351,6 +351,9 @@ async function getProjectDetail(projectId) {
         submission_type: sub.submission_type,
         notes: sub.notes,
         is_current: !!sub.is_current,
+        // Falls back to the bid's own salesperson for older submissions that
+        // predate per-submission assignment.
+        salesperson: tm[sub.salesperson_id || b.salesperson_id] || null,
         outcome: sub.outcome || 'pending',
         award_date: sub.award_date,
         award_amount: sub.award_amount,
@@ -701,7 +704,7 @@ async function updateTeamMemberV2(id, data) {
 // controls their own inbox. req.session.userId is passed straight through
 // as the id, never taken from the request body, so there's no way to edit
 // someone else's prefs through this endpoint.
-const NOTIFICATION_PREF_KEYS = ['assigned', 'followup', 'awarded', 'reminder', 'walkthrough', 'digest', 'ideas'];
+const NOTIFICATION_PREF_KEYS = ['assigned', 'followup', 'awarded', 'submitted', 'reminder', 'walkthrough', 'digest', 'ideas'];
 async function updateMyNotificationPrefs(userId, prefs) {
   const M = getModels();
   const upd = {};
@@ -1444,16 +1447,20 @@ async function submitBid(id, data, actorId) {
   if (!companyIds.length) throw new Error('Pick at least one customer to submit to');
 
   const s = await getSettings();
+  const newSubmissionIds = [];
+  const subSalesperson = data.salesperson_id ? Number(data.salesperson_id) : (bid.salesperson_id || null);
   for (const companyId of companyIds) {
     await ensureBidCustomer(bid._id, companyId);
     try {
+      const subId = await nextId('bid_submissions');
       await M.BidSubmission.create({
-        _id: await nextId('bid_submissions'),
+        _id: subId,
         bid_id: bid._id, company_id: companyId,
         amount: Number(data.amount), date_submitted: data.date_submitted, approved_by: data.approved_by,
-        submission_type: 'initial', notes: data.notes || null, is_current: 1,
+        submission_type: 'initial', notes: data.notes || null, is_current: 1, salesperson_id: subSalesperson,
         outcome: 'pending', next_followup_date: addWorkingDays(data.date_submitted, s.fu_initial_days),
       });
+      newSubmissionIds.push(subId);
     } catch (e) {
       // Same double form-submit race as addSubmission — a duplicate-key hit
       // here just means this customer already got submitted (by the other
@@ -1490,7 +1497,7 @@ async function submitBid(id, data, actorId) {
     });
   }
   await recordGateAutomaticEvidence(bid._id, 'g3.submission_logged', `Submission recorded on Estimating Calendar — ${data.date_submitted}, $${data.amount}`, actorId);
-  return { bid_id: bid._id, stage: allSubmitted ? 'submitted' : bid.stage, remaining: allCustomers.length - submittedCompanyIds.size };
+  return { bid_id: bid._id, stage: allSubmitted ? 'submitted' : bid.stage, remaining: allCustomers.length - submittedCompanyIds.size, submission_ids: newSubmissionIds };
 }
 
 // ── Add another submission to a submitted bid ─────────────────────────────────
@@ -1517,12 +1524,17 @@ async function addSubmission(id, data, actorId) {
     { $set: { is_current: 0, next_followup_date: null, updated_at: ts() } }
   );
   const s = await getSettings();
+  // Carry the prior round's salesperson forward unless this one names a
+  // different one — a revision to the same customer is the same relationship.
+  const priorSub = await M.BidSubmission.findOne({ bid_id: bid._id, company_id: companyId }).sort({ _id: -1 }).lean();
+  const subSalesperson = data.salesperson_id ? Number(data.salesperson_id) : (priorSub?.salesperson_id || bid.salesperson_id || null);
+  const newSubId = await nextId('bid_submissions');
   try {
     await M.BidSubmission.create({
-      _id: await nextId('bid_submissions'),
+      _id: newSubId,
       bid_id: bid._id, company_id: companyId,
       amount: Number(data.amount), date_submitted: data.date_submitted, approved_by: data.approved_by,
-      submission_type: data.submission_type, notes: data.notes || null, is_current: 1,
+      submission_type: data.submission_type, notes: data.notes || null, is_current: 1, salesperson_id: subSalesperson,
       outcome: 'pending', next_followup_date: addWorkingDays(data.date_submitted, s.fu_initial_days),
     });
   } catch (e) {
@@ -1560,7 +1572,7 @@ async function addSubmission(id, data, actorId) {
     }
   }
   await recordGateAutomaticEvidence(bid._id, 'g3.submission_logged', `Submission recorded on Estimating Calendar — ${data.date_submitted}, $${data.amount} (${data.submission_type})`, actorId);
-  return { bid_id: bid._id, stage };
+  return { bid_id: bid._id, stage, submission_ids: [newSubId] };
 }
 
 // ── (submitted | closed) → active_bid/opportunity ("Reactivate") ──────────────
@@ -1632,7 +1644,7 @@ const ADMIN_EDITABLE = {
   job:            ['job_number', 'pm_id', 'apm_id', 'awarded_company_id', 'award_date', 'folder_url'],
   change_order:   ['co_number', 'name', 'due_date', 'start_date', 'estimator_id', 'notes',
                    'estimate_amount', 'date_submitted', 'approved_by', 'approval_date'],
-  bid_submission: ['company_id', 'amount', 'award_amount', 'date_submitted', 'approved_by', 'submission_type', 'notes', 'is_current', 'not_awarded_notes', 'gc_awarded'],
+  bid_submission: ['company_id', 'amount', 'award_amount', 'date_submitted', 'approved_by', 'submission_type', 'notes', 'is_current', 'not_awarded_notes', 'gc_awarded', 'salesperson_id'],
 };
 const NUMERIC_FK = new Set(['estimator_id', 'salesperson_id', 'apm_id', 'pm_id', 'awarded_company_id', 'company_id', 'owner_id']);
 
@@ -2695,14 +2707,14 @@ async function checkInOutOfOffice(id, actorId, isAdmin) {
   return { ok: true };
 }
 
-// Job # format is Foundation's: digits only, 5-6 chars (customer # + 3-digit
-// sequence). Clearing to null is always allowed; existing stored numbers are
-// NOT retro-validated (only enforced when a number is being SET).
+// Job # is free-form (2026-10, per Carrie): the old digits-only 5-6 char rule
+// blocked real numbers like 9717 and service jobs that start with "S". Only
+// uniqueness (and a sane length) is enforced now. Clearing to null is always
+// allowed.
 async function validateJobNumber(M, jobNumber, excludeJobId) {
   if (jobNumber == null) return;
-  if (!/^\d{5,6}$/.test(jobNumber)) {
-    throw new Error('Job numbers are 5-6 digits, no dashes (e.g. 18002). This must match Foundation.');
-  }
+  if (!String(jobNumber).trim()) throw new Error('Job # cannot be blank.');
+  if (String(jobNumber).length > 20) throw new Error('Job # is too long (20 characters max).');
   const query = { job_number: jobNumber };
   if (excludeJobId != null) query._id = { $ne: excludeJobId };
   const conflict = await M.Job.findOne(query).lean();
@@ -2723,7 +2735,7 @@ async function createLegacyJob(data) {
     await M.Project.create({ _id: pid, name: data.project_name.trim(), created_by: data.created_by || null });
     isNewProject = true;
   }
-  const jobNumber = data.job_number || null;
+  const jobNumber = (data.job_number || '').trim() || null;
   await validateJobNumber(M, jobNumber, null);
   const jobId = await nextId('jobs');
   const awardedCompanyId = data.awarded_company_id ? Number(data.awarded_company_id)
@@ -2767,7 +2779,7 @@ async function updateJob(id, data, actorId) {
 
   const upd = { updated_at: ts() };
   if ('job_number' in data) {
-    const jobNumber = data.job_number || null;
+    const jobNumber = (data.job_number || '').trim() || null;
     if (jobNumber !== before.job_number) await validateJobNumber(M, jobNumber, jobId);
     upd.job_number = jobNumber;
   }
@@ -3739,6 +3751,7 @@ async function getReportsCohort({ from, to, granularity, personId, companyId, ty
   };
 }
 
+const WIN_RATE_MIN_SUBMITTED = 5;
 async function getReports(filters = {}) {
   const {
     gran, submittedIn, awardedIn, notAwardedIn, pendingIn, closedIn, submittedCosIn, sumAmt,
@@ -3802,9 +3815,30 @@ async function getReports(filters = {}) {
     else if (sub.outcome === 'not_awarded') s.notAwardedCount++;
     else s.pendingCount++;
   }));
+  // A win rate off one or two bids is noise (a customer we bid once and won
+  // shows 100% and tops the win-rate sort — per Keegan), so it's only
+  // reported once at least WIN_RATE_MIN_SUBMITTED bids are in the cohort.
+  const rate = (won, lost, submitted) => (submitted >= WIN_RATE_MIN_SUBMITTED && (won + lost)) ? Math.round((won / (won + lost)) * 1000) / 10 : null;
   const byCustomer = Object.values(custStats)
-    .map(s => ({ ...s, winRate: (s.awardedCount + s.notAwardedCount) ? Math.round((s.awardedCount / (s.awardedCount + s.notAwardedCount)) * 1000) / 10 : null }))
+    .map(s => ({ ...s, winRate: rate(s.awardedCount, s.notAwardedCount, s.submittedCount) }))
     .sort((a, b) => b.awardedValue - a.awardedValue || b.submittedValue - a.submittedValue);
+
+  // ── By estimator (lead estimator on the bid) — same bid-level cohort and
+  // win-rate definition as the summary card, so one estimator's row can
+  // never disagree with the headline when filtered to them.
+  const estStats = {};
+  submittedIn.forEach(b => {
+    const key = b.estimator_id || 0;
+    const e = estStats[key] || (estStats[key] = { estimatorId: key || null, name: key ? (tm[key]?.name || 'Unknown') : 'Unassigned', submittedCount: 0, submittedValue: 0, awardedCount: 0, awardedValue: 0, notAwardedCount: 0, pendingCount: 0, closedCount: 0 });
+    e.submittedCount++; e.submittedValue += (b.estimate_amount || 0);
+    if (b.stage === 'awarded') { e.awardedCount++; e.awardedValue += (b.estimate_amount || 0); }
+    else if (b.stage === 'not_awarded') e.notAwardedCount++;
+    else if (b.stage === 'closed') e.closedCount++;
+    else e.pendingCount++;
+  });
+  const byEstimator = Object.values(estStats)
+    .map(e => ({ ...e, winRate: rate(e.awardedCount, e.notAwardedCount, e.submittedCount) }))
+    .sort((a, b) => b.submittedCount - a.submittedCount);
 
   // ── Not-awarded detail list — the summary card only has a count/value;
   // this backs a "why did we lose these" drill-down with the project name
@@ -3817,7 +3851,7 @@ async function getReports(filters = {}) {
     }))
     .sort((a, b) => (b.dateNotAwarded || '').localeCompare(a.dateNotAwarded || ''));
 
-  return { summary, timeSeries, byCustomer, notAwardedList, granularity: gran, from: from || null, to: to || null, person: pid ? (tm[pid]?.name || null) : null };
+  return { summary, timeSeries, byCustomer, byEstimator, winRateMinSubmitted: WIN_RATE_MIN_SUBMITTED, notAwardedList, granularity: gran, from: from || null, to: to || null, person: pid ? (tm[pid]?.name || null) : null };
 }
 
 // Powers clicking a Bid Volume Over Time bar — the exact same bids that bar

@@ -48,6 +48,7 @@ const NOTIFICATION_CATEGORIES = {
   assigned: 'Bid/CO assignment',
   followup: 'Follow-up logged',
   awarded: 'Bid awarded (team-wide)',
+  submitted: 'Bid submitted to my customer',
   reminder: 'Reminders due',
   walkthrough: 'Jobsite walk-throughs',
   digest: 'Weekly digest',
@@ -301,6 +302,26 @@ function emailFollowup(bid, note, nextDate, loggedByName) {
       ${note ? `<div style="margin:14px 0;padding:12px 16px;background:#f8fafc;border-left:3px solid #cbd5e1;border-radius:4px;font-size:14px;color:#475569;font-style:italic">"${note}"</div>` : ''}
       ${nextDate ? `<p style="margin-top:12px">Next follow-up scheduled: <strong>${fmtDate(nextDate)}</strong></p>` : ''}
       ${actionButtons(bid, { href: APP_URL, label: 'Open App' })}
+      ${folderButtonHtml(bid)}
+    `),
+  };
+}
+
+// Tells a salesperson that a number just went out to a customer they own
+// (2026-10, per Carrie) — `lines` is [{ customer, amount, date }], one per
+// submission assigned to them in this batch.
+function emailBidSubmitted(bid, recipientName, actorName, lines) {
+  const hasDeepLink = bid.project_id && bid.bid_id;
+  const link = hasDeepLink ? `${APP_URL}/#project/${bid.project_id}/bid/${bid.bid_id}` : APP_URL;
+  const rows = lines.map(l => `<li><strong>${l.customer}</strong>${l.amount ? ` — ${fmtCurrency(l.amount)}` : ''}${l.date ? ` (submitted ${fmtDate(l.date)})` : ''}</li>`).join('');
+  return {
+    subject: `Bid submitted — ${bid.project_name || bid.bid_number || 'Unnamed'}`,
+    html: base(`
+      ${iconHeading(`${APP_URL}/icon-active-bids.png`, 'Bid Submitted')}
+      <p>Hi <strong>${recipientName}</strong>, <strong>${actorName}</strong> submitted a bid to ${lines.length === 1 ? 'a customer' : 'customers'} you're the salesperson for:</p>
+      <ul style="margin:10px 0 14px;padding-left:20px;font-size:14px;color:#334155">${rows}</ul>
+      ${bidTable(bid)}
+      ${actionButtons(bid, { href: link, label: hasDeepLink ? 'Open Bid' : 'Open App' })}
       ${folderButtonHtml(bid)}
     `),
   };
@@ -702,4 +723,4 @@ function emailIdeaStatusChanged(idea, newStatus) {
   };
 }
 
-module.exports = { sendMail, emailAssigned, emailFollowup, emailAwarded, emailRoleAwardNotice, emailApprovedToBid, emailForwardBidInvite, emailDueDateChanged, emailReminder, emailWalkthroughSet, emailWalkthroughAssigned, emailWalkthroughReminder, emailDigest, emailIdeaSubmitted, emailIdeaNeedsApproval, emailIdeaStatusChanged, wantsNotification, NOTIFICATION_CATEGORIES };
+module.exports = { sendMail, emailAssigned, emailFollowup, emailBidSubmitted, emailAwarded, emailRoleAwardNotice, emailApprovedToBid, emailForwardBidInvite, emailDueDateChanged, emailReminder, emailWalkthroughSet, emailWalkthroughAssigned, emailWalkthroughReminder, emailDigest, emailIdeaSubmitted, emailIdeaNeedsApproval, emailIdeaStatusChanged, wantsNotification, NOTIFICATION_CATEGORIES };
