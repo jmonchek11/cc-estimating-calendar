@@ -657,7 +657,7 @@ async function getMeta() {
     M.TeamMember.find({ active: 1 }).sort({ name: 1 }).lean(),
   ]);
   return {
-    companies: companies.map(c => ({ id: c._id, name: c.name, type: c.type })),
+    companies: companies.map(c => ({ id: c._id, name: c.name, type: c.type, street: c.street || null, city: c.city || null, state: c.state || null, zip: c.zip || null, phone: c.phone || null })),
     team: team.map(t => ({ id: t._id, name: t.name, initials: t.initials, role: t.role, is_apm: !!t.is_apm })),
     holidays: getHolidayNamesAround(new Date().getUTCFullYear()),
     vendorCategories: VENDOR_CATEGORIES,
@@ -1633,7 +1633,7 @@ async function reactivateBid(id, data, actorId) {
 // bid_submission entity, not the bid — the bid's headline is derived from them.
 const ADMIN_EDITABLE = {
   project:        ['name', 'description', 'location', 'size_bucket', 'type_of_work', 'street', 'city', 'state', 'zip'],
-  company:        ['name', 'city', 'state', 'type'],
+  company:        ['name', 'street', 'city', 'state', 'zip', 'phone', 'type'],
   // Walk-throughs are NOT here — they go through the dedicated add/update/
   // remove walk-through endpoints, which need find-or-create logic for the
   // site company/contact (and array-entry targeting) this generic whitelist

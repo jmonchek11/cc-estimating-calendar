@@ -6399,23 +6399,35 @@ const gcStatsHtml = (s) => {
   const gcWinRate = s.decided > 0 ? Math.round(s.gcWon / s.decided * 100) : null;
   return `
   <div style="font-weight:700;font-size:13px;margin:12px 0 4px">GC Award Record</div>
-  <div style="display:flex;gap:10px;flex-wrap:wrap;margin:0 0 10px">
-    <div class="stat-card" style="flex:1;min-width:90px"><div style="font-size:20px;font-weight:800">${gcWinRate == null ? '—' : gcWinRate + '%'}</div><div style="font-size:11px;color:var(--text-muted)">GC Win Rate (jobs they won, of ones we bid)</div></div>
-    <div class="stat-card" style="flex:1;min-width:90px"><div style="font-size:20px;font-weight:800;color:#166534">${s.weWon}</div><div style="font-size:11px;color:var(--text-muted)">They Picked Us</div></div>
-    <div class="stat-card" style="flex:1;min-width:90px"><div style="font-size:20px;font-weight:800;color:#dc2626">${s.gcWonPickedSomeoneElse}</div><div style="font-size:11px;color:var(--text-muted)">Won It, Picked Someone Else</div></div>
-    <div class="stat-card" style="flex:1;min-width:90px"><div style="font-size:20px;font-weight:800;color:var(--text-muted)">${s.gcNeverWon}</div><div style="font-size:11px;color:var(--text-muted)">Never Won The Job</div></div>
-    ${s.unknown ? `<div class="stat-card" style="flex:1;min-width:90px"><div style="font-size:20px;font-weight:800;color:var(--text-muted)">${s.unknown}</div><div style="font-size:11px;color:var(--text-muted)">Unknown</div></div>` : ''}
-  </div>`;
+  ${statGrid([
+    statTile(gcWinRate == null ? '—' : gcWinRate + '%', 'GC Win Rate (jobs they won, of ones we bid)'),
+    statTile(s.weWon, 'They Picked Us', '#166534'),
+    statTile(s.gcWonPickedSomeoneElse, 'Won It, Picked Someone Else', '#dc2626'),
+    statTile(s.gcNeverWon, 'Never Won The Job', 'var(--text-muted)'),
+    ...(s.unknown ? [statTile(s.unknown, 'Unknown', 'var(--text-muted)')] : []),
+  ])}`;
 };
 
-const bidStatsHtml = (stats) => `
-  <div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0">
-    <div class="stat-card" style="flex:1;min-width:80px"><div style="font-size:20px;font-weight:800">${stats.total}</div><div style="font-size:11px;color:var(--text-muted)">Total Bids</div></div>
-    <div class="stat-card" style="flex:1;min-width:80px"><div style="font-size:20px;font-weight:800;color:#92400e">${stats.active}</div><div style="font-size:11px;color:var(--text-muted)">Active</div></div>
-    <div class="stat-card" style="flex:1;min-width:80px"><div style="font-size:20px;font-weight:800;color:#166534">${stats.wins}</div><div style="font-size:11px;color:var(--text-muted)">Wins</div></div>
-    <div class="stat-card" style="flex:1;min-width:80px"><div style="font-size:20px;font-weight:800">${stats.winRate == null ? '—' : stats.winRate + '%'}</div><div style="font-size:11px;color:var(--text-muted)">Win Rate</div></div>
-    <div class="stat-card" style="flex:1;min-width:100px"><div style="font-size:16px;font-weight:800;color:#166534">${fmt$(stats.wonValue)}</div><div style="font-size:11px;color:var(--text-muted)">Won Value</div></div>
-  </div>`;
+// Compact money for tight stat tiles — a full "$12,345,678" ran past the edge
+// of its card; the exact figure stays available as the tile's tooltip.
+const fmtCompact$ = n => {
+  if (n == null) return '';
+  const a = Math.abs(n);
+  if (a >= 1e6) return '$' + String(+(n / 1e6).toFixed(a >= 1e7 ? 1 : 2)) + 'M';
+  if (a >= 1e4) return '$' + Math.round(n / 1e3) + 'K';
+  return fmt$(n);
+};
+const statTile = (value, label, color, title) => `<div class="stat-card" style="min-width:0;padding:10px 12px"${title ? ` title="${esc(title)}"` : ''}>
+  <div style="font-size:19px;font-weight:800;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis${color ? ';color:' + color : ''}">${value}</div>
+  <div style="font-size:11px;color:var(--text-muted);margin-top:2px;line-height:1.25">${label}</div></div>`;
+const statGrid = (tiles) => `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:8px;margin:8px 0 12px">${tiles.join('')}</div>`;
+const bidStatsHtml = (stats) => statGrid([
+  statTile(stats.total, 'Total Bids'),
+  statTile(stats.active, 'Active', '#92400e'),
+  statTile(stats.wins, 'Wins', '#166534'),
+  statTile(stats.winRate == null ? '—' : stats.winRate + '%', 'Win Rate'),
+  statTile(fmtCompact$(stats.wonValue), 'Won Value', '#166534', fmt$(stats.wonValue)),
+]);
 
 const bidHistoryRowsHtml = (bids) => bids.length ? bids.map(b => `
     <div class="proj-row" onclick="closeProfileModal();openBidFlyout(${b.project_id},${b.id})">
@@ -6506,7 +6518,7 @@ function openProfileModal(title, bodyHtml) {
   closeProfileModal(); closeFlyout();
   const ov = document.createElement('div');
   ov.className = 'v2-overlay'; ov.id = 'v2-profile-overlay';
-  ov.innerHTML = `<div class="v2-modal" style="max-width:520px">
+  ov.innerHTML = `<div class="v2-modal" style="max-width:580px">
     <div class="v2-modal-hd">${title}<button class="v2-btn outline" onclick="closeProfileModal()">✕</button></div>
     <div class="v2-modal-bd">${bodyHtml}</div>
   </div>`;
@@ -6552,7 +6564,27 @@ async function openCompanyProfile(companyId) {
   catch (e) { openProfileModal('Error', `<div class="err-card">${esc(e.message)}</div>`); return; }
   const co = META.companies.find(c => c.id === companyId);
 
+  // Header card: type + address on the left, Edit/Delete as real buttons on
+  // the right (they used to be loose text links crammed into the title bar).
+  const cityLine = [co?.city, [co?.state, co?.zip].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+  const addrLines = [co?.street, cityLine].filter(Boolean);
+  const mapQ = encodeURIComponent(addrLines.join(', '));
+  const infoCard = `
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:12px 14px;border:1px solid var(--border);border-radius:10px;background:#f8fafc;margin-bottom:4px">
+      <div style="min-width:0;font-size:13px;line-height:1.5">
+        ${co?.type ? `<div style="margin-bottom:4px">${companyTypeBadge(co.type)}</div>` : ''}
+        ${addrLines.length
+          ? `<a href="https://www.google.com/maps/search/?api=1&query=${mapQ}" target="_blank" rel="noopener" style="color:var(--text);text-decoration:none" title="Open in Maps">📍 ${addrLines.map(esc).join('<br><span style="padding-left:21px"></span>')}</a>`
+          : `<span style="color:var(--text-muted)">📍 No address on file</span>`}
+        ${co?.phone ? `<div style="color:var(--text-muted)">📞 ${esc(co.phone)}</div>` : ''}
+      </div>
+      ${CURRENT_USER?.is_admin ? `<div style="display:flex;gap:6px;flex-shrink:0">
+        <button class="v2-btn outline" style="padding:5px 12px;font-size:12px" onclick="actEditCompany(${companyId})">✏️ Edit</button>
+        <button class="v2-btn outline" style="padding:5px 12px;font-size:12px;color:#dc2626;border-color:#fecaca" onclick="actAdminDelete('company',${companyId},'${escJs(co?.name || 'this company')}')">🗑 Delete</button>
+      </div>` : ''}
+    </div>`;
   const body = `
+    ${infoCard}
     ${bidStatsHtml(hist.stats)}
     ${gcStatsHtml(hist.gcStats)}
     <div style="font-weight:700;font-size:13px;margin:12px 0 4px">Contacts</div>
@@ -6570,13 +6602,17 @@ async function openCompanyProfile(companyId) {
       <a href="#" onclick="event.preventDefault();actLogGeneralCallFromCompany(${companyId})" style="font-size:12px;color:#2563eb;font-weight:600">+ Log a Call</a>
     </div>
     <div class="card" style="padding:0 12px;max-height:320px;overflow-y:auto">${communicationsTimelineHtml(comms)}</div>`;
-  const titleExtra = `${companyTypeBadge(co?.type)}${CURRENT_USER?.is_admin ? ` <a href="#" onclick="event.preventDefault();actEditCompanyType(${companyId})" style="font-size:11px;color:#2563eb;font-weight:400;margin-left:6px">edit type</a> <a href="#" onclick="event.preventDefault();actAdminDelete('company',${companyId},'${escJs(co?.name || 'this company')}')" style="font-size:11px;color:#dc2626;font-weight:400;margin-left:6px">delete</a>` : ''}`;
-  openProfileModal(`🏢 ${esc(co?.name || 'Company')} ${titleExtra}`, body);
+  openProfileModal(`🏢 ${esc(co?.name || 'Company')}`, body);
 }
-function actEditCompanyType(companyId) {
+function actEditCompany(companyId) {
   const co = META.companies.find(c => c.id === companyId);
-  showForm('✏️ Edit Company Type', [
+  showForm('✏️ Edit Company', [
     { id: 'type', label: 'Type', type: 'select', emptyLabel: 'Unspecified', value: co?.type, options: COMPANY_TYPE_OPTIONS },
+    { id: 'street', label: 'Street Address', type: 'text', value: co?.street, placeholder: '123 Main Street, Suite 400' },
+    { id: 'city', label: 'City', type: 'text', value: co?.city },
+    { id: 'state', label: 'State', type: 'text', value: co?.state, placeholder: 'PA', maxLength: 2 },
+    { id: 'zip', label: 'Zip', type: 'text', value: co?.zip },
+    { id: 'phone', label: 'Main Phone', type: 'phone', value: co?.phone },
   ], async data => {
     const r = await api('PATCH', `/api/v2/admin/company/${companyId}`, data);
     META = await api('GET', '/api/v2/meta'); CURRENT_USER = META.current_user;
