@@ -90,6 +90,9 @@ const BidSchema = new mongoose.Schema({
   // only as a note in the opportunity's free-text notes, which kept getting
   // missed and led to bids being assigned to the wrong department.
   who_will_bid:   { type: String, enum: ['estimating', 'project_management'], default: null },
+  // Budget pricing rather than a hard bid (2026-10, per Carrie) — flagged so
+  // it's visible on the card/lists instead of only living in the notes.
+  is_budget:      { type: Boolean, default: false },
   rfi_due_date:   { type: String, default: null },               // official RFI (Request for Information) cutoff, when a project has one — independent of due_date/stage
   rfi_due_time:   { type: String, default: null },               // "HH:MM", 24-hour — optional
   folder_url:     { type: String, default: null },               // link to THIS bid's own OneDrive folder — a new folder is created per bid (not per project); at award, the team renames it from "bid# - bid name" to "job# - job name" but the link itself stays valid
@@ -217,6 +220,11 @@ const JobSchema = new mongoose.Schema({
   // Only meaningful once needs_permit === true; left null otherwise.
   needs_rough_in_permit:     { type: Boolean, default: null },
   needs_accelerated_permit:  { type: Boolean, default: null },
+  // Added 2026-10 (Connor): asked in the same requirements step, same
+  // three-state (null = not yet answered) and only meaningful when
+  // needs_permit === true.
+  needs_fire_alarm_drawings: { type: Boolean, default: null },
+  ez_permit_eligible:        { type: Boolean, default: null },
   permit_date_applied:       { type: String, default: null },
   permit_date_approved:      { type: String, default: null },
   permit_date_coa_received:  { type: String, default: null },   // Certificate of Approval

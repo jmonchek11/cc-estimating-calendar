@@ -1955,6 +1955,7 @@ function renderBidListBody(stage) {
           <div class="proj-name">${esc(b.project)}${b.bid_number ? ` <span style="color:var(--text-muted);font-weight:400;font-size:12px">#${esc(b.bid_number)}</span>` : ''}
             ${b.project_on_hold ? '<span class="badge" style="background:#fef3c7;color:#92400e">⏸ ON HOLD</span>' : ''}
             ${b.awaiting_po ? '<span class="badge" style="background:#ffedd5;color:#9a3412">🔥 AWAITING PO</span>' : ''}
+            ${b.is_budget ? '<span class="badge" style="background:#fef9c3;color:#854d0e;font-size:10px">BUDGET</span>' : ''}
             ${b.drawing_stage ? `<span class="badge" style="background:#ede9fe;color:#5b21b6;font-size:10px">${esc(b.drawing_stage)}</span>` : ''}
             ${b.size_bucket ? `<span class="badge" style="background:#e0f2fe;color:#075985;font-size:10px">${esc(b.size_bucket)}</span>` : ''}
             ${b.type_of_work ? `<span class="badge" style="background:#f0fdf4;color:#166534;font-size:10px">${esc(b.type_of_work)}</span>` : ''}</div>
@@ -1966,6 +1967,7 @@ function renderBidListBody(stage) {
             ${b.estimator ? `<span class="proj-meta-sep">·</span> Est ${ini(b.estimator)}` : ''}
             ${b.salesperson ? ` Sales ${ini(b.salesperson)}` : ''}
             ${b.apm ? ` APM ${ini(b.apm)}` : ''}
+            ${b.pm && !['awarded', 'queue'].includes(stage) ? ` PM ${ini(b.pm)}` : ''}
           </div>
         </div>
         <div style="display:flex;align-items:center;gap:12px;flex-shrink:0;align-self:center">
@@ -2859,6 +2861,10 @@ function bidNode(b, proj) {
   b.sub_estimators.forEach(s => metaBits.push(`${ini(s)}<span style="font-size:10px">${esc(s.scope)}<a href="#" onclick="event.preventDefault();actRemoveSubEstimator(${b.id},${s.id},'${escJs(s.scope)}')" style="color:#dc2626;margin-left:2px">✕</a></span>`));
   if (b.salesperson) metaBits.push(`Sales ${ini(b.salesperson)}`);
   if (b.apm) metaBits.push(`APM ${ini(b.apm)}`);
+  // PM was only ever visible inside Edit Bid on a bid card — never in this
+  // line — so a bid with several people assigned looked like it had no PM
+  // (per Carrie).
+  if (b.pm) metaBits.push(`PM ${ini(b.pm)}`);
   if (b.jurisdiction) metaBits.push(`Local ${esc(b.jurisdiction)}`);
   const fuOverdue = !proj?.on_hold && b.next_followup_date && b.next_followup_date < today;
   if (b.next_followup_date) metaBits.push(`Next F/U <span class="${fuOverdue ? 'overdue-txt' : ''}">${fmtD(b.next_followup_date)}${fuOverdue ? ' — OVERDUE' : ''}</span>`);
@@ -2874,6 +2880,7 @@ function bidNode(b, proj) {
           <span class="bc-bidnum">${b.bid_number ? esc(b.bid_number) : 'No bid #'}</span>
           ${isAwarded ? '<span class="awarded-pill">AWARDED</span>' : stageBadge(b.stage)}
           ${b.superseded ? '<span class="badge" style="background:#e2e8f0;color:#64748b">SUPERSEDED</span>' : ''}
+          ${b.is_budget ? '<span class="badge" style="background:#fef9c3;color:#854d0e" title="Budget pricing, not a hard bid">BUDGET</span>' : ''}
           ${b.stage === 'opportunity' && b.approved_to_bid ? `<span class="badge" style="background:#ede9fe;color:#6d28d9" title="Approved ${esc(b.approved_to_bid_at || '')} — in the Queue">QUEUED</span>` : ''}
           ${b.drawing_stage ? `<span class="badge" style="background:#ede9fe;color:#5b21b6">${esc(b.drawing_stage)}</span>` : ''}
           ${b.certified_payroll ? `<span class="badge" style="background:#fef3c7;color:#92400e" title="Notifies Accounting on award">CERTIFIED PAYROLL</span>` : ''}
@@ -3158,7 +3165,7 @@ function permitsSectionHtml(j) {
   return `<div class="v2-co" style="border-left-color:#a855f7">
     <div style="flex:1;min-width:0">
       <div style="font-weight:700;font-size:12px;color:#7e22ce">🏛️ Permits — required <a href="#" onclick="event.preventDefault();actEditPermitRequirements(${j.id})" style="font-size:11px;color:#2563eb;font-weight:400">edit</a></div>
-      <div style="font-size:11.5px;color:var(--text-muted);margin-top:2px">Rough-In: ${permitYesNo(j.needs_rough_in_permit)} · Accelerated: ${permitYesNo(j.needs_accelerated_permit)}</div>
+      <div style="font-size:11.5px;color:var(--text-muted);margin-top:2px">Rough-In: ${permitYesNo(j.needs_rough_in_permit)} · Accelerated: ${permitYesNo(j.needs_accelerated_permit)} · FA Drawings: ${permitYesNo(j.needs_fire_alarm_drawings)} · EZ Permit: ${permitYesNo(j.ez_permit_eligible)}</div>
       ${dateRow('Applied', j.permit_date_applied)}
       ${dateRow('Approved', j.permit_date_approved)}
       ${dateRow('COA Received', j.permit_date_coa_received)}
@@ -3175,6 +3182,10 @@ function actEditPermitRequirements(jobId) {
     { id: 'needs_rough_in_permit', label: 'Do we need a Rough-In permit?', type: 'select', emptyLabel: 'TBD — not yet known', value: yn(j.needs_rough_in_permit),
       options: [{ value: 1, label: 'Yes' }, { value: 0, label: 'No' }] },
     { id: 'needs_accelerated_permit', label: 'Do we need an Accelerated permit?', type: 'select', emptyLabel: 'TBD — not yet known', value: yn(j.needs_accelerated_permit),
+      options: [{ value: 1, label: 'Yes' }, { value: 0, label: 'No' }] },
+    { id: 'needs_fire_alarm_drawings', label: 'Do we need Fire Alarm drawings?', type: 'select', emptyLabel: 'TBD — not yet known', value: yn(j.needs_fire_alarm_drawings),
+      options: [{ value: 1, label: 'Yes' }, { value: 0, label: 'No' }] },
+    { id: 'ez_permit_eligible', label: 'Can this job be an EZ permit?', type: 'select', emptyLabel: 'TBD — not yet known', value: yn(j.ez_permit_eligible),
       options: [{ value: 1, label: 'Yes' }, { value: 0, label: 'No' }] },
   ], data => api('PATCH', `/api/v2/jobs/${jobId}/permits`, data), 'Save', 'blue');
 }
@@ -3834,6 +3845,7 @@ async function actNewOpportunity() {
       maxLength: 30, hint: 'Max 30 characters (Foundation limit). Suggested format: "Building name/# - Type of work" — e.g. "Merck B53 Controls" (customer isn\'t included — it\'s tracked separately).' },
     { id: 'owner_id', label: 'Who Added the Opportunity', type: 'select', required: true, options: teamOpts(), value: CURRENT_USER?.id },
     { id: 'who_will_bid', label: 'Who Will Bid?', type: 'select', required: true, options: WHO_WILL_BID_OPTIONS },
+    { id: 'is_budget', label: 'Is this a Budget?', type: 'select', emptyLabel: 'No — regular bid', options: [{ value: 1, label: 'Yes — budget' }] },
     { id: 'source', label: 'Source', type: 'select', required: true, options: OPPORTUNITY_SOURCE_OPTIONS },
     { id: 'due_date', label: 'Due Date', type: 'date', required: true },
     { id: 'due_time', label: 'Due Time (optional)', type: 'time' },
@@ -4239,6 +4251,7 @@ function actEditBid(bidId) {
   // same ground at the Opportunity stage — this isn't replacing it, just no
   // longer leaving Edit Bid itself inconsistent about it.
   fields.push(
+    { id: 'is_budget', label: 'Is this a Budget?', type: 'select', emptyLabel: 'No — regular bid', options: [{ value: 1, label: 'Yes — budget' }], value: b.is_budget ? 1 : '' },
     { id: 'estimator_id', label: 'Estimator', type: 'select', emptyLabel: 'TBD', options: teamOpts(['estimator', 'sales']), value: b.estimator?.id },
     { id: 'salesperson_id', label: 'Salesperson', type: 'select', emptyLabel: 'TBD', options: teamOpts(['sales']), value: b.salesperson?.id },
     { id: 'apm_id', label: 'APM', type: 'select', emptyLabel: 'None', options: apmOpts(), value: b.apm?.id },
@@ -4823,6 +4836,7 @@ function actEditOpportunityDetails(bidId) {
     { id: 'due_time', label: 'Due Time (optional)', type: 'time', value: b.due_time },
     { id: 'owner_id', label: 'Opportunity Owner', type: 'select', emptyLabel: 'TBD', options: teamOpts(), value: b.owner?.id },
     { id: 'who_will_bid', label: 'Who Will Bid?', type: 'select', emptyLabel: 'TBD', options: WHO_WILL_BID_OPTIONS, value: b.who_will_bid },
+    { id: 'is_budget', label: 'Is this a Budget?', type: 'select', emptyLabel: 'No — regular bid', options: [{ value: 1, label: 'Yes — budget' }], value: b.is_budget ? 1 : '' },
     { id: 'source', label: 'Source (where did this come from?)', type: 'text', value: b.source, placeholder: 'iSqFt, BuildingConnected, email invite, referral, phone call…' },
     { id: 'estimator_id', label: 'Estimator (if known)', type: 'select', emptyLabel: 'TBD', options: teamOpts(['estimator', 'sales']), value: b.estimator?.id },
     { id: 'salesperson_id', label: 'Salesperson', type: 'select', emptyLabel: 'TBD', options: teamOpts(['sales']), value: b.salesperson?.id },
@@ -5271,7 +5285,7 @@ async function renderPermits() {
       <span class="badge" style="background:${m.color}1a;color:${m.color};flex-shrink:0">${esc(m.label)}</span>
       <div style="flex:1;min-width:0">
         <div style="font-weight:700;font-size:13px">${r.job_number ? `Job ${esc(r.job_number)}` : '<span style="color:#dc2626">Job # pending</span>'} — ${esc(r.project_name)}</div>
-        <div style="font-size:11.5px;color:var(--text-muted);margin-top:1px">${r.awarded_company ? esc(r.awarded_company) + ' · ' : ''}Rough-In: ${permitYesNo(r.needs_rough_in_permit)} · Accelerated: ${permitYesNo(r.needs_accelerated_permit)}</div>
+        <div style="font-size:11.5px;color:var(--text-muted);margin-top:1px">${r.awarded_company ? esc(r.awarded_company) + ' · ' : ''}Rough-In: ${permitYesNo(r.needs_rough_in_permit)} · Accelerated: ${permitYesNo(r.needs_accelerated_permit)} · FA Drawings: ${permitYesNo(r.needs_fire_alarm_drawings)} · EZ Permit: ${permitYesNo(r.ez_permit_eligible)}</div>
       </div>
       <div style="text-align:right;flex-shrink:0;font-size:11.5px;color:var(--text-muted)">
         ${r.permit_date_applied ? `Applied ${fmtD(r.permit_date_applied)}` : ''}

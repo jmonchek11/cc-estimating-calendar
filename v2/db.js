@@ -307,7 +307,7 @@ async function getProjectDetail(projectId) {
     pm: tm[b.pm_id] || null,
     owner: tm[b.owner_id] || null,
     source: b.source,
-    who_will_bid: b.who_will_bid || null,
+    who_will_bid: b.who_will_bid || null, is_budget: !!b.is_budget,
     sub_estimators: (b.sub_estimators || []).map(s => ({ ...(tm[s.estimator_id] || {}), scope: s.scope })),
     customers: bidCustomers.filter(bc => bc.bid_id === b._id).map(bc => {
       const co = companyById[bc.company_id]; if (!co) return null;
@@ -446,6 +446,8 @@ async function getProjectDetail(projectId) {
       needs_permit: j.needs_permit == null ? null : !!j.needs_permit,
       needs_rough_in_permit: j.needs_rough_in_permit == null ? null : !!j.needs_rough_in_permit,
       needs_accelerated_permit: j.needs_accelerated_permit == null ? null : !!j.needs_accelerated_permit,
+      needs_fire_alarm_drawings: j.needs_fire_alarm_drawings == null ? null : !!j.needs_fire_alarm_drawings,
+      ez_permit_eligible: j.ez_permit_eligible == null ? null : !!j.ez_permit_eligible,
       permit_date_applied: j.permit_date_applied || null,
       permit_date_approved: j.permit_date_approved || null,
       permit_date_coa_received: j.permit_date_coa_received || null,
@@ -790,7 +792,7 @@ async function updateSettingsV2(data) {
 // stage (real substance — a contact, plans, worth reviewing daily). Same
 // creation path for both since the fields captured are identical; only the
 // starting stage differs.
-async function createOpportunity({ project_id, project_name, notes, description, location, size_bucket, type_of_work, due_date, due_time, rfi_due_date, rfi_due_time, owner_id, source, cm_portal_url, who_will_bid, company_ids, new_companies, contact_ids_by_company, new_contacts_by_company, created_by, stage }) {
+async function createOpportunity({ project_id, project_name, notes, description, location, size_bucket, type_of_work, due_date, due_time, rfi_due_date, rfi_due_time, owner_id, source, cm_portal_url, who_will_bid, is_budget, company_ids, new_companies, contact_ids_by_company, new_contacts_by_company, created_by, stage }) {
   const M = getModels();
   const startStage = stage === 'lead' ? 'lead' : 'opportunity';
   // Required for a real opportunity (per Connor — bids were getting
@@ -822,7 +824,7 @@ async function createOpportunity({ project_id, project_name, notes, description,
   }
   const bidId = await nextId('bids');
   const ownerId = owner_id ? Number(owner_id) : (created_by ? Number(created_by) : null);
-  await M.Bid.create({ _id: bidId, project_id: pid, stage: startStage, notes: notes || null, due_date: due_date || null, due_time: due_time || null, rfi_due_date: rfi_due_date || null, rfi_due_time: rfi_due_time || null, owner_id: ownerId, source: source || null, cm_portal_url: cm_portal_url || null, who_will_bid: who_will_bid || null });
+  await M.Bid.create({ _id: bidId, project_id: pid, stage: startStage, notes: notes || null, due_date: due_date || null, due_time: due_time || null, rfi_due_date: rfi_due_date || null, rfi_due_time: rfi_due_time || null, owner_id: ownerId, source: source || null, cm_portal_url: cm_portal_url || null, who_will_bid: who_will_bid || null, is_budget: Number(is_budget) === 1 });
 
   const { newContacts } = await attachCustomersAndContacts(bidId, { company_ids, new_companies, contact_ids_by_company, new_contacts_by_company });
 
@@ -1322,6 +1324,7 @@ async function updateOpportunity(id, data) {
   if ('apm_id' in data) upd.apm_id = data.apm_id ? Number(data.apm_id) : null;
   if ('pm_id' in data) upd.pm_id = data.pm_id ? Number(data.pm_id) : null;
   if ('who_will_bid' in data) upd.who_will_bid = data.who_will_bid || null;
+  if ('is_budget' in data) upd.is_budget = Number(data.is_budget) === 1;
   await M.Bid.updateOne({ _id: bid._id }, { $set: upd });
   return { bid_id: bid._id };
 }
@@ -1639,7 +1642,7 @@ const ADMIN_EDITABLE = {
   // site company/contact (and array-entry targeting) this generic whitelist
   // path can't do.
   bid:            ['bid_number', 'estimator_id', 'salesperson_id', 'apm_id', 'pm_id', 'date_received', 'due_date', 'due_time', 'start_date',
-                   'drawing_stage', 'notes', 'jurisdiction', 'superseded', 'owner_id', 'source', 'rfi_due_date', 'rfi_due_time', 'folder_url', 'cm_portal_url',
+                   'drawing_stage', 'notes', 'jurisdiction', 'superseded', 'owner_id', 'source', 'rfi_due_date', 'rfi_due_time', 'folder_url', 'cm_portal_url', 'is_budget',
                    'certified_payroll', 'tax_exempt', 'prevailing_wage', 'follow_up_interval_days'],
   job:            ['job_number', 'pm_id', 'apm_id', 'awarded_company_id', 'award_date', 'folder_url'],
   change_order:   ['co_number', 'name', 'due_date', 'start_date', 'estimator_id', 'notes',
@@ -1670,6 +1673,7 @@ async function adminUpdate(entity, id, data) {
     // forcing every submitted-bid edit to 1 regardless of which option was
     // actually chosen. Numeric comparison first, then coerce to 1/0.
     else if (f === 'superseded' || f === 'is_current') v = Number(v) === 1 ? 1 : 0;
+    else if (f === 'is_budget') v = Number(v) === 1;
     // Three-state — '' (TBD) already became null above and stays null;
     // anything else is a real Yes/No answer.
     else if (f === 'certified_payroll' || f === 'tax_exempt' || f === 'prevailing_wage' || f === 'gc_awarded') v = (v == null) ? null : (Number(v) === 1 || v === true);
@@ -2829,10 +2833,12 @@ async function updateJobPermits(id, data) {
     // The sub-questions only mean anything once a permit is actually
     // needed — clear them rather than leave a stale Yes/No sitting under a
     // "No permit needed" answer.
-    if (upd.needs_permit !== true) { upd.needs_rough_in_permit = null; upd.needs_accelerated_permit = null; }
+    if (upd.needs_permit !== true) { upd.needs_rough_in_permit = null; upd.needs_accelerated_permit = null; upd.needs_fire_alarm_drawings = null; upd.ez_permit_eligible = null; }
   }
   if ('needs_rough_in_permit' in data) upd.needs_rough_in_permit = b3(data.needs_rough_in_permit);
   if ('needs_accelerated_permit' in data) upd.needs_accelerated_permit = b3(data.needs_accelerated_permit);
+  if ('needs_fire_alarm_drawings' in data) upd.needs_fire_alarm_drawings = b3(data.needs_fire_alarm_drawings);
+  if ('ez_permit_eligible' in data) upd.ez_permit_eligible = b3(data.ez_permit_eligible);
   for (const f of ['permit_date_applied', 'permit_date_approved', 'permit_date_coa_received']) {
     if (f in data) upd[f] = data[f] || null;
   }
@@ -2863,6 +2869,7 @@ async function getPermitsOverview() {
       id: j._id, job_number: j.job_number, project_id: j.project_id, project_name: pName[j.project_id] || '—',
       awarded_company: j.awarded_company_id ? (coName[j.awarded_company_id] || null) : null,
       needs_rough_in_permit: j.needs_rough_in_permit, needs_accelerated_permit: j.needs_accelerated_permit,
+      needs_fire_alarm_drawings: j.needs_fire_alarm_drawings, ez_permit_eligible: j.ez_permit_eligible,
       permit_date_applied: j.permit_date_applied, permit_date_approved: j.permit_date_approved, permit_date_coa_received: j.permit_date_coa_received,
       status,
     };
@@ -3274,7 +3281,7 @@ async function getBidList(stage) {
       type_of_work: pType[b.project_id] || null, project_on_hold: !!pOnHold[b.project_id],
       bid_number: b.bid_number, stage: b.stage, drawing_stage: b.drawing_stage,
       estimator: tm[b.estimator_id] || null, salesperson: tm[b.salesperson_id] || null, apm: tm[b.apm_id] || null,
-      owner: tm[b.owner_id] || null, source: b.source, who_will_bid: b.who_will_bid || null,
+      owner: tm[b.owner_id] || null, source: b.source, who_will_bid: b.who_will_bid || null, is_budget: !!b.is_budget,
       sub_estimators: (b.sub_estimators || []).map(s => ({ ...(tm[s.estimator_id] || {}), scope: s.scope })),
       customers: [...new Set((custByBid[b._id] || []).filter(Boolean))],
       date_received: b.date_received, due_date: b.due_date, due_time: b.due_time,
