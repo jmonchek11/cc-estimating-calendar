@@ -2987,6 +2987,46 @@ async function addPermitUpdate(id, text, actorName) {
   await M.Permit.updateOne({ _id: existing._id }, { $push: { updates: { date: today(), text: String(text).trim(), by: actorName || null } }, $set: { updated_at: ts() } });
   return { id: existing._id };
 }
+// One-tap status changes for the Permits page (per Pat's workflow — no edit
+// form needed to mark a permit filed / approved / picked up). Each one sets
+// the right fields AND writes a dated timeline entry, so the Wednesday
+// report shows what changed without anyone typing it.
+async function permitAction(id, data, actorName) {
+  const M = getModels();
+  const p = await loadPermit(id);
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(data.date || '') ? data.date : today();
+  const note = data.note && String(data.note).trim() ? String(data.note).trim() : null;
+  const set = { updated_at: ts() };
+  let text;
+  switch (data.action) {
+    case 'filed':
+      set.status = 'filed'; set.date_filed = date;
+      if (data.permit_number && String(data.permit_number).trim()) set.permit_number = String(data.permit_number).trim();
+      text = `Permit filed${set.permit_number ? ' (' + set.permit_number + ')' : ''}`; break;
+    case 'corrections':
+      set.status = 'corrections'; text = 'L&I corrections needed'; break;
+    case 'resubmitted':
+      set.status = 'filed'; text = 'Corrections resubmitted to L&I'; break;
+    case 'approved':
+      set.status = 'approved'; set.approved_for_pickup = true; text = 'Approved — ready for pickup'; break;
+    case 'picked_up':
+      set.status = 'picked_up'; set.approved_for_pickup = true; set.date_picked_up = date; text = 'Permit picked up'; break;
+    case 'closed':
+      set.status = 'closed'; text = 'Closed out'; break;
+    case 'withdrawn':
+      set.status = 'withdrawn'; text = 'Permit withdrawn'; break;
+    case 'reopen':
+      set.status = p.date_picked_up ? 'picked_up' : (p.date_filed ? 'filed' : 'not_filed'); text = 'Reopened'; break;
+    case 'note':
+      if (!note) throw new Error('Type a note first');
+      await M.Permit.updateOne({ _id: p._id }, { $push: { updates: { date, text: note, by: actorName || null } }, $set: { updated_at: ts() } });
+      return { id: p._id };
+    default: throw new Error('Unknown permit action');
+  }
+  const entry = { date, text: note ? `${text} — ${note}` : text, by: actorName || null };
+  await M.Permit.updateOne({ _id: p._id }, { $set: set, $push: { updates: entry } });
+  return { id: p._id, status: set.status };
+}
 async function deletePermit(id) {
   await getModels().Permit.deleteOne({ _id: Number(id) });
   return { ok: true };
@@ -5128,7 +5168,7 @@ module.exports = {
   getCompanyCommunications, getContactCommunications, getAllCommunications,
   addBidCustomerContact, removeBidCustomerContact, setBidCustomerPortalUrl,
   awardSubmission, notAwardSubmission, revertAward, revertNotAwarded, closeBid, approveToBid, unapproveToBid, logFollowupV2, updateFollowup,
-  createLegacyJob, updateJob, updateJobPermits, getPermitsOverview, createPermit, updatePermit, addPermitUpdate, deletePermit, permitJobNumber,
+  createLegacyJob, updateJob, updateJobPermits, getPermitsOverview, createPermit, updatePermit, addPermitUpdate, permitAction, deletePermit, permitJobNumber,
   createChangeOrder, submitCO, approveCO, notApproveCO, voidCO, reopenCO, reviseCO,
   createCoRequest, approveCoRequest, unapproveCoRequest, startCoRequest,
   _norm, resolveCompanyByName, ensureBidCustomer, teamMap,
