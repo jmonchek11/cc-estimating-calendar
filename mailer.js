@@ -49,6 +49,7 @@ const NOTIFICATION_CATEGORIES = {
   followup: 'Follow-up logged',
   awarded: 'Bid awarded (team-wide)',
   submitted: 'Bid submitted to my customer',
+  permit: 'Permit updates & reminders',
   reminder: 'Reminders due',
   walkthrough: 'Jobsite walk-throughs',
   digest: 'Weekly digest',
@@ -323,6 +324,49 @@ function emailBidSubmitted(bid, recipientName, actorName, lines) {
       ${bidTable(bid)}
       ${actionButtons(bid, { href: link, label: hasDeepLink ? 'Open Bid' : 'Open App' })}
       ${folderButtonHtml(bid)}
+    `),
+  };
+}
+
+// ── Permit emails (2026-10) ──────────────────────────────────────────────────
+function emailPermitUpdate(p, recipientName, actorName, text) {
+  const link = p.project_id ? `${APP_URL}/#project/${p.project_id}` : `${APP_URL}/#permits`;
+  const label = [p.job_number, p.job_name].filter(Boolean).join(' — ') || 'a job';
+  return {
+    subject: `Permit update — ${label}`,
+    html: base(`
+      ${iconHeading(`${APP_URL}/icon-active-bids.png`, 'Permit Update')}
+      <p>Hi <strong>${recipientName}</strong>, <strong>${actorName}</strong> updated the permit on a job you're the PM for:</p>
+      <div style="margin:14px 0;padding:12px 16px;background:#f8fafc;border-left:3px solid #2563eb;border-radius:4px;font-size:15px;color:#0f172a"><strong>${label}</strong><br>${text}${p.permit_number ? `<br><span style="color:#64748b;font-size:13px">Permit # ${p.permit_number}</span>` : ''}</div>
+      ${buttonRow({ href: link, label: p.project_id ? 'Open Job' : 'Open Permits' }, { href: `${APP_URL}/#permits`, label: 'All Permits' })}
+    `),
+  };
+}
+function emailPermitRequired(job, recipientName, actorName) {
+  const label = [job.job_number, job.project_name].filter(Boolean).join(' — ') || 'a job';
+  const yn = v => v === true ? 'Yes' : v === false ? 'No' : 'TBD';
+  return {
+    subject: `Permit required — ${label}`,
+    html: base(`
+      ${iconHeading(`${APP_URL}/icon-active-bids.png`, 'New Permit Required')}
+      <p>Hi <strong>${recipientName}</strong>, <strong>${actorName}</strong> marked <strong>${label}</strong> as needing a permit.</p>
+      <div style="margin:14px 0;padding:12px 16px;background:#f8fafc;border-left:3px solid #d97706;border-radius:4px;font-size:14px;color:#334155;line-height:1.7">
+        Rough-in permit: <strong>${yn(job.needs_rough_in_permit)}</strong> &nbsp;·&nbsp; Accelerated: <strong>${yn(job.needs_accelerated_permit)}</strong><br>
+        Fire alarm drawings: <strong>${yn(job.needs_fire_alarm_drawings)}</strong> &nbsp;·&nbsp; EZ permit: <strong>${yn(job.ez_permit_eligible)}</strong>
+      </div>
+      ${buttonRow({ href: `${APP_URL}/#permits`, label: 'Open Permits' }, { href: `${APP_URL}/#project/${job.project_id}`, label: 'Open Job' })}
+    `),
+  };
+}
+function emailPermitNudge(list, recipientName) {
+  const rows = list.map(p => `<li><strong>${[p.job_number, p.job_name].filter(Boolean).join(' — ') || 'Unnamed'}</strong>${p.permit_number ? ` (${p.permit_number})` : ''} — filed ${fmtDate(p.date_filed)}, <strong>${p.days_open} days</strong>${p.status === 'corrections' ? ' · corrections needed' : ''}</li>`).join('');
+  return {
+    subject: `Permits waiting over 3 weeks (${list.length})`,
+    html: base(`
+      ${iconHeading(`${APP_URL}/icon-reminder.png`, 'Permits Waiting on L&I')}
+      <p>Hi <strong>${recipientName}</strong>, ${list.length === 1 ? 'this permit has' : 'these permits have'} been filed for over 3 weeks without being approved — time to follow up with L&I:</p>
+      <ul style="margin:10px 0 14px;padding-left:20px;font-size:14px;color:#334155;line-height:1.7">${rows}</ul>
+      ${buttonRow({ href: `${APP_URL}/#permits`, label: 'Open Permits' })}
     `),
   };
 }
@@ -723,4 +767,4 @@ function emailIdeaStatusChanged(idea, newStatus) {
   };
 }
 
-module.exports = { sendMail, emailAssigned, emailFollowup, emailBidSubmitted, emailAwarded, emailRoleAwardNotice, emailApprovedToBid, emailForwardBidInvite, emailDueDateChanged, emailReminder, emailWalkthroughSet, emailWalkthroughAssigned, emailWalkthroughReminder, emailDigest, emailIdeaSubmitted, emailIdeaNeedsApproval, emailIdeaStatusChanged, wantsNotification, NOTIFICATION_CATEGORIES };
+module.exports = { sendMail, emailAssigned, emailFollowup, emailBidSubmitted, emailPermitUpdate, emailPermitRequired, emailPermitNudge, emailAwarded, emailRoleAwardNotice, emailApprovedToBid, emailForwardBidInvite, emailDueDateChanged, emailReminder, emailWalkthroughSet, emailWalkthroughAssigned, emailWalkthroughReminder, emailDigest, emailIdeaSubmitted, emailIdeaNeedsApproval, emailIdeaStatusChanged, wantsNotification, NOTIFICATION_CATEGORIES };

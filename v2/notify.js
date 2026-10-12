@@ -180,6 +180,61 @@ async function notifyBidSubmitted(bidId, submissionIds, actorId) {
   } catch (e) { console.error('[v2 notify] bid submitted email failed:', e.message); }
 }
 
+// ── Permits (2026-10) ─────────────────────────────────────────────────────────
+// Anyone flagged permit_manager (Pat) is who permit emails go to when a job
+// is marked as needing a permit and for the 3-week nudge.
+async function permitManagers() {
+  const M = getModels();
+  const ms = await M.TeamMember.find({ permit_manager: true, active: 1 }).lean();
+  return ms.filter(m => m.email).map(m => ({ id: m._id, email: m.email, name: m.name, notification_prefs: m.notification_prefs }))
+    .filter(m => mailer.wantsNotification(m, 'permit'));
+}
+// A permit changed (filed / approved / picked up / note…) — tell the job's PM.
+// Skips when the PM is the one who made the change, and when the permit
+// isn't linked to a job (no PM to tell). Never blocks the action itself.
+async function notifyPermitUpdate(permitId, text, actorId) {
+  try {
+    const M = getModels();
+    const p = await M.Permit.findById(Number(permitId)).lean();
+    if (!p?.job_id) return;
+    const job = await M.Job.findById(p.job_id).lean();
+    if (!job?.pm_id || Number(job.pm_id) === Number(actorId)) return;
+    const pm = await emailForV2Member(job.pm_id);
+    if (!pm?.email || !mailer.wantsNotification(pm, 'permit')) return;
+    const [project, actor] = await Promise.all([M.Project.findById(job.project_id).lean(), actorId ? maindb.getMember(actorId) : null]);
+    const { subject, html } = mailer.emailPermitUpdate({ job_number: job.job_number || p.job_number_raw, job_name: p.job_name || project?.name, permit_number: p.permit_number, project_id: job.project_id }, pm.name, actor?.name || 'Someone', text);
+    await mailer.sendMail({ to: pm.email, subject, html });
+  } catch (e) { console.error('[v2 notify] permit update email failed:', e.message); }
+}
+// A job was just marked as needing a permit — tell the permit manager(s).
+async function notifyPermitRequired(jobId, actorId) {
+  try {
+    const M = getModels();
+    const job = await M.Job.findById(Number(jobId)).lean();
+    if (!job) return;
+    const [project, actor, managers] = await Promise.all([M.Project.findById(job.project_id).lean(), actorId ? maindb.getMember(actorId) : null, permitManagers()]);
+    for (const m of managers) {
+      if (Number(m.id) === Number(actorId)) continue;
+      const { subject, html } = mailer.emailPermitRequired({ ...job, project_name: project?.name }, m.name, actor?.name || 'Someone');
+      await mailer.sendMail({ to: m.email, subject, html });
+    }
+  } catch (e) { console.error('[v2 notify] permit required email failed:', e.message); }
+}
+// Daily cron: one digest per permit manager of permits filed 3+ weeks ago.
+async function notifyStalePermits() {
+  try {
+    const list = await require('./db').getStalePermits();
+    if (!list.length) return 0;
+    const managers = await permitManagers();
+    for (const m of managers) {
+      const { subject, html } = mailer.emailPermitNudge(list, m.name);
+      await mailer.sendMail({ to: m.email, subject, html });
+    }
+    if (managers.length) await require('./db').markPermitsNudged(list.map(p => p.id));
+    return list.length;
+  } catch (e) { console.error('[v2 notify] stale permit nudge failed:', e.message); return 0; }
+}
+
 async function notifyAwarded(bidId, actorName) {
   try {
     const shape = await bidEmailShape(bidId);
@@ -415,4 +470,4 @@ async function notifyDueDateChanged(kind, id, oldDate, newDate, actorId) {
   } catch (e) { console.error('[v2 notify] due-date-changed email failed:', e.message); }
 }
 
-module.exports = { bidEmailShape, coEmailShape, emailShapeForReminder, notifyBidSubmitted, notifyAwarded, notifyRoleAward, notifyApprovedToBid, notifyOwnerToForwardInvite, notifyAssigned, notifyWalkthroughSet, notifyWalkthroughAssignees, notifyFollowup, notifyDueDateChanged, notifyOpportunityClosed, notifyNewOpportunity, notifyCoQueued, bidRecipients, walkthroughContactInfo, emailForV2Member };
+module.exports = { bidEmailShape, coEmailShape, emailShapeForReminder, notifyBidSubmitted, notifyPermitUpdate, notifyPermitRequired, notifyStalePermits, notifyAwarded, notifyRoleAward, notifyApprovedToBid, notifyOwnerToForwardInvite, notifyAssigned, notifyWalkthroughSet, notifyWalkthroughAssignees, notifyFollowup, notifyDueDateChanged, notifyOpportunityClosed, notifyNewOpportunity, notifyCoQueued, bidRecipients, walkthroughContactInfo, emailForV2Member };

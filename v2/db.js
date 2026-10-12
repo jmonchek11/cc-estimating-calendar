@@ -731,7 +731,7 @@ async function updateTeamMemberV2(id, data) {
 // controls their own inbox. req.session.userId is passed straight through
 // as the id, never taken from the request body, so there's no way to edit
 // someone else's prefs through this endpoint.
-const NOTIFICATION_PREF_KEYS = ['assigned', 'followup', 'awarded', 'submitted', 'reminder', 'walkthrough', 'digest', 'ideas'];
+const NOTIFICATION_PREF_KEYS = ['assigned', 'followup', 'awarded', 'submitted', 'permit', 'reminder', 'walkthrough', 'digest', 'ideas'];
 async function updateMyNotificationPrefs(userId, prefs) {
   const M = getModels();
   const upd = {};
@@ -2934,6 +2934,11 @@ async function getPermitsOverview() {
   return { permits: rows, needsFiling, counts };
 }
 
+async function loadJob(id) {
+  const j = await getModels().Job.findById(Number(id)).lean();
+  if (!j) throw new Error('Job not found');
+  return j;
+}
 async function loadPermit(id) {
   const p = await getModels().Permit.findById(Number(id)).lean();
   if (!p) throw new Error('Permit not found');
@@ -3021,12 +3026,30 @@ async function permitAction(id, data, actorName) {
     case 'note':
       if (!note) throw new Error('Type a note first');
       await M.Permit.updateOne({ _id: p._id }, { $push: { updates: { date, text: note, by: actorName || null } }, $set: { updated_at: ts() } });
-      return { id: p._id };
+      return { id: p._id, text: `Note: ${note}` };
     default: throw new Error('Unknown permit action');
   }
   const entry = { date, text: note ? `${text} — ${note}` : text, by: actorName || null };
   await M.Permit.updateOne({ _id: p._id }, { $set: set, $push: { updates: entry } });
-  return { id: p._id, status: set.status };
+  return { id: p._id, status: set.status, text: entry.text };
+}
+// Permits filed (or sent back for corrections) 21+ days ago and not yet
+// approved — the "nudge" list. A permit is only re-listed once a week after
+// it has been nudged, so the reminder doesn't repeat daily.
+const PERMIT_STALE_DAYS = 21;
+async function getStalePermits() {
+  const M = getModels();
+  const [permits, jobs, projects] = await Promise.all([M.Permit.find({ status: { $in: ['filed', 'corrections'] } }).lean(), M.Job.find().lean(), M.Project.find().lean()]);
+  const jobById = {}; jobs.forEach(j => jobById[j._id] = j);
+  const pName = {}; projects.forEach(p => pName[p._id] = p.name);
+  const daysSince = d => Math.round((Date.now() - new Date(d + 'T12:00:00').getTime()) / 86400000);
+  return permits.filter(p => p.date_filed && daysSince(p.date_filed) >= PERMIT_STALE_DAYS && (!p.last_nudged_at || daysSince(p.last_nudged_at) >= 7))
+    .map(p => ({ id: p._id, job_number: jobById[p.job_id]?.job_number || p.job_number_raw, job_name: p.job_name || (jobById[p.job_id] ? pName[jobById[p.job_id].project_id] : null),
+      permit_number: p.permit_number, status: p.status, date_filed: p.date_filed, days_open: daysSince(p.date_filed) }))
+    .sort((a, b) => b.days_open - a.days_open);
+}
+async function markPermitsNudged(ids) {
+  await getModels().Permit.updateMany({ _id: { $in: ids } }, { $set: { last_nudged_at: today() } });
 }
 async function deletePermit(id) {
   await getModels().Permit.deleteOne({ _id: Number(id) });
@@ -5169,7 +5192,7 @@ module.exports = {
   getCompanyCommunications, getContactCommunications, getAllCommunications,
   addBidCustomerContact, removeBidCustomerContact, setBidCustomerPortalUrl,
   awardSubmission, notAwardSubmission, revertAward, revertNotAwarded, closeBid, approveToBid, unapproveToBid, logFollowupV2, updateFollowup,
-  createLegacyJob, updateJob, updateJobPermits, getPermitsOverview, createPermit, updatePermit, addPermitUpdate, permitAction, deletePermit, permitJobNumber,
+  createLegacyJob, updateJob, updateJobPermits, getPermitsOverview, createPermit, updatePermit, addPermitUpdate, loadJob, permitAction, getStalePermits, markPermitsNudged, deletePermit, permitJobNumber,
   createChangeOrder, submitCO, approveCO, notApproveCO, voidCO, reopenCO, reviseCO,
   createCoRequest, approveCoRequest, unapproveCoRequest, startCoRequest,
   _norm, resolveCompanyByName, ensureBidCustomer, teamMap,

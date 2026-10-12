@@ -517,6 +517,7 @@ const PermitSchema = new mongoose.Schema({
   // Dated timeline entries going forward (Pat's notes are already dated
   // text — new ones are structured so the Wednesday view can show the latest).
   updates:            { type: [{ _id: false, date: String, text: String, by: String }], default: [] },
+  last_nudged_at:     { type: String, default: null },           // last "filed 3+ weeks" reminder email (YYYY-MM-DD)
   source:             { type: String, default: 'app' },          // 'import' (status log) | 'app'
   created_by:         { type: Number, default: null },
   created_at:         { type: String, default: ts },

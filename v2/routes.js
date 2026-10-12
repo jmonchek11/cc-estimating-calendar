@@ -585,7 +585,13 @@ router.post('/api/v2/jobs',                   t(req => v2db.createLegacyJob({ ..
   (req, r) => ({ action: 'job.create_legacy', summary: `Created legacy job #${r.job_id || r.id}`, entity_type: 'job', entity_id: r.job_id || r.id })));
 router.patch('/api/v2/jobs/:id',              t(req => v2db.updateJob(req.params.id, req.body, req.session.userId),
   (req) => ({ action: 'job.update', summary: `Edited job #${req.params.id} (${Object.keys(req.body).join(', ')})`, entity_type: 'job', entity_id: Number(req.params.id) })));
-router.patch('/api/v2/jobs/:id/permits',      t(req => v2db.updateJobPermits(req.params.id, req.body),
+router.patch('/api/v2/jobs/:id/permits',      t(async req => {
+    const before = await v2db.loadJob(req.params.id).catch(() => null);
+    const r = await v2db.updateJobPermits(req.params.id, req.body);
+    // Newly marked as needing a permit -> let the permit manager know.
+    if (before && before.needs_permit !== true && ['1', 1, true].includes(req.body.needs_permit)) notify.notifyPermitRequired(req.params.id, req.session.userId);
+    return r;
+  },
   (req) => ({ action: 'job.update_permits', summary: `Edited permits on job #${req.params.id} (${Object.keys(req.body).join(', ')})`, entity_type: 'job', entity_id: Number(req.params.id) })));
 // Company-wide Permits view — every job needing a permit, grouped by status.
 router.get('/api/v2/permits',                 async (req, res) => { try { res.json(await v2db.getPermitsOverview()); } catch (e) { res.status(500).json({ error: e.message }); } });
@@ -598,12 +604,20 @@ async function requirePermitManager(req, res, next) {
     next();
   } catch (e) { res.status(500).json({ error: e.message }); }
 }
-router.post('/api/v2/permits',                requirePermitManager, t(req => v2db.createPermit(req.body, req.session.userId),
+router.post('/api/v2/permits',                requirePermitManager, t(async req => {
+    const r = await v2db.createPermit(req.body, req.session.userId);
+    notify.notifyPermitUpdate(r.id, req.body.date_filed ? 'Permit filed' : 'Permit record started', req.session.userId);
+    return r;
+  },
   (req, r) => ({ action: 'permit.create', summary: `Created permit record #${r.id}${req.body.permit_number ? ' (' + req.body.permit_number + ')' : ''}`, entity_type: 'permit', entity_id: r.id })));
 router.patch('/api/v2/permits/:id',           requirePermitManager, t(req => v2db.updatePermit(req.params.id, req.body),
   (req) => ({ action: 'permit.update', summary: `Edited permit #${req.params.id} (${Object.keys(req.body).join(', ')})`, entity_type: 'permit', entity_id: Number(req.params.id) })));
 router.post('/api/v2/permits/:id/updates',    requirePermitManager, t(async req => v2db.addPermitUpdate(req.params.id, req.body.text, (await actorOf(req))?.name)));
-router.post('/api/v2/permits/:id/action',     requirePermitManager, t(async req => v2db.permitAction(req.params.id, req.body, (await actorOf(req))?.name),
+router.post('/api/v2/permits/:id/action',     requirePermitManager, t(async req => {
+    const r = await v2db.permitAction(req.params.id, req.body, (await actorOf(req))?.name);
+    notify.notifyPermitUpdate(r.id, r.text, req.session.userId);   // the job's PM gets an email
+    return r;
+  },
   (req) => ({ action: 'permit.' + (req.body.action || 'action'), summary: `Permit #${req.params.id}: ${req.body.action}`, entity_type: 'permit', entity_id: Number(req.params.id) })));
 router.delete('/api/v2/permits/:id',          requireAdmin, t(req => v2db.deletePermit(req.params.id),
   (req) => ({ action: 'permit.delete', summary: `Deleted permit #${req.params.id}`, entity_type: 'permit', entity_id: Number(req.params.id) })));

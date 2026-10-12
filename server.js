@@ -845,6 +845,16 @@ cron.schedule('5 7 * * *', async () => {
   }
 }, { timezone: 'America/New_York' });
 
+// Weekdays 7:30 AM ET — permits filed 3+ weeks ago and still not approved:
+// one email to the permit manager(s) listing them (re-sent at most weekly
+// per permit — see getStalePermits).
+cron.schedule('30 7 * * 1-5', async () => {
+  try {
+    const n = await v2notify.notifyStalePermits();
+    console.log(`[cron] permit nudge: ${n} stale permit(s)`);
+  } catch (e) { console.error('[cron] permit nudge error:', e.message); }
+}, { timezone: 'America/New_York' });
+
 // Hourly — jobsite walk-through reminders, 24h before. Unlike the other
 // cron jobs (daily is fine for a date-only due date), a walk-through has a
 // specific time of day, so "24 hours before" only lands in the right window
