@@ -594,8 +594,9 @@ than blocking the user's action.
 | `co.created` | `createChangeOrder` | `{ co_number, name, project_name, job_number }` |
 | `co.stage_changed` | `submitCO`, `approveCO`, `notApproveCO`, `voidCO`, `reopenCO` | `{ co_number, from, to, amount, project_name, job_number }` |
 
-**Job-number validation** (`updateJob`, `createLegacyJob`): must match `^\d{5,6}$`
-(Foundation format — digits only, 5–6 chars) or is rejected with a friendly message;
+**Job-number validation** (`updateJob`, `createLegacyJob`): free-form since 2026-10
+(was `^\d{5,6}$`; relaxed so numbers like 9717 and S-prefixed service jobs work — check
+other Liberty apps that assumed digits-only); trimmed, max 20 chars, non-blank;
 must be unique across Jobs (rejected naming the conflicting project); clearing to
 null is always allowed; existing stored numbers are not retro-validated. Note: the
 admin generic entity-editor (`adminUpdate` → `PATCH /api/v2/admin/job/:id`) can also
@@ -612,3 +613,18 @@ and job-number assignments are backfilled.
 ---
 
 *All decisions resolved. Next step: full-team review and sign-off, then implementation begins per §6.4 — fake data first, real data only after sign-off.*
+
+
+---
+
+## Permit (added 2026-10)
+
+One row per electrical permit (`permits` collection), modeled on Pat McCreesh's Electrical Permit
+Status Log — permit-level, not job-level (a job can have several; history predates the app).
+`job_id` (nullable FK → Job) links by job number; the log writes `181-001-I0`, the app stores
+`181001` (`permitJobNumber()` in `v2/db.js`). `status`: not_filed → filed → corrections → approved →
+picked_up → closed (or withdrawn). `updates[]` is a dated timeline; `notes` holds imported text.
+Job.needs_permit / rough-in / accelerated / F/A drawings / EZ stay as the *qualifier* ("do we need
+one"); a flagged job with no Permit record shows in the Permits page's Needs Filing queue.
+Editing is limited to admins and `TeamMember.permit_manager` (Pat). Backfill: `v2/import-permit-log.js`
+(idempotent; imported 315 rows 2026-10-12; filed >1yr ago with no pickup is imported as closed, noted).
