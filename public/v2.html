@@ -1256,7 +1256,7 @@ async function fetchCalendarItems(mineOnly) {
     api('GET', '/api/v2/co-list?stage=active_co'), api('GET', '/api/v2/co-list?stage=submitted_co'),
   ]);
   let items = [
-    ...[...opp, ...active, ...sub].map(b => ({ kind: 'bid', id: b.id, project_id: b.project_id, title: b.project, label: b.bid_number, due_date: b.due_date, due_time: b.due_time, next_followup_date: b.next_followup_date, walkthroughs: b.walkthroughs || [], rfi_due_date: b.rfi_due_date, rfi_due_time: b.rfi_due_time, estimator: b.estimator, salesperson: b.salesperson, sub_estimators: b.sub_estimators || [], customer: (b.customers || []).join(', '), stage: b.stage })),
+    ...[...opp, ...active, ...sub].map(b => ({ kind: 'bid', id: b.id, project_id: b.project_id, title: b.project, label: b.bid_number, due_date: b.due_date, due_time: b.due_time, next_followup_date: b.next_followup_date, walkthroughs: b.walkthroughs || [], rfi_due_date: b.rfi_due_date, rfi_due_time: b.rfi_due_time, estimator: b.estimator, salesperson: b.salesperson, salespeople: b.salespeople || [], sub_estimators: b.sub_estimators || [], customer: (b.customers || []).join(', '), stage: b.stage })),
     ...[...activeCo, ...subCo].map(c => ({ kind: 'co', id: c.id, project_id: c.project_id, title: `${c.co_number} — ${c.name}`, label: c.project, due_date: c.due_date, next_followup_date: c.next_followup_date, estimator: c.estimator, salesperson: c.salesperson, customer: null, stage: c.stage })),
   ];
   if (mineOnly && CURRENT_USER) {
@@ -1264,7 +1264,7 @@ async function fetchCalendarItems(mineOnly) {
     // someone who isn't otherwise on the bid (estimator/salesperson/sub-
     // estimator) — without this, a walk-through-only assignee's own My
     // View never shows the thing they were just personally invited to.
-    items = items.filter(it => it.estimator?.id === CURRENT_USER.id || it.salesperson?.id === CURRENT_USER.id
+    items = items.filter(it => it.estimator?.id === CURRENT_USER.id || it.salesperson?.id === CURRENT_USER.id || (it.salespeople || []).some(sp => sp.id === CURRENT_USER.id)
       || (it.sub_estimators || []).some(se => se.id === CURRENT_USER.id)
       || (it.walkthroughs || []).some(w => (w.assignees || []).some(a => a.id === CURRENT_USER.id)));
   }
@@ -1793,9 +1793,9 @@ function applyPersonMine(rows, s) {
   let out = rows;
   if (s.person) {
     const [kind, id] = s.person.split(':'); const nid = Number(id);
-    out = out.filter(r => kind === 'sal' ? r.salesperson?.id === nid : kind === 'apm' ? r.apm?.id === nid : (r.estimator?.id === nid || (r.sub_estimators || []).some(se => se.id === nid)));
+    out = out.filter(r => kind === 'sal' ? (r.salesperson?.id === nid || (r.salespeople || []).some(sp => sp.id === nid)) : kind === 'apm' ? r.apm?.id === nid : (r.estimator?.id === nid || (r.sub_estimators || []).some(se => se.id === nid)));
   }
-  if (s.mine && CURRENT_USER) out = out.filter(r => r.estimator?.id === CURRENT_USER.id || r.salesperson?.id === CURRENT_USER.id || r.apm?.id === CURRENT_USER.id || (r.sub_estimators || []).some(se => se.id === CURRENT_USER.id));
+  if (s.mine && CURRENT_USER) out = out.filter(r => r.estimator?.id === CURRENT_USER.id || r.salesperson?.id === CURRENT_USER.id || (r.salespeople || []).some(sp => sp.id === CURRENT_USER.id) || r.apm?.id === CURRENT_USER.id || (r.sub_estimators || []).some(se => se.id === CURRENT_USER.id));
   return out;
 }
 function applyTextSearch(rows, q, getFields) {
@@ -1965,7 +1965,7 @@ function renderBidListBody(stage) {
             <span class="proj-meta-sep">·</span> ${b.pm ? `PM ${ini(b.pm)}` : '<span style="color:#dc2626">no PM</span>'}` : ''}
             ${stage === 'queue' ? `<span class="proj-meta-sep">·</span> ${b.pm ? `PM ${ini(b.pm)}` : '<span style="color:#dc2626">no PM</span>'}` : ''}
             ${b.estimator ? `<span class="proj-meta-sep">·</span> Est ${ini(b.estimator)}` : ''}
-            ${b.salesperson ? ` Sales ${ini(b.salesperson)}` : ''}
+            ${(b.salespeople && b.salespeople.length ? b.salespeople : (b.salesperson ? [b.salesperson] : [])).map(sp => ` Sales ${ini(sp)}`).join('')}
             ${b.apm ? ` APM ${ini(b.apm)}` : ''}
             ${b.pm && !['awarded', 'queue'].includes(stage) ? ` PM ${ini(b.pm)}` : ''}
           </div>
@@ -2617,7 +2617,7 @@ function customerRowHtml(b, cust, dead) {
     .sort((x, y) => (y.date_submitted || '').localeCompare(x.date_submitted || ''));
   const current = subs.find(s => s.is_current);
   const historical = subs.filter(s => !s.is_current);
-  const canEditSub = CURRENT_USER?.is_admin || CURRENT_USER?.id === b.estimator?.id || CURRENT_USER?.id === b.salesperson?.id;
+  const canEditSub = CURRENT_USER?.is_admin || CURRENT_USER?.id === b.estimator?.id || CURRENT_USER?.id === b.salesperson?.id || (!!current && CURRENT_USER?.id === current.salesperson?.id);
 
   let outcomeBadge = '', right = '', actionsHtml = '', followupsHtml = '', subMetaExtra = '';
   if (current) {
@@ -2859,7 +2859,8 @@ function bidNode(b, proj) {
   if (b.awarded_company) metaBits.push(`Won by <strong style="color:#166534">${esc(b.awarded_company.name)}</strong> ${fmtD(b.award_date)}`);
   if (b.estimator) metaBits.push(`Est. ${ini(b.estimator)}`);
   b.sub_estimators.forEach(s => metaBits.push(`${ini(s)}<span style="font-size:10px">${esc(s.scope)}<a href="#" onclick="event.preventDefault();actRemoveSubEstimator(${b.id},${s.id},'${escJs(s.scope)}')" style="color:#dc2626;margin-left:2px">✕</a></span>`));
-  if (b.salesperson) metaBits.push(`Sales ${ini(b.salesperson)}`);
+  { const sps = (b.salespeople && b.salespeople.length) ? b.salespeople : (b.salesperson ? [b.salesperson] : []);
+    if (sps.length) metaBits.push(`Sales ${sps.map(ini).join(' ')}`); }
   if (b.apm) metaBits.push(`APM ${ini(b.apm)}`);
   // PM was only ever visible inside Edit Bid on a bid card — never in this
   // line — so a bid with several people assigned looked like it had no PM

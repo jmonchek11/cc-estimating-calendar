@@ -45,6 +45,7 @@ async function requireAdminOrAssigned(req, res, next) {
     } else if (actor && entity === 'bid_submission') {
       const sub = await v2db.loadSubmission(id).catch(() => null);
       const bid = sub ? await v2db.loadBid(sub.bid_id).catch(() => null) : null;
+      if (sub && sub.salesperson_id === actor.id) return next();   // the customer's own salesperson
       if (bid && (bid.estimator_id === actor.id || bid.salesperson_id === actor.id)) return next();
     }
     return res.status(403).json({ error: 'Admin only' });

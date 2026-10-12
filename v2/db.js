@@ -121,6 +121,28 @@ async function undoActivity(logId) {
   return { ok: true };
 }
 
+// Salespeople are assigned per customer submission now (BidSubmission.
+// salesperson_id), not only per bid — so "is this bid mine as a salesperson"
+// has to look at the bid's own salesperson AND every current submission's.
+// Without this a salesperson assigned only on a customer's submission (e.g.
+// Brian on Cartias) never saw that bid on their dashboard, lists, or digest.
+// salesIndex() builds bid_id -> Set(salesperson ids) once from a submissions
+// array; salesIds()/hasSales() read it.
+function salesIndex(subs) {
+  const idx = {};
+  (subs || []).forEach(s => {
+    if (!s.is_current || !s.salesperson_id) return;
+    (idx[s.bid_id] = idx[s.bid_id] || new Set()).add(s.salesperson_id);
+  });
+  return idx;
+}
+function salesIds(b, idx) {
+  const out = new Set(idx[b._id] || []);
+  if (b.salesperson_id) out.add(b.salesperson_id);
+  return out;
+}
+const hasSales = (b, id, idx) => b.salesperson_id === id || !!idx[b._id]?.has(id);
+
 function teamMap(members) {
   const m = {};
   members.forEach(t => { m[t._id] = { id: t._id, name: t.name, initials: t.initials, role: t.role }; });
@@ -300,6 +322,8 @@ async function getProjectDetail(projectId) {
     drawing_stage: b.drawing_stage,
     estimator: tm[b.estimator_id] || null,
     salesperson: tm[b.salesperson_id] || null,
+    // Bid default + every current customer submission's salesperson.
+    salespeople: [...salesIds(b, salesIndex(submissions.filter(s => s.bid_id === b._id)))].map(id => tm[id]).filter(Boolean),
     apm: tm[b.apm_id] || null,
     // Early PM assignment (set at Approve to Bid) — the Job's own pm_id
     // (set/changeable at award) takes over as authoritative once a Job
@@ -3262,15 +3286,18 @@ async function getBidList(stage) {
   const [projects, companies, members, bidCustomers, jobs, currentSubs] = await Promise.all([
     M.Project.find().lean(), M.Company.find().lean(), M.TeamMember.find().lean(), M.BidCustomer.find({ bid_id: { $in: ids } }).lean(),
     stage === 'awarded' ? M.Job.find({ winning_bid_id: { $in: ids } }).lean() : Promise.resolve([]),
-    // Only 'submitted' bids can be flagged awaiting_po (a submission still
-    // pending its own decision) — fetched just for that list's 🔥 badge.
-    stage === 'submitted' ? M.BidSubmission.find({ bid_id: { $in: ids }, is_current: 1, awaiting_po: true }).lean() : Promise.resolve([]),
+    // Current submissions for these bids — feeds both the 🔥 awaiting-PO
+    // badge (only 'submitted' bids can have one) and each bid's per-customer
+    // salespeople (see salesIndex), so a salesperson assigned only on one
+    // customer's submission still sees the bid in their lists.
+    M.BidSubmission.find({ bid_id: { $in: ids }, is_current: 1 }).lean(),
   ]);
+  const salesIdx = salesIndex(currentSubs);
   const pName = {}; const pSize = {}; const pType = {}; const pOnHold = {};
   projects.forEach(p => { pName[p._id] = p.name; pSize[p._id] = p.size_bucket; pType[p._id] = p.type_of_work; pOnHold[p._id] = !!p.on_hold; });
   const coName = {}; companies.forEach(c => coName[c._id] = c.name);
   const tm = teamMap(members);
-  const awaitingPoBids = new Set(currentSubs.map(s => s.bid_id));
+  const awaitingPoBids = new Set(stage === 'submitted' ? currentSubs.filter(s => s.awaiting_po).map(s => s.bid_id) : []);
   const custByBid = {}; bidCustomers.forEach(bc => (custByBid[bc.bid_id] = custByBid[bc.bid_id] || []).push(coName[bc.company_id]));
   const jobByBid = {}; jobs.forEach(j => { if (j.winning_bid_id) jobByBid[j.winning_bid_id] = j; });
   const rows = bids.map(b => {
@@ -3281,6 +3308,9 @@ async function getBidList(stage) {
       type_of_work: pType[b.project_id] || null, project_on_hold: !!pOnHold[b.project_id],
       bid_number: b.bid_number, stage: b.stage, drawing_stage: b.drawing_stage,
       estimator: tm[b.estimator_id] || null, salesperson: tm[b.salesperson_id] || null, apm: tm[b.apm_id] || null,
+      // Everyone who's the salesperson on this bid or on any current customer
+      // submission (the single `salesperson` above is just the bid default).
+      salespeople: [...salesIds(b, salesIdx)].map(id => tm[id]).filter(Boolean),
       owner: tm[b.owner_id] || null, source: b.source, who_will_bid: b.who_will_bid || null, is_budget: !!b.is_budget,
       sub_estimators: (b.sub_estimators || []).map(s => ({ ...(tm[s.estimator_id] || {}), scope: s.scope })),
       customers: [...new Set((custByBid[b._id] || []).filter(Boolean))],
@@ -3388,7 +3418,7 @@ async function getDigest() {
   const yearStart = todayStr.slice(0, 4) + '-01-01';
   const CLOSED = ['awarded', 'not_awarded', 'closed'];
 
-  const [bids, cos, jobs, projects, companies, members, bidCustomers] = await Promise.all([
+  const [bids, cos, jobs, projects, companies, members, bidCustomers, currentSubsAll] = await Promise.all([
     M.Bid.find({ superseded: { $ne: 1 } }).lean(),
     M.ChangeOrder.find({ superseded: { $ne: 1 } }).lean(),
     M.Job.find().lean(),
@@ -3396,7 +3426,9 @@ async function getDigest() {
     M.Company.find().lean(),
     M.TeamMember.find({ active: 1 }).lean(),
     M.BidCustomer.find().lean(),
+    M.BidSubmission.find({ is_current: 1 }).lean(),
   ]);
+  const salesIdx = salesIndex(currentSubsAll);
   const pName = {}; projects.forEach(p => pName[p._id] = p.name);
   const coName = {}; companies.forEach(c => coName[c._id] = c.name);
   const jobProj = {}; jobs.forEach(j => jobProj[j._id] = j.project_id);
@@ -3461,7 +3493,7 @@ async function getDigest() {
   }).sort((a, b) => b.bid_count - a.bid_count);
 
   const bySalesperson = members.filter(m => m.role === 'sales').map(m => {
-    const l = bids.filter(b => b.salesperson_id === m._id);
+    const l = bids.filter(b => hasSales(b, m._id, salesIdx));
     const overdue = l.filter(b => b.next_followup_date && b.next_followup_date < todayStr && !CLOSED.includes(b.stage)).length;
     return { id: m._id, name: m.name, initials: m.initials, bid_count: l.filter(b => !CLOSED.includes(b.stage)).length, overdue_followups: overdue };
   }).sort((a, b) => b.overdue_followups - a.overdue_followups || b.bid_count - a.bid_count);
@@ -3504,7 +3536,7 @@ async function getDigest() {
   // generated once a week and the marginal cost per person is small.
   const byPersonId = {};
   members.forEach(m => {
-    const mine = (b) => b.estimator_id === m._id || b.salesperson_id === m._id || b.apm_id === m._id || (b.sub_estimators || []).some(s => s.estimator_id === m._id);
+    const mine = (b) => b.estimator_id === m._id || hasSales(b, m._id, salesIdx) || b.apm_id === m._id || (b.sub_estimators || []).some(s => s.estimator_id === m._id);
     const myBids = bids.filter(mine);
     byPersonId[m._id] = {
       activeBids: myBids.filter(b => b.stage === 'active_bid').sort((a, b) => (a.due_date || '').localeCompare(b.due_date || '')).map(shapeBid),
@@ -3701,7 +3733,8 @@ async function getReportsCohort({ from, to, granularity, personId, companyId, ty
   const tm = teamMap(members);
   const bidsWithCompany = cid ? new Set(bidCustomers.map(bc => bc.bid_id)) : null;
 
-  const bidMatchesPerson = (b) => !pid || b.estimator_id === pid || b.salesperson_id === pid || b.apm_id === pid || (b.sub_estimators || []).some(s => s.estimator_id === pid);
+  const salesIdx = salesIndex(currentSubs);
+  const bidMatchesPerson = (b) => !pid || b.estimator_id === pid || hasSales(b, pid, salesIdx) || b.apm_id === pid || (b.sub_estimators || []).some(s => s.estimator_id === pid);
   const bidMatchesFilters = (b) =>
     bidMatchesPerson(b)
     && (!cid || bidsWithCompany.has(b._id))
@@ -3928,7 +3961,8 @@ async function getDashboard(userId, mineOnly) {
   const jobById = {}; jobs.forEach(j => jobById[j._id] = j);
   const coProjectId = (c) => jobById[c.job_id]?.project_id ?? null;
 
-  const isMyBid = (b) => !uid || b.estimator_id === uid || b.salesperson_id === uid || b.apm_id === uid || (b.sub_estimators || []).some(s => s.estimator_id === uid);
+  const salesIdx = salesIndex(subs);
+  const isMyBid = (b) => !uid || b.estimator_id === uid || hasSales(b, uid, salesIdx) || b.apm_id === uid || (b.sub_estimators || []).some(s => s.estimator_id === uid);
   const isMyCo = (c) => !uid || c.estimator_id === uid;
   // jobOwner resolves the single "primary owner" shown for display — apm_id
   // is intentionally NOT folded into this fallback chain (it would silently
@@ -3953,7 +3987,7 @@ async function getDashboard(userId, mineOnly) {
   const awardedYTD = myBids.filter(b => b.stage === 'awarded' && b.award_date && b.award_date >= yearStart && b.award_date <= today);
   const awardedMissingDate = myBids.filter(b => b.stage === 'awarded' && !b.award_date).length;
 
-  const overdueBids = subs.filter(s => s.is_current && s.outcome === 'pending' && s.next_followup_date && s.next_followup_date < today && !pOnHold[bidById[s.bid_id]?.project_id] && (!uid || bidById[s.bid_id]?.salesperson_id === uid || bidById[s.bid_id]?.apm_id === uid));
+  const overdueBids = subs.filter(s => s.is_current && s.outcome === 'pending' && s.next_followup_date && s.next_followup_date < today && !pOnHold[bidById[s.bid_id]?.project_id] && (!uid || (s.salesperson_id || bidById[s.bid_id]?.salesperson_id) === uid || bidById[s.bid_id]?.apm_id === uid));
   const overdueCos = myCos.filter(c => c.stage === 'submitted_co' && !c.superseded && c.next_followup_date && c.next_followup_date < today && !pOnHold[coProjectId(c)]);
   // No date window (was "next 14 days," which hid both overdue items and
   // anything further out) — every active/submitted bid or CO with a due

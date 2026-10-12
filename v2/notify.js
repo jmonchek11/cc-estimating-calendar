@@ -79,7 +79,10 @@ async function notifyAssigned(bidId, recipientId, actorId, role, scope) {
 // notifications — same "who's actually on this bid" roster every time,
 // just gated by whichever category the caller cares about.
 async function bidRecipients(bid, category) {
-  const ids = [...new Set([bid.estimator_id, bid.salesperson_id, ...(bid.sub_estimators || []).map(s => s.estimator_id)].filter(Boolean))];
+  // Per-customer salespeople count too (BidSubmission.salesperson_id) — a
+  // salesperson assigned only on one customer's submission is still on this bid.
+  const subSales = bid._id ? (await getModels().BidSubmission.find({ bid_id: bid._id, is_current: 1 }).lean()).map(s => s.salesperson_id) : [];
+  const ids = [...new Set([bid.estimator_id, bid.salesperson_id, ...subSales, ...(bid.sub_estimators || []).map(s => s.estimator_id)].filter(Boolean))];
   const members = (await Promise.all(ids.map(emailForV2Member))).filter(Boolean);
   return members.filter(m => mailer.wantsNotification(m, category));
 }
