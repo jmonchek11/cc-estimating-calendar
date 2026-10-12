@@ -488,6 +488,43 @@ const OutOfOfficeSchema = new mongoose.Schema({
 }, opts);
 OutOfOfficeSchema.index({ date: 1 });
 
+// One electrical permit (2026-10) — modeled after Pat McCreesh's Electrical
+// Permit Status Log, which is permit-level, not job-level: a job can have
+// several (e.g. a separate low-voltage or F/A permit), and 2018+ history
+// exists for jobs that were never in this app. job_id links to a Job when
+// one matches (by job number); job_number_raw/job_name always keep what the
+// log said. Job.needs_permit etc. stay as the "do we need one" qualifier.
+const PERMIT_STATUSES = ['not_filed', 'filed', 'corrections', 'approved', 'picked_up', 'closed', 'withdrawn'];
+const PermitSchema = new mongoose.Schema({
+  _id:             Number,
+  job_id:          { type: Number, default: null },              // FK → Job (nullable — history/standalone)
+  job_number_raw:  { type: String, default: null },              // as written in the log, e.g. "181-001-I0" / "S001541"
+  job_name:        { type: String, default: null },
+  permit_number:   { type: String, default: null },              // L&I number, e.g. EP2026009796
+  status:          { type: String, enum: PERMIT_STATUSES, default: 'not_filed' },
+  date_filed:      { type: String, default: null },
+  rough_in_required:  { type: Boolean, default: null },
+  expedited:          { type: Boolean, default: null },
+  fa_required:        { type: Boolean, default: null },          // fire alarm drawings required
+  fa_submitted:       { type: Boolean, default: null },
+  approved_for_pickup:{ type: Boolean, default: null },
+  date_picked_up:     { type: String, default: null },
+  posted_filed:       { type: Boolean, default: null },
+  underwriter_po:     { type: String, default: null },
+  uw_rough_in:        { type: String, default: null },           // underwriter inspection — rough-in
+  uw_final:           { type: String, default: null },           // underwriter inspection — final
+  notes:              { type: String, default: null },           // free-text carried over from the log
+  // Dated timeline entries going forward (Pat's notes are already dated
+  // text — new ones are structured so the Wednesday view can show the latest).
+  updates:            { type: [{ _id: false, date: String, text: String, by: String }], default: [] },
+  source:             { type: String, default: 'app' },          // 'import' (status log) | 'app'
+  created_by:         { type: Number, default: null },
+  created_at:         { type: String, default: ts },
+  updated_at:         { type: String, default: ts },
+}, opts);
+PermitSchema.index({ job_id: 1 });
+PermitSchema.index({ status: 1 });
+
 // TeamMember is v1's ACTUAL model (not a v2-isolated copy). v1 and v2 used to
 // have independently-assigned TeamMember ids in two separate databases —
 // merged in July 2026 (v2/merge-team-ids.js) after that silently broke
@@ -670,6 +707,7 @@ function getModels() {
     Reminder:    c.model('Reminder', ReminderSchema, 'reminders'),
     Note:        c.model('Note', NoteSchema, 'notes'),
     OutOfOffice: c.model('OutOfOffice', OutOfOfficeSchema, 'out_of_office'),
+    Permit:      c.model('Permit', PermitSchema, 'permits'),
     TeamMember:  V1TeamMember,
     Idea:        V1Idea,
     ReleaseNote: c.model('ReleaseNote', ReleaseNoteSchema, 'release_notes'),
@@ -684,4 +722,4 @@ function getModels() {
   };
 }
 
-module.exports = { getConnection, getModels, V2_DB_NAME, BID_STAGES, CO_STAGES, BID_SUBMISSION_TYPES, RELEASE_NOTE_CATEGORIES };
+module.exports = { getConnection, getModels, V2_DB_NAME, PERMIT_STATUSES, BID_STAGES, CO_STAGES, BID_SUBMISSION_TYPES, RELEASE_NOTE_CATEGORIES };

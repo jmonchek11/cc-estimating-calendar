@@ -37,6 +37,7 @@ function formatMember(m) {
     email: o.email || null,
     ms_oid: o.ms_oid || null,
     is_admin: o.is_admin || false,
+    permit_manager: o.permit_manager || false,
     must_change_password: o.must_change_password !== false,
     created_at: o.created_at,
     notification_prefs: o.notification_prefs || null,

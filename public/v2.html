@@ -5253,55 +5253,230 @@ async function renderCommunications() {
     <div class="card" style="padding:6px 16px">${communicationsTimelineHtml(comms, { showCompany: true })}</div>`;
 }
 
-// ── Permits (2026-09-30) — every job that needs a permit, grouped by where
-// it stands. Read-only overview; the actual editing stays on the job card
-// (permitsSectionHtml/actEditPermitDates) where the rest of that job's
-// context already lives — this page exists so Pat's whole permit queue is
-// visible in one place instead of having to open each job to check.
+// ── Permits (2026-10) — Pat's permit log, in the app. Permit RECORDS (one per
+// permit, imported from his Electrical Permit Status Log going back to 2018),
+// not just a per-job flag. Everyone can read it; admins and the permit
+// manager (Pat) can create/edit. Tabs: Active (what he reports on every
+// Wednesday), Needs Filing (jobs flagged needs-permit with nothing filed),
+// Wednesday Report (a one-screen, printable rundown), and All (searchable
+// history, including closed).
 const PERMIT_STATUS_META = {
-  not_applied: { label: 'Needs Permit — Not Yet Applied', color: '#dc2626' },
-  applied:     { label: 'Applied — Awaiting Approval',     color: '#d97706' },
-  approved:    { label: 'Approved / Current',              color: '#2563eb' },
-  closed:      { label: 'Closed (COA Received)',           color: '#16a34a' },
+  not_filed:   { label: 'Not Filed',   color: '#dc2626' },
+  filed:       { label: 'Filed',       color: '#d97706' },
+  corrections: { label: 'L&I Corrections', color: '#c2410c' },
+  approved:    { label: 'Approved',    color: '#2563eb' },
+  picked_up:   { label: 'Picked Up',   color: '#0e7490' },
+  closed:      { label: 'Closed',      color: '#16a34a' },
+  withdrawn:   { label: 'Withdrawn',   color: '#64748b' },
 };
+const PERMIT_ACTIVE_STATUSES = ['not_filed', 'corrections', 'filed', 'approved', 'picked_up'];
+let PERMITS_STATE = { tab: 'active', q: '', status: '', data: null };
+const canManagePermits = () => !!CURRENT_USER?.can_manage_permits;
+const permitYN = (v) => v === true ? 'Yes' : v === false ? 'No' : '—';
+
 async function renderPermits() {
   setActiveNav('permits');
   const main = document.getElementById('main');
   main.innerHTML = '<div style="padding:30px;color:var(--text-muted)">Loading…</div>';
-  let data;
-  try { data = await api('GET', '/api/v2/permits'); }
+  try { PERMITS_STATE.data = await api('GET', '/api/v2/permits'); }
   catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
-
-  const { rows, counts } = data;
-  const statCard = (key) => {
-    const m = PERMIT_STATUS_META[key];
-    return `<div style="flex:1;min-width:120px;border:1px solid var(--border);border-radius:8px;padding:10px 14px">
-      <div style="font-size:22px;font-weight:800;color:${m.color}">${counts[key]}</div>
-      <div style="font-size:11.5px;color:var(--text-muted);font-weight:600">${esc(m.label)}</div>
-    </div>`;
-  };
-  const rowHtml = (r) => {
-    const m = PERMIT_STATUS_META[r.status];
-    return `<div style="display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border);cursor:pointer" onclick="renderProjectPage(${r.project_id})">
-      <span class="badge" style="background:${m.color}1a;color:${m.color};flex-shrink:0">${esc(m.label)}</span>
-      <div style="flex:1;min-width:0">
-        <div style="font-weight:700;font-size:13px">${r.job_number ? `Job ${esc(r.job_number)}` : '<span style="color:#dc2626">Job # pending</span>'} — ${esc(r.project_name)}</div>
-        <div style="font-size:11.5px;color:var(--text-muted);margin-top:1px">${r.awarded_company ? esc(r.awarded_company) + ' · ' : ''}Rough-In: ${permitYesNo(r.needs_rough_in_permit)} · Accelerated: ${permitYesNo(r.needs_accelerated_permit)} · FA Drawings: ${permitYesNo(r.needs_fire_alarm_drawings)} · EZ Permit: ${permitYesNo(r.ez_permit_eligible)}</div>
-      </div>
-      <div style="text-align:right;flex-shrink:0;font-size:11.5px;color:var(--text-muted)">
-        ${r.permit_date_applied ? `Applied ${fmtD(r.permit_date_applied)}` : ''}
-        ${r.permit_date_approved ? `<br>Approved ${fmtD(r.permit_date_approved)}` : ''}
-        ${r.permit_date_coa_received ? `<br>COA ${fmtD(r.permit_date_coa_received)}` : ''}
-      </div>
-    </div>`;
-  };
-
+  renderPermitsBody();
+}
+function setPermitsTab(tab) { PERMITS_STATE.tab = tab; renderPermitsBody(); }
+function onPermitsFilter() {
+  PERMITS_STATE.q = document.getElementById('pm-q')?.value || '';
+  PERMITS_STATE.status = document.getElementById('pm-status')?.value || '';
+  renderPermitsList();
+}
+function permitFlagChips(p) {
+  const chip = (t, c) => `<span class="badge" style="background:${c}1a;color:${c};font-size:10px">${t}</span>`;
+  return [
+    p.rough_in_required ? chip('ROUGH-IN', '#7c3aed') : '',
+    p.expedited ? chip('EXPEDITED', '#c2410c') : '',
+    p.fa_required ? chip(p.fa_submitted ? 'F/A SUBMITTED' : 'F/A NEEDED', p.fa_submitted ? '#16a34a' : '#dc2626') : '',
+  ].join(' ');
+}
+function permitRowHtml(p) {
+  const m = PERMIT_STATUS_META[p.status] || PERMIT_STATUS_META.filed;
+  const stale = p.days_open != null && p.days_open >= 21;
+  return `<div style="display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--border);cursor:pointer" onclick="openPermit(${p.id})">
+    <span class="badge" style="background:${m.color}1a;color:${m.color};flex-shrink:0;min-width:84px;text-align:center">${esc(m.label)}</span>
+    <div style="flex:1;min-width:0">
+      <div style="font-weight:700;font-size:13px">${p.job_number ? esc(p.job_number) : '<span style="color:#dc2626">no job #</span>'} — ${esc(p.job_name || '—')}
+        ${p.permit_number ? `<span style="font-weight:500;color:var(--text-muted);font-size:12px"> · ${esc(p.permit_number)}</span>` : ''} ${permitFlagChips(p)}</div>
+      ${p.last_update ? `<div style="font-size:11.5px;color:var(--text-muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${fmtD(p.last_update.date)}: ${esc(p.last_update.text)}</div>`
+        : (p.notes ? `<div style="font-size:11.5px;color:var(--text-muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.notes)}</div>` : '')}
+    </div>
+    <div style="text-align:right;flex-shrink:0;font-size:11.5px;color:var(--text-muted)">
+      ${p.date_filed ? `Filed ${fmtD(p.date_filed)}` : ''}
+      ${p.days_open != null ? `<div style="${stale ? 'color:#c2410c;font-weight:700' : ''}">${p.days_open}d open</div>` : ''}
+      ${p.date_picked_up ? `<div>Picked up ${fmtD(p.date_picked_up)}</div>` : ''}
+    </div>
+  </div>`;
+}
+function renderPermitsList() {
+  const el = document.getElementById('pm-list'); if (!el) return;
+  const { permits } = PERMITS_STATE.data;
+  const q = (PERMITS_STATE.q || '').toLowerCase().trim();
+  let rows = permits;
+  if (PERMITS_STATE.tab === 'active') rows = rows.filter(p => PERMIT_ACTIVE_STATUSES.includes(p.status));
+  if (PERMITS_STATE.status) rows = rows.filter(p => p.status === PERMITS_STATE.status);
+  if (q) rows = rows.filter(p => [p.job_number, p.job_name, p.permit_number, p.notes].some(v => v && String(v).toLowerCase().includes(q)));
+  if (PERMITS_STATE.tab === 'active') {
+    const order = { not_filed: 0, corrections: 1, filed: 2, approved: 3, picked_up: 4 };
+    rows = [...rows].sort((a, b) => (order[a.status] - order[b.status]) || ((b.days_open || 0) - (a.days_open || 0)));
+  }
+  const shown = rows.slice(0, 300);
+  el.innerHTML = shown.length ? shown.map(permitRowHtml).join('') + (rows.length > shown.length ? `<div style="padding:10px 16px;color:var(--text-muted);font-size:12px">Showing the 300 most recent of ${rows.length} — narrow with search.</div>` : '')
+    : '<div style="padding:30px;text-align:center;color:var(--text-muted);font-size:13px">Nothing here.</div>';
+}
+function needsFilingHtml(rows) {
+  if (!rows.length) return '<div style="padding:30px;text-align:center;color:var(--text-muted);font-size:13px">No jobs are waiting on a permit to be filed.</div>';
+  return rows.map(j => `<div style="display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--border)">
+    <span class="badge" style="background:#dc26261a;color:#dc2626;flex-shrink:0">Needs Filing</span>
+    <div style="flex:1;min-width:0;cursor:pointer" onclick="renderProjectPage(${j.project_id})">
+      <div style="font-weight:700;font-size:13px">${j.job_number ? 'Job ' + esc(j.job_number) : '<span style="color:#dc2626">Job # pending</span>'} — ${esc(j.project_name)}</div>
+      <div style="font-size:11.5px;color:var(--text-muted)">${j.awarded_company ? esc(j.awarded_company) + ' · ' : ''}${j.award_date ? 'Awarded ' + fmtD(j.award_date) + ' · ' : ''}Rough-In: ${permitYesNo(j.needs_rough_in_permit)} · Accelerated: ${permitYesNo(j.needs_accelerated_permit)} · FA Drawings: ${permitYesNo(j.needs_fire_alarm_drawings)} · EZ: ${permitYesNo(j.ez_permit_eligible)}</div>
+    </div>
+    ${canManagePermits() ? `<button class="v2-btn blue" style="padding:4px 12px;font-size:12px;flex-shrink:0" onclick="actNewPermit(${j.job_id})">Start Permit</button>` : ''}
+  </div>`).join('');
+}
+function permitReportHtml(data) {
+  const active = data.permits.filter(p => PERMIT_ACTIVE_STATUSES.includes(p.status));
+  const groups = [['not_filed', 'Needs filing / not yet filed'], ['corrections', 'L&I corrections needed'], ['filed', 'Filed — waiting on L&I'], ['approved', 'Approved — ready for pickup'], ['picked_up', 'Picked up — in inspection / posting']];
+  const line = p => `<tr style="border-bottom:1px solid #f1f5f9">
+    <td style="padding:5px 8px;font-weight:700;white-space:nowrap">${esc(p.job_number || '—')}</td>
+    <td style="padding:5px 8px">${esc(p.job_name || '—')}</td>
+    <td style="padding:5px 8px;white-space:nowrap">${esc(p.permit_number || '')}</td>
+    <td style="padding:5px 8px;white-space:nowrap">${p.date_filed ? fmtD(p.date_filed) : ''}${p.days_open != null ? ` <span style="color:${p.days_open >= 21 ? '#c2410c' : 'var(--text-muted)'}">(${p.days_open}d)</span>` : ''}</td>
+    <td style="padding:5px 8px;color:var(--text-muted)">${p.last_update ? `${fmtD(p.last_update.date)}: ${esc(p.last_update.text)}` : esc((p.notes || '').slice(0, 140))}</td></tr>`;
+  const blocks = groups.map(([key, label]) => {
+    const list = active.filter(p => p.status === key).sort((a, b) => (b.days_open || 0) - (a.days_open || 0));
+    if (!list.length) return '';
+    return `<div style="margin-bottom:16px"><div style="font-weight:800;font-size:13px;margin-bottom:4px;color:${PERMIT_STATUS_META[key].color}">${label} (${list.length})</div>
+      <table style="width:100%;border-collapse:collapse;font-size:12.5px"><tbody>${list.map(line).join('')}</tbody></table></div>`;
+  }).join('');
+  const nf = data.needsFiling.length ? `<div style="margin-bottom:16px"><div style="font-weight:800;font-size:13px;margin-bottom:4px;color:#dc2626">Jobs flagged needing a permit — nothing filed yet (${data.needsFiling.length})</div>
+    <table style="width:100%;border-collapse:collapse;font-size:12.5px"><tbody>${data.needsFiling.map(j => `<tr style="border-bottom:1px solid #f1f5f9"><td style="padding:5px 8px;font-weight:700">${esc(j.job_number || 'pending')}</td><td style="padding:5px 8px">${esc(j.project_name)}</td><td style="padding:5px 8px;color:var(--text-muted)">${j.award_date ? 'Awarded ' + fmtD(j.award_date) : ''}</td></tr>`).join('')}</tbody></table></div>` : '';
+  return `<div style="padding:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div style="font-weight:800;font-size:15px">Permit Status — ${new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</div>
+      <button class="v2-btn outline" style="padding:4px 12px;font-size:12px" onclick="window.print()">🖨 Print</button>
+    </div>${nf}${blocks || '<div style="color:var(--text-muted);font-size:13px">No active permits.</div>'}</div>`;
+}
+function renderPermitsBody() {
+  const main = document.getElementById('main');
+  const { counts, needsFiling } = PERMITS_STATE.data;
+  const tab = PERMITS_STATE.tab;
+  const stat = (n, label, color) => `<div style="flex:1;min-width:110px;border:1px solid var(--border);border-radius:8px;padding:10px 14px"><div style="font-size:22px;font-weight:800;color:${color}">${n}</div><div style="font-size:11.5px;color:var(--text-muted);font-weight:600">${label}</div></div>`;
+  const tabBtn = (key, label) => `<button class="v2-btn ${tab === key ? 'blue' : 'outline'}" style="padding:6px 14px;font-size:12.5px" onclick="setPermitsTab('${key}')">${label}</button>`;
   main.innerHTML = `
-    <div class="page-header"><div><div class="page-title">${pageIcon('permits')} Permits</div><div class="page-subtitle">${rows.length} job${rows.length !== 1 ? 's' : ''} needing a permit, across every stage</div></div></div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;margin:0 16px 16px">${Object.keys(PERMIT_STATUS_META).map(statCard).join('')}</div>
-    <div class="card" style="padding:0">
-      ${rows.length ? rows.map(rowHtml).join('') : '<div style="padding:30px;text-align:center;color:var(--text-muted);font-size:13px">No jobs currently need a permit.</div>'}
-    </div>`;
+    <div class="page-header">
+      <div><div class="page-title">${pageIcon('permits')} Permits</div><div class="page-subtitle">${counts.active} active · ${counts.closed} closed · ${PERMITS_STATE.data.permits.length} on record since 2018</div></div>
+      ${canManagePermits() ? `<button class="v2-btn green" onclick="actNewPermit()">+ New Permit</button>` : ''}
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin:0 16px 14px">
+      ${stat(counts.needs_filing + counts.not_filed, 'Needs Filing', '#dc2626')}
+      ${stat(counts.filed + counts.corrections, 'Filed / Corrections', '#d97706')}
+      ${stat(counts.approved, 'Approved', '#2563eb')}
+      ${stat(counts.picked_up, 'Picked Up (in inspection)', '#0e7490')}
+      ${stat(counts.closed, 'Closed', '#16a34a')}
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin:0 16px 12px">
+      ${tabBtn('active', `Active (${counts.active})`)}${tabBtn('needs', `Needs Filing (${needsFiling.length})`)}${tabBtn('report', 'Wednesday Report')}${tabBtn('all', 'All / History')}
+    </div>
+    ${tab === 'report' ? `<div class="card" style="padding:0">${permitReportHtml(PERMITS_STATE.data)}</div>`
+      : tab === 'needs' ? `<div class="card" style="padding:0">${needsFilingHtml(needsFiling)}</div>`
+      : `<div class="card" style="padding:0">
+          <div class="v2-filterbar">
+            <input type="text" id="pm-q" placeholder="Search job #, name, permit #, notes…" value="${esc(PERMITS_STATE.q)}" oninput="onPermitsFilter()">
+            <select id="pm-status" onchange="onPermitsFilter()"><option value="">All statuses</option>${Object.entries(PERMIT_STATUS_META).map(([k, m]) => `<option value="${k}" ${PERMITS_STATE.status === k ? 'selected' : ''}>${m.label}</option>`).join('')}</select>
+          </div>
+          <div id="pm-list"></div></div>`}`;
+  if (tab === 'active' || tab === 'all') renderPermitsList();
+}
+
+function permitFormFields(p) {
+  const yn = v => v == null ? '' : (v ? 1 : 0);
+  const ynOpts = [{ value: 1, label: 'Yes' }, { value: 0, label: 'No' }];
+  const f = (id, label, extra = {}) => ({ id, label, type: 'text', value: p?.[id], ...extra });
+  return [
+    f('job_number_raw', 'Job #', { placeholder: 'e.g. 181001 or S001541' }),
+    f('job_name', 'Job Name'),
+    f('permit_number', 'Permit #', { placeholder: 'EP2026009796' }),
+    { id: 'status', label: 'Status', type: 'select', required: true, value: p?.status || 'not_filed', options: Object.entries(PERMIT_STATUS_META).map(([value, m]) => ({ value, label: m.label })) },
+    f('date_filed', 'Date Permit Filed', { type: 'date' }),
+    { id: 'rough_in_required', label: 'Rough-In Required?', type: 'select', emptyLabel: '—', value: yn(p?.rough_in_required), options: ynOpts },
+    { id: 'expedited', label: 'Permit Expedited?', type: 'select', emptyLabel: '—', value: yn(p?.expedited), options: ynOpts },
+    { id: 'fa_required', label: 'F/A Drawings Required?', type: 'select', emptyLabel: '—', value: yn(p?.fa_required), options: ynOpts },
+    { id: 'fa_submitted', label: 'F/A Drawings Submitted?', type: 'select', emptyLabel: '—', value: yn(p?.fa_submitted), options: ynOpts },
+    { id: 'approved_for_pickup', label: 'Approved for Pick Up?', type: 'select', emptyLabel: '—', value: yn(p?.approved_for_pickup), options: ynOpts },
+    f('date_picked_up', 'Date Permit Picked Up', { type: 'date' }),
+    { id: 'posted_filed', label: 'Permit Posted & Filed?', type: 'select', emptyLabel: '—', value: yn(p?.posted_filed), options: ynOpts },
+    f('underwriter_po', "Underwriter's PO #"),
+    f('uw_rough_in', "Underwriter's Inspection — Rough-In"),
+    f('uw_final', "Underwriter's Inspection — Final"),
+    f('notes', 'Notes (carried over from the log)', { type: 'textarea' }),
+  ];
+}
+async function actNewPermit(jobId) {
+  let jobs = [];
+  try { jobs = await api('GET', '/api/v2/jobs-picker'); } catch { /* typed job #/name still works */ }
+  const j = jobs.find(x => x.id === jobId);
+  const fields = [
+    { id: 'job_id', label: 'Job in the app (optional)', type: 'select', emptyLabel: 'Not linked — type job # / name below', value: jobId || '',
+      options: jobs.map(x => ({ value: x.id, label: `${x.job_number || 'no #'} — ${x.project_name}` })) },
+    ...permitFormFields({ job_number_raw: j?.job_number, job_name: j?.project_name }),
+  ];
+  showForm('+ New Permit', fields, async data => { await api('POST', '/api/v2/permits', data); await renderPermits(); }, 'Create Permit', 'green');
+}
+function actEditPermit(id) {
+  const p = PERMITS_STATE.data.permits.find(x => x.id === id);
+  showForm('✏️ Edit Permit', permitFormFields(p), async data => { await api('PATCH', `/api/v2/permits/${id}`, data); await renderPermits(); }, 'Save', 'blue');
+}
+async function actDeletePermit(id) {
+  if (!confirm('Delete this permit record? This cannot be undone.')) return;
+  try { await api('DELETE', `/api/v2/permits/${id}`); document.getElementById('v2-form-overlay')?.remove(); await renderPermits(); }
+  catch (e) { alert(e.message); }
+}
+async function actAddPermitUpdate(id) {
+  const input = document.getElementById('pm-upd-text');
+  const text = input?.value.trim(); if (!text) return;
+  try { await api('POST', `/api/v2/permits/${id}/updates`, { text }); await renderPermits(); openPermit(id); }
+  catch (e) { alert(e.message); }
+}
+function openPermit(id) {
+  const p = PERMITS_STATE.data.permits.find(x => x.id === id); if (!p) return;
+  const m = PERMIT_STATUS_META[p.status] || PERMIT_STATUS_META.filed;
+  const row = (label, val) => `<div style="display:flex;justify-content:space-between;gap:12px;padding:5px 0;border-bottom:1px solid #f1f5f9;font-size:12.5px"><span style="color:var(--text-muted)">${label}</span><span style="font-weight:600;text-align:right">${val}</span></div>`;
+  document.getElementById('v2-form-overlay')?.remove();
+  const ov = document.createElement('div');
+  ov.className = 'v2-overlay'; ov.id = 'v2-form-overlay';
+  ov.innerHTML = `<div class="v2-modal" style="max-width:560px">
+    <div class="v2-modal-hd"><span>🏛️ ${esc(p.job_number || 'no job #')} — ${esc(p.job_name || '')}</span><button class="v2-btn outline" onclick="document.getElementById('v2-form-overlay').remove()">✕</button></div>
+    <div class="v2-modal-bd">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class="badge" style="background:${m.color}1a;color:${m.color}">${esc(m.label)}</span>${permitFlagChips(p)}
+        ${p.project_id ? `<a href="#" onclick="event.preventDefault();document.getElementById('v2-form-overlay').remove();renderProjectPage(${p.project_id})" style="font-size:12px;margin-left:auto">Open job →</a>` : ''}</div>
+      <div>
+        ${row('Permit #', esc(p.permit_number || '—'))}${row('Date filed', p.date_filed ? fmtD(p.date_filed) : '—')}
+        ${row('Rough-in required', permitYN(p.rough_in_required))}${row('Expedited', permitYN(p.expedited))}
+        ${row('F/A drawings required / submitted', `${permitYN(p.fa_required)} / ${permitYN(p.fa_submitted)}`)}
+        ${row('Approved for pick up', permitYN(p.approved_for_pickup))}${row('Picked up', p.date_picked_up ? fmtD(p.date_picked_up) : '—')}
+        ${row('Posted & filed', permitYN(p.posted_filed))}${p.underwriter_po ? row("Underwriter's PO #", esc(p.underwriter_po)) : ''}
+        ${p.uw_rough_in ? row('UW inspection — rough-in', esc(p.uw_rough_in)) : ''}${p.uw_final ? row('UW inspection — final', esc(p.uw_final)) : ''}
+      </div>
+      ${p.notes ? `<div><div style="font-weight:700;font-size:12px;margin-bottom:3px">Notes from the log</div><div style="font-size:12.5px;color:var(--text-muted);white-space:pre-wrap;line-height:1.45">${esc(p.notes)}</div></div>` : ''}
+      <div><div style="font-weight:700;font-size:12px;margin-bottom:4px">Updates</div>
+        ${p.updates.length ? p.updates.map(u => `<div style="font-size:12.5px;padding:4px 0;border-bottom:1px solid #f1f5f9"><strong>${fmtD(u.date)}</strong>${u.by ? ` <span style="color:var(--text-muted)">(${esc(u.by)})</span>` : ''} — ${esc(u.text)}</div>`).join('')
+          : '<div style="font-size:12.5px;color:var(--text-muted)">No dated updates yet.</div>'}
+        ${canManagePermits() ? `<div style="display:flex;gap:6px;margin-top:8px"><input id="pm-upd-text" type="text" placeholder="Add an update — e.g. L&I corrections uploaded" style="flex:1" onkeydown="if(event.key==='Enter')actAddPermitUpdate(${p.id})"><button class="v2-btn blue" style="padding:4px 12px" onclick="actAddPermitUpdate(${p.id})">Add</button></div>` : ''}
+      </div>
+    </div>
+    ${canManagePermits() ? `<div class="v2-modal-ft" style="justify-content:space-between">
+      ${CURRENT_USER?.is_admin ? `<button class="v2-btn outline" style="color:#dc2626;border-color:#fecaca" onclick="actDeletePermit(${p.id})">🗑 Delete</button>` : '<span></span>'}
+      <button class="v2-btn outline" onclick="actEditPermit(${p.id})">✏️ Edit</button></div>` : ''}
+  </div>`;
+  document.body.appendChild(ov);
 }
 
 async function showHealth() {

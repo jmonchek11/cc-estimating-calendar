@@ -9,7 +9,7 @@
  */
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
-const { getModels, RELEASE_NOTE_CATEGORIES } = require('./models');
+const { getModels, RELEASE_NOTE_CATEGORIES, PERMIT_STATUSES } = require('./models');
 const events = require('./events');
 const ics = require('./ics');
 
@@ -2870,37 +2870,126 @@ async function updateJobPermits(id, data) {
   return { job_id: jobId };
 }
 
-// Company-wide Permits view (2026-09-30, per Joe) — every job that needs a
-// permit, grouped by where it stands: not yet applied, applied and waiting,
-// approved/current, or closed out (COA received). Jobs never marked as
-// needing a permit (false or still TBD/null) have nothing to track here, so
-// they're excluded rather than cluttering the list.
+// ── Permits (2026-10) ─────────────────────────────────────────────────────────
+// Permit-level records modeled on Pat McCreesh's Electrical Permit Status
+// Log (see PermitSchema). The Permits page is Pat's working tool and the
+// source for the Wednesday permit update. A permit "needs filing" when a job
+// is flagged needs_permit but has no permit record yet.
+//
+// The log writes job numbers in Foundation's customer-job-type form
+// ("181-001-I0", "018-595-I0"); the app stores them as the digits
+// ("181001", "18595"). S-numbers ("S001541") are kept as-is.
+function permitJobNumber(raw) {
+  const s = String(raw || '').trim();
+  const m = s.match(/^(\d{3})-(\d{3})-/);
+  if (m) return String(Number(m[1] + m[2]));
+  return s || null;
+}
+const PERMIT_ACTIVE = ['not_filed', 'filed', 'corrections', 'approved', 'picked_up'];
+const PERMIT_EDITABLE = ['job_id', 'job_number_raw', 'job_name', 'permit_number', 'status', 'date_filed', 'rough_in_required', 'expedited',
+  'fa_required', 'fa_submitted', 'approved_for_pickup', 'date_picked_up', 'posted_filed', 'underwriter_po', 'uw_rough_in', 'uw_final', 'notes'];
+const PERMIT_BOOL = new Set(['rough_in_required', 'expedited', 'fa_required', 'fa_submitted', 'approved_for_pickup', 'posted_filed']);
+
+function fmtPermit(p, jobById, pName) {
+  const job = p.job_id ? jobById[p.job_id] : null;
+  const last = (p.updates || []).slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0] || null;
+  const days = p.date_filed && ['filed', 'corrections', 'approved'].includes(p.status)
+    ? Math.max(0, Math.round((Date.now() - new Date(p.date_filed + 'T12:00:00').getTime()) / 86400000)) : null;
+  return {
+    id: p._id, job_id: p.job_id || null, project_id: job?.project_id || null,
+    job_number: job?.job_number || p.job_number_raw || null, job_number_raw: p.job_number_raw,
+    job_name: p.job_name || (job ? pName[job.project_id] : null) || null,
+    permit_number: p.permit_number, status: p.status, date_filed: p.date_filed, days_open: days,
+    rough_in_required: p.rough_in_required, expedited: p.expedited, fa_required: p.fa_required, fa_submitted: p.fa_submitted,
+    approved_for_pickup: p.approved_for_pickup, date_picked_up: p.date_picked_up, posted_filed: p.posted_filed,
+    underwriter_po: p.underwriter_po, uw_rough_in: p.uw_rough_in, uw_final: p.uw_final,
+    notes: p.notes, updates: (p.updates || []).slice().sort((a, b) => (b.date || '').localeCompare(a.date || '')),
+    last_update: last, source: p.source,
+  };
+}
+
 async function getPermitsOverview() {
   const M = getModels();
-  const [jobs, projects, companies] = await Promise.all([
-    M.Job.find({ needs_permit: true }).lean(),
-    M.Project.find().lean(),
-    M.Company.find().lean(),
+  const [permits, jobs, projects, companies] = await Promise.all([
+    M.Permit.find().lean(), M.Job.find().lean(), M.Project.find().lean(), M.Company.find().lean(),
   ]);
   const pName = {}; projects.forEach(p => pName[p._id] = p.name);
   const coName = {}; companies.forEach(c => coName[c._id] = c.name);
-  const rows = jobs.map(j => {
-    const status = j.permit_date_coa_received ? 'closed'
-      : j.permit_date_approved ? 'approved'
-      : j.permit_date_applied ? 'applied'
-      : 'not_applied';
-    return {
-      id: j._id, job_number: j.job_number, project_id: j.project_id, project_name: pName[j.project_id] || '—',
-      awarded_company: j.awarded_company_id ? (coName[j.awarded_company_id] || null) : null,
-      needs_rough_in_permit: j.needs_rough_in_permit, needs_accelerated_permit: j.needs_accelerated_permit,
-      needs_fire_alarm_drawings: j.needs_fire_alarm_drawings, ez_permit_eligible: j.ez_permit_eligible,
-      permit_date_applied: j.permit_date_applied, permit_date_approved: j.permit_date_approved, permit_date_coa_received: j.permit_date_coa_received,
-      status,
-    };
-  }).sort((a, b) => (a.job_number || '').localeCompare(b.job_number || ''));
-  const counts = { not_applied: 0, applied: 0, approved: 0, closed: 0 };
-  rows.forEach(r => counts[r.status]++);
-  return { rows, counts };
+  const jobById = {}; jobs.forEach(j => jobById[j._id] = j);
+  const rows = permits.map(p => fmtPermit(p, jobById, pName))
+    .sort((a, b) => (b.date_filed || '').localeCompare(a.date_filed || '') || b.id - a.id);
+  // Jobs flagged as needing a permit with nothing filed/recorded yet — the
+  // "needs filing" queue (fills itself as jobs are awarded and flagged).
+  const withPermit = new Set(permits.filter(p => p.job_id).map(p => p.job_id));
+  const needsFiling = jobs.filter(j => j.needs_permit === true && !withPermit.has(j._id)).map(j => ({
+    job_id: j._id, job_number: j.job_number, project_id: j.project_id, project_name: pName[j.project_id] || '—',
+    awarded_company: j.awarded_company_id ? (coName[j.awarded_company_id] || null) : null, award_date: j.award_date,
+    needs_rough_in_permit: j.needs_rough_in_permit, needs_accelerated_permit: j.needs_accelerated_permit,
+    needs_fire_alarm_drawings: j.needs_fire_alarm_drawings, ez_permit_eligible: j.ez_permit_eligible,
+  })).sort((a, b) => (b.award_date || '').localeCompare(a.award_date || ''));
+  const counts = { needs_filing: needsFiling.length, active: 0 };
+  PERMIT_STATUSES.forEach(s => counts[s] = 0);
+  rows.forEach(r => { counts[r.status]++; if (PERMIT_ACTIVE.includes(r.status)) counts.active++; });
+  return { permits: rows, needsFiling, counts };
+}
+
+async function loadPermit(id) {
+  const p = await getModels().Permit.findById(Number(id)).lean();
+  if (!p) throw new Error('Permit not found');
+  return p;
+}
+function permitFields(data, existing) {
+  const upd = {};
+  for (const f of PERMIT_EDITABLE) {
+    if (!(f in data)) continue;
+    let v = data[f] === '' ? null : data[f];
+    if (f === 'job_id') v = v ? Number(v) : null;
+    else if (PERMIT_BOOL.has(f)) v = v == null ? null : (Number(v) === 1 || v === true);
+    else if (f === 'status' && v && !PERMIT_STATUSES.includes(v)) throw new Error('Invalid permit status');
+    else if (typeof v === 'string') v = v.trim() || null;
+    upd[f] = v;
+  }
+  // Advance-only auto status: logging a pickup date means it is picked up, a
+  // filed date means at least filed — unless the caller set status explicitly.
+  if (!('status' in data)) {
+    const cur = existing?.status || 'not_filed';
+    if (upd.date_picked_up && ['not_filed', 'filed', 'corrections', 'approved'].includes(cur)) upd.status = 'picked_up';
+    else if (upd.date_filed && cur === 'not_filed') upd.status = 'filed';
+  }
+  return upd;
+}
+async function createPermit(data, actorId) {
+  const M = getModels();
+  const fields = permitFields(data, null);
+  if (!fields.job_id && !fields.job_number_raw && !fields.job_name) throw new Error('Pick a job, or enter a job # / job name');
+  if (fields.job_id) {
+    const job = await M.Job.findById(fields.job_id).lean();
+    if (!job) throw new Error('Job not found');
+    if (!fields.job_number_raw) fields.job_number_raw = job.job_number || null;
+    if (job.needs_permit == null) await M.Job.updateOne({ _id: job._id }, { $set: { needs_permit: true, updated_at: ts() } });
+  }
+  const id = await nextId('permits');
+  await M.Permit.create({ _id: id, ...fields, status: fields.status || 'not_filed', source: 'app', created_by: actorId || null });
+  return { id };
+}
+async function updatePermit(id, data) {
+  const M = getModels();
+  const existing = await loadPermit(id);
+  const upd = permitFields(data, existing);
+  upd.updated_at = ts();
+  await M.Permit.updateOne({ _id: existing._id }, { $set: upd });
+  return { id: existing._id };
+}
+async function addPermitUpdate(id, text, actorName) {
+  const M = getModels();
+  if (!text || !String(text).trim()) throw new Error('Update text is required');
+  const existing = await loadPermit(id);
+  await M.Permit.updateOne({ _id: existing._id }, { $push: { updates: { date: today(), text: String(text).trim(), by: actorName || null } }, $set: { updated_at: ts() } });
+  return { id: existing._id };
+}
+async function deletePermit(id) {
+  await getModels().Permit.deleteOne({ _id: Number(id) });
+  return { ok: true };
 }
 
 // ── Change Orders ─────────────────────────────────────────────────────────────
@@ -5039,7 +5128,7 @@ module.exports = {
   getCompanyCommunications, getContactCommunications, getAllCommunications,
   addBidCustomerContact, removeBidCustomerContact, setBidCustomerPortalUrl,
   awardSubmission, notAwardSubmission, revertAward, revertNotAwarded, closeBid, approveToBid, unapproveToBid, logFollowupV2, updateFollowup,
-  createLegacyJob, updateJob, updateJobPermits, getPermitsOverview,
+  createLegacyJob, updateJob, updateJobPermits, getPermitsOverview, createPermit, updatePermit, addPermitUpdate, deletePermit, permitJobNumber,
   createChangeOrder, submitCO, approveCO, notApproveCO, voidCO, reopenCO, reviseCO,
   createCoRequest, approveCoRequest, unapproveCoRequest, startCoRequest,
   _norm, resolveCompanyByName, ensureBidCustomer, teamMap,

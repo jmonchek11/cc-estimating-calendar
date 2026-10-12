@@ -177,7 +177,7 @@ router.get('/api/v2/meta', async (req, res) => {
         // Ideas approval is locked to Carrie specifically (per Joe, 2026-09-16)
         // — surfaced here so the frontend can hide the Approve/Decline buttons
         // from other admins instead of showing them a control that 403s.
-        current_user = { id: m.id, name: m.name, is_admin: !!m.is_admin, role: m.role, liberty_apps, notification_prefs: m.notification_prefs, unseen_release_count, can_approve_ideas: m.email === 'cyaffe@libertyintegrated.com' };
+        current_user = { id: m.id, name: m.name, is_admin: !!m.is_admin, can_manage_permits: !!(m.is_admin || m.permit_manager), role: m.role, liberty_apps, notification_prefs: m.notification_prefs, unseen_release_count, can_approve_ideas: m.email === 'cyaffe@libertyintegrated.com' };
       }
     } catch { /* ignore — current_user stays null */ }
     res.json({ ...meta, current_user });
@@ -589,6 +589,22 @@ router.patch('/api/v2/jobs/:id/permits',      t(req => v2db.updateJobPermits(req
   (req) => ({ action: 'job.update_permits', summary: `Edited permits on job #${req.params.id} (${Object.keys(req.body).join(', ')})`, entity_type: 'job', entity_id: Number(req.params.id) })));
 // Company-wide Permits view — every job needing a permit, grouped by status.
 router.get('/api/v2/permits',                 async (req, res) => { try { res.json(await v2db.getPermitsOverview()); } catch (e) { res.status(500).json({ error: e.message }); } });
+// Creating/editing permit records is limited to admins and anyone flagged
+// permit_manager (Pat) — everyone else can read the Permits page.
+async function requirePermitManager(req, res, next) {
+  try {
+    const actor = await maindb.getMember(req.session.userId);
+    if (!actor?.is_admin && !actor?.permit_manager) return res.status(403).json({ error: 'Only admins or the permit manager can edit permits' });
+    next();
+  } catch (e) { res.status(500).json({ error: e.message }); }
+}
+router.post('/api/v2/permits',                requirePermitManager, t(req => v2db.createPermit(req.body, req.session.userId),
+  (req, r) => ({ action: 'permit.create', summary: `Created permit record #${r.id}${req.body.permit_number ? ' (' + req.body.permit_number + ')' : ''}`, entity_type: 'permit', entity_id: r.id })));
+router.patch('/api/v2/permits/:id',           requirePermitManager, t(req => v2db.updatePermit(req.params.id, req.body),
+  (req) => ({ action: 'permit.update', summary: `Edited permit #${req.params.id} (${Object.keys(req.body).join(', ')})`, entity_type: 'permit', entity_id: Number(req.params.id) })));
+router.post('/api/v2/permits/:id/updates',    requirePermitManager, t(async req => v2db.addPermitUpdate(req.params.id, req.body.text, (await actorOf(req))?.name)));
+router.delete('/api/v2/permits/:id',          requireAdmin, t(req => v2db.deletePermit(req.params.id),
+  (req) => ({ action: 'permit.delete', summary: `Deleted permit #${req.params.id}`, entity_type: 'permit', entity_id: Number(req.params.id) })));
 router.post('/api/v2/jobs/:id/change-orders', t(req => v2db.createChangeOrder(req.params.id, req.body, req.session.userId),
   async (req, r) => ({ action: 'co.create', summary: `Created CO ${await v2db.coLabel(r.co_id)} on job #${req.params.id}`, entity_type: 'change_order', entity_id: r.co_id })));
 

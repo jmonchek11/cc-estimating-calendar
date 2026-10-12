@@ -32,6 +32,9 @@ const teamMemberSchema = new mongoose.Schema({
   // both mean "send it" (see wantsNotification in mailer.js), so accounts
   // that predate this feature keep getting everything until they visit
   // Settings and turn something off themselves.
+  // Can create/edit Permit records (Permits page) — Pat McCreesh's job.
+  // Admins can always do it too; this just lets a non-admin own the workflow.
+  permit_manager: { type: Boolean, default: false },
   notification_prefs: {
     assigned: { type: Boolean, default: true },
     followup: { type: Boolean, default: true },
