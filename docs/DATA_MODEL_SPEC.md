@@ -627,4 +627,4 @@ picked_up → closed (or withdrawn). `updates[]` is a dated timeline; `notes` ho
 Job.needs_permit / rough-in / accelerated / F/A drawings / EZ stay as the *qualifier* ("do we need
 one"); a flagged job with no Permit record shows in the Permits page's Needs Filing queue.
 Editing is limited to admins and `TeamMember.permit_manager` (Pat). Backfill: `v2/import-permit-log.js`
-(idempotent; imported 315 rows 2026-10-12; filed >1yr ago with no pickup is imported as closed, noted).
+(idempotent; only rows NOT greyed out in the log are imported (16 of 315, 2026-10-12) — Pat greys closed-out permits; filed >1yr ago with no pickup is imported as closed, noted).

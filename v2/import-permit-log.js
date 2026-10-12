@@ -5,6 +5,13 @@
  *   node v2/import-permit-log.js "<path to .xlsx>"            # dry run (default)
  *   node v2/import-permit-log.js "<path to .xlsx>" --write    # actually insert
  *
+ * ONLY ROWS THAT AREN'T GREYED OUT are imported — Pat greys a row's text out
+ * (columns B onward) when a permit is closed out, and years-old closed permits
+ * (e.g. 032-138-I0) don't matter to us. Greying is read from the workbook's
+ * styles (font color on column B+), since SheetJS doesn't expose it per cell.
+ * --reset-import first deletes everything previously imported from the log
+ * (and un-flags jobs whose only permits were those), for re-running the rule.
+ *
  * Idempotent: a row is skipped if a Permit with the same job # + permit # +
  * filed date (source 'import') already exists, so a re-run only adds new rows.
  * Matches each row to a Job by job number (log "181-001-I0" -> app "181001"),
@@ -16,6 +23,27 @@ const mongoose = require('mongoose');
 const XLSX = require('xlsx');
 const { getModels } = require('./models');
 const { permitJobNumber } = require('./db');
+
+// Rows whose text (col B..N — the free-text notes column O is ignored, it is often left un-greyed) is in one of the grey fonts = closed out in the log.
+function greyedRowNumbers(file) {
+  const wb = XLSX.readFile(file, { bookFiles: true });
+  const get = n => { const e = wb.files[n]; if (!e) return ''; const c = e.content; return Buffer.isBuffer(c) ? c.toString('utf8') : Buffer.from(c).toString('utf8'); };
+  const st = get('xl/styles.xml'), sh = get('xl/worksheets/sheet1.xml');
+  const fontsXml = (st.match(/<fonts[\s\S]*?<\/fonts>/) || [''])[0];
+  const fonts = [...fontsXml.matchAll(/<font>([\s\S]*?)<\/font>|<font\/>/g)].map(m => { const c = (m[1] || '').match(/<color ([^/]*)\/>/); return c ? c[1] : ''; });
+  const isGrey = c => /theme="0"[^>]*tint="-/.test(c) || /rgb="(FF)?(BFBFBF|D9D9D9|F2F2F2|A6A6A6|808080|7F7F7F|969696)"/i.test(c);
+  const xfsXml = (st.match(/<cellXfs[\s\S]*?<\/cellXfs>/) || [''])[0];
+  const xfFont = [...xfsXml.matchAll(/<xf ([^>]*?)\/?>/g)].map(m => +((m[1].match(/fontId="(\d+)"/) || [0, 0])[1]));
+  const byRow = {};
+  for (const m of sh.matchAll(/<c r="([A-Z]+)(\d+)"([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
+    if (m[1] === 'A' || m[1].length > 1 || m[1] > 'N' || !(m[4] && /<v>|<is>/.test(m[4]))) continue;
+    const s = +((m[3].match(/ s="(\d+)"/) || [0, 0])[1]);
+    (byRow[+m[2]] = byRow[+m[2]] || []).push(isGrey(fonts[xfFont[s]] || ''));
+  }
+  const grey = new Set();
+  for (const [r, flags] of Object.entries(byRow)) if (flags.length && flags.every(Boolean)) grey.add(+r);
+  return grey;
+}
 
 const file = process.argv[2];
 const WRITE = process.argv.includes('--write');
@@ -71,16 +99,30 @@ function toPermit(r) {
 }
 
 (async () => {
-  const rows = XLSX.utils.sheet_to_json(XLSX.readFile(file).Sheets['Sheet1'], { header: 1, defval: '', raw: false })
-    .slice(2).filter(r => clean(r[0]) || clean(r[1]));
+  const grey = greyedRowNumbers(file);
+  const all = XLSX.utils.sheet_to_json(XLSX.readFile(file).Sheets['Sheet1'], { header: 1, defval: '', raw: false });
+  const present = all.map((r, i) => ({ r, rowNo: i + 1 })).slice(2).filter(x => clean(x.r[0]) || clean(x.r[1]));
+  const rows = present.filter(x => !grey.has(x.rowNo)).map(x => x.r);
+  const skippedGrey = present.length - rows.length;
   await mongoose.connect(process.env.MONGODB_URI);
   const M = getModels();
-  const [jobs, existing] = await Promise.all([M.Job.find().lean(), M.Permit.find({ source: 'import' }).lean()]);
+  let [jobs, existing] = await Promise.all([M.Job.find().lean(), M.Permit.find({ source: 'import' }).lean()]);
   const jobByNum = {}; jobs.forEach(j => { if (j.job_number) jobByNum[String(j.job_number).trim()] = j; });
   const keyOf = p => [p.job_number_raw, p.permit_number, p.date_filed, p.job_name].map(x => x || '').join('|');
-  const seen = new Set(existing.map(keyOf));
+  let seen = new Set(existing.map(keyOf));
 
-  const counts = { rows: rows.length, inserted: 0, skippedExisting: 0, matchedJob: 0, jobsQualified: 0 };
+  if (process.argv.includes('--reset-import') && WRITE) {
+    seen = new Set();   // everything imported is about to be deleted
+    const old = await M.Permit.find({ source: 'import' }).lean();
+    await M.Permit.deleteMany({ source: 'import' });
+    const left = new Set((await M.Permit.find({ job_id: { $ne: null } }).lean()).map(p => p.job_id));
+    const jobIds = [...new Set(old.filter(p => p.job_id).map(p => p.job_id))].filter(id => !left.has(id));
+    await M.Job.updateMany({ _id: { $in: jobIds } }, { $set: { needs_permit: null, needs_rough_in_permit: null, needs_accelerated_permit: null, needs_fire_alarm_drawings: null } });
+    console.log('RESET: removed', old.length, 'imported permits; un-flagged', jobIds.length, 'jobs');
+    jobs = await M.Job.find().lean();   // fresh flags, so the qualifier step below re-fills them
+    jobs.forEach(j => { if (j.job_number) jobByNum[String(j.job_number).trim()] = j; });
+  }
+  const counts = { skippedGreyedOut: skippedGrey, rows: rows.length, inserted: 0, skippedExisting: 0, matchedJob: 0, jobsQualified: 0 };
   const byStatus = {};
   const lastForJob = {};
   const { Counter } = M;
