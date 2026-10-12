@@ -2822,6 +2822,17 @@ async function updateJob(id, data, actorId) {
   if (!r.matchedCount) throw new Error('Job not found');
 
   const proj = await M.Project.findById(before.project_id).lean();
+  // A job just got its number: link any permit records whose log job # (e.g.
+  // "552-147-I0") was waiting for it — the permit import ran before some jobs
+  // had numbers, which is how 552147 ended up unlinked.
+  if ('job_number' in upd && upd.job_number && upd.job_number !== before.job_number) {
+    const waiting = await M.Permit.find({ job_id: null }).lean();
+    const ids = waiting.filter(p => permitJobNumber(p.job_number_raw) === upd.job_number).map(p => p._id);
+    if (ids.length) {
+      await M.Permit.updateMany({ _id: { $in: ids } }, { $set: { job_id: jobId, updated_at: ts() } });
+      await M.Job.updateOne({ _id: jobId, needs_permit: null }, { $set: { needs_permit: true } });
+    }
+  }
   if ('job_number' in upd && upd.job_number !== before.job_number) {
     if (!before.job_number && upd.job_number) {
       await events.safeEmit('job.number_assigned', {
