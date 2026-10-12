@@ -3150,7 +3150,33 @@ function jobNode(j, legacy = false) {
 // reopens the requirements even after dates exist, same as every other form
 // here; the UI just leads with whichever phase is more relevant right now.
 function permitYesNo(v) { return v === true ? 'Yes' : v === false ? 'No' : 'TBD'; }
+// A job's permit info comes from its Permit RECORDS (what Pat tracks on the
+// Permits board) — status, permit #, filed/picked-up dates, last update — so the
+// project view can never disagree with the Permits page. The old hand-typed
+// job-level dates only show for a job with no permit records yet.
+function jobPermitRecordsHtml(j) {
+  const rows = j.permits.map(p => {
+    const m = (typeof PERMIT_STATUS_META !== 'undefined' && PERMIT_STATUS_META[p.status]) || { label: p.status, color: '#64748b' };
+    const stale = p.days_open != null && p.days_open >= 21;
+    return `<div style="padding:7px 0;border-top:1px solid #f1e8fb;cursor:pointer" onclick="navigate('permits').then(() => openPermit(${p.id}))">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span class="badge" style="background:${m.color}1a;color:${m.color}">${esc(m.label)}</span>
+        <span style="font-size:12px;font-weight:600">${p.permit_number ? 'Permit # ' + esc(p.permit_number) : 'No permit # yet'}</span>
+        ${stale ? `<span style="font-size:11px;font-weight:700;color:#c2410c">⏰ ${p.days_open} days since filing</span>` : ''}
+      </div>
+      <div style="font-size:11.5px;color:var(--text-muted);margin-top:2px">${p.date_filed ? 'Filed ' + fmtD(p.date_filed) : 'Not filed yet'}${p.date_picked_up ? ' · Picked up ' + fmtD(p.date_picked_up) : ''}${p.last_update ? ' · ' + fmtD(p.last_update.date) + ': ' + esc(p.last_update.text) : ''}</div>
+    </div>`;
+  }).join('');
+  return `<div class="v2-co" style="border-left-color:#a855f7">
+    <div style="flex:1;min-width:0">
+      <div style="font-weight:700;font-size:12px;color:#7e22ce">🏛️ Permits <a href="#" onclick="event.preventDefault();navigate('permits')" style="font-size:11px;color:#2563eb;font-weight:400">open Permits board</a> <a href="#" onclick="event.preventDefault();actEditPermitRequirements(${j.id})" style="font-size:11px;color:#2563eb;font-weight:400">edit requirements</a></div>
+      <div style="font-size:11.5px;color:var(--text-muted);margin-top:2px">Rough-In: ${permitYesNo(j.needs_rough_in_permit)} · Accelerated: ${permitYesNo(j.needs_accelerated_permit)} · FA Drawings: ${permitYesNo(j.needs_fire_alarm_drawings)} · EZ Permit: ${permitYesNo(j.ez_permit_eligible)}</div>
+      ${rows}
+    </div>
+  </div>`;
+}
 function permitsSectionHtml(j) {
+  if (j.permits && j.permits.length) return jobPermitRecordsHtml(j);
   if (j.needs_permit == null) {
     return `<div class="v2-co" style="border-left-color:#a855f7">
       <div style="flex:1;min-width:0">
@@ -3171,6 +3197,7 @@ function permitsSectionHtml(j) {
     <div style="flex:1;min-width:0">
       <div style="font-weight:700;font-size:12px;color:#7e22ce">🏛️ Permits — required <a href="#" onclick="event.preventDefault();actEditPermitRequirements(${j.id})" style="font-size:11px;color:#2563eb;font-weight:400">edit</a></div>
       <div style="font-size:11.5px;color:var(--text-muted);margin-top:2px">Rough-In: ${permitYesNo(j.needs_rough_in_permit)} · Accelerated: ${permitYesNo(j.needs_accelerated_permit)} · FA Drawings: ${permitYesNo(j.needs_fire_alarm_drawings)} · EZ Permit: ${permitYesNo(j.ez_permit_eligible)}</div>
+      ${j.needs_permit === true && !j.permit_date_applied ? '<div style="font-size:11.5px;color:#c2410c;font-weight:600;margin-top:3px">Not filed yet — it is in the “To File” column on the Permits board.</div>' : ''}
       ${dateRow('Applied', j.permit_date_applied)}
       ${dateRow('Approved', j.permit_date_approved)}
       ${dateRow('COA Received', j.permit_date_coa_received)}
@@ -5529,9 +5556,14 @@ async function actNewPermit(jobId) {
     { id: 'date_filed', label: 'Date filed (leave blank if not filed yet)', type: 'date' },
   ], async data => { await api('POST', '/api/v2/permits', data); }, 'Add Permit', 'green');
 }
-function actEditPermit(id) {
+async function actEditPermit(id) {
   const p = PERMITS_STATE.data.permits.find(x => x.id === id);
-  showForm('✏️ Edit Permit (all details)', permitFormFields(p), async data => { await api('PATCH', `/api/v2/permits/${id}`, data); }, 'Save', 'blue');
+  let jobs = [];
+  try { jobs = await api('GET', '/api/v2/jobs-picker'); } catch { /* link picker just stays empty */ }
+  // Link/re-link to the job in the app (e.g. when the log's job # has no match).
+  const linkField = { id: 'job_id', label: 'Linked job in the app', type: 'select', emptyLabel: 'Not linked to a job', value: p?.job_id || '',
+    options: jobs.map(x => ({ value: x.id, label: `${x.job_number || 'no #'} — ${x.project_name}` })) };
+  showForm('✏️ Edit Permit (all details)', [linkField, ...permitFormFields(p)], async data => { await api('PATCH', `/api/v2/permits/${id}`, data); }, 'Save', 'blue');
 }
 async function actDeletePermit(id) {
   if (!confirm('Delete this permit record? This cannot be undone.')) return;

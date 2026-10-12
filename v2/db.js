@@ -231,10 +231,13 @@ async function getProjectDetail(projectId) {
   ]);
   const bidIds = bids.map(b => b._id);
   const jobIds = jobs.map(j => j._id);
-  let [cos, bidCustomers, submissions] = await Promise.all([
+  let [cos, bidCustomers, submissions, jobPermits] = await Promise.all([
     M.ChangeOrder.find({ job_id: { $in: jobIds } }).lean(),
     M.BidCustomer.find({ bid_id: { $in: bidIds } }).lean(),
     M.BidSubmission.find({ bid_id: { $in: bidIds } }).sort({ date_submitted: 1, _id: 1 }).lean(),
+    // Permit records for this project's jobs — the job card shows these (the
+    // Permits board is the source of truth), not hand-typed job-level dates.
+    M.Permit.find({ job_id: { $in: jobIds } }).lean(),
   ]);
   // Self-healing: a 'submitted' bid whose every current submission is
   // already decided (all not_awarded, none pending, none awarded) should
@@ -470,6 +473,8 @@ async function getProjectDetail(projectId) {
       needs_permit: j.needs_permit == null ? null : !!j.needs_permit,
       needs_rough_in_permit: j.needs_rough_in_permit == null ? null : !!j.needs_rough_in_permit,
       needs_accelerated_permit: j.needs_accelerated_permit == null ? null : !!j.needs_accelerated_permit,
+      permits: jobPermits.filter(p => p.job_id === j._id).map(p => fmtPermit(p, { [j._id]: j }, { [project._id]: project.name }))
+        .sort((a, b) => (b.date_filed || '').localeCompare(a.date_filed || '')),
       needs_fire_alarm_drawings: j.needs_fire_alarm_drawings == null ? null : !!j.needs_fire_alarm_drawings,
       ez_permit_eligible: j.ez_permit_eligible == null ? null : !!j.ez_permit_eligible,
       permit_date_applied: j.permit_date_applied || null,
@@ -2983,6 +2988,12 @@ async function updatePermit(id, data) {
   const existing = await loadPermit(id);
   const upd = permitFields(data, existing);
   upd.updated_at = ts();
+  // Linking to a job that has no permit qualifier yet marks it as needing one.
+  if (upd.job_id) {
+    const job = await M.Job.findById(upd.job_id).lean();
+    if (!job) throw new Error('Job not found');
+    if (job.needs_permit == null) await M.Job.updateOne({ _id: job._id }, { $set: { needs_permit: true, updated_at: ts() } });
+  }
   await M.Permit.updateOne({ _id: existing._id }, { $set: upd });
   return { id: existing._id };
 }
