@@ -1086,6 +1086,7 @@ async function renderSettings() {
         <div class="proj-name">${esc(m.name)} <span class="initials-pill${m.role === 'sales' ? ' initials-pill-sales' : ''}">${esc(m.initials)}</span>
           ${m.is_admin ? '<span class="badge" style="background:#ede9fe;color:#5b21b6">ADMIN</span>' : ''}
           ${m.is_apm ? '<span class="badge" style="background:#dbeafe;color:#1e40af">APM</span>' : ''}
+          ${m.permit_manager ? '<span class="badge" style="background:#ccfbf1;color:#115e59">PERMITS</span>' : ''}
           ${!m.active ? '<span class="badge" style="background:#e2e8f0;color:#64748b">INACTIVE</span>' : ''}
           ${m.has_password === false ? '<span class="badge" style="background:#fef3c7;color:#b45309">NO PASSWORD SET</span>' : ''}</div>
         <div class="proj-meta">${roleLabel[m.role] || esc(m.role)}${m.email ? ` · ${esc(m.email)}` : ''}</div>
@@ -1193,7 +1194,9 @@ function actEditTeamMember(id) {
     { id: 'is_admin', label: 'Admin', type: 'select', required: true, value: m?.is_admin ? '1' : '0', options: [{ value: '1', label: 'Yes — full access incl. Data Health merges' }, { value: '0', label: 'No' }] },
     { id: 'is_apm', label: 'APM', type: 'select', required: true, value: m?.is_apm ? '1' : '0',
       options: [{ value: '1', label: 'Yes — assignable as APM on bids/jobs (in addition to their role above)' }, { value: '0', label: 'No' }] },
-  ], data => api('PATCH', `/api/v2/team/${id}`, { ...data, active: Number(data.active), is_admin: Number(data.is_admin), is_apm: Number(data.is_apm) }), 'Save');
+    { id: 'permit_manager', label: 'Permit manager', type: 'select', required: true, value: m?.permit_manager ? '1' : '0',
+      options: [{ value: '1', label: 'Yes — can mark permits filed/picked up and edit them (Pat)' }, { value: '0', label: 'No — view only (admins can always edit)' }] },
+  ], data => api('PATCH', `/api/v2/team/${id}`, { ...data, active: Number(data.active), is_admin: Number(data.is_admin), is_apm: Number(data.is_apm), permit_manager: Number(data.permit_manager) }), 'Save');
 }
 function actResetTeamPassword(id, name) {
   showForm(`🔑 Set Password — ${esc(name)}`, [

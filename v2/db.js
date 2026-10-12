@@ -697,7 +697,7 @@ async function getMeta() {
 async function getTeamV2() {
   const M = getModels();
   const team = await M.TeamMember.find().sort({ name: 1 }).lean();
-  return team.map(t => ({ id: t._id, name: t.name, initials: t.initials, role: t.role, email: t.email, active: !!t.active, is_admin: !!t.is_admin, is_apm: !!t.is_apm, has_password: !!t.password_hash }));
+  return team.map(t => ({ id: t._id, name: t.name, initials: t.initials, role: t.role, email: t.email, active: !!t.active, is_admin: !!t.is_admin, is_apm: !!t.is_apm, permit_manager: !!t.permit_manager, has_password: !!t.password_hash }));
 }
 async function createTeamMemberV2({ name, initials, role, email, temp_password }) {
   require_({ name, initials, role }, ['name', 'initials', 'role']);
@@ -722,6 +722,7 @@ async function updateTeamMemberV2(id, data) {
   if ('active' in data) upd.active = Number(data.active);
   if ('is_admin' in data) upd.is_admin = !!Number(data.is_admin);
   if ('is_apm' in data) upd.is_apm = !!Number(data.is_apm);
+  if ('permit_manager' in data) upd.permit_manager = !!Number(data.permit_manager);
   const r = await M.TeamMember.updateOne({ _id: Number(id) }, { $set: upd });
   if (!r.matchedCount) throw new Error('Team member not found');
   return { ok: true };
