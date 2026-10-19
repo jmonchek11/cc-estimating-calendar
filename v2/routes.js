@@ -177,7 +177,7 @@ router.get('/api/v2/meta', async (req, res) => {
         // Ideas approval is locked to Carrie specifically (per Joe, 2026-09-16)
         // — surfaced here so the frontend can hide the Approve/Decline buttons
         // from other admins instead of showing them a control that 403s.
-        current_user = { id: m.id, name: m.name, is_admin: !!m.is_admin, can_manage_permits: !!(m.is_admin || m.permit_manager), role: m.role, liberty_apps, notification_prefs: m.notification_prefs, unseen_release_count, can_approve_ideas: m.email === 'cyaffe@libertyintegrated.com' };
+        current_user = { id: m.id, name: m.name, is_admin: !!m.is_admin, can_manage_permits: !!(m.is_admin || m.permit_manager), role: m.role, liberty_apps, notification_prefs: m.notification_prefs, unseen_release_count, can_approve_ideas: require('../idea-approvers').includes(m.email) };
       }
     } catch { /* ignore — current_user stays null */ }
     res.json({ ...meta, current_user });

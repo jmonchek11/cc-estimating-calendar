@@ -554,7 +554,7 @@ const IDEA_ADMIN_NOTIFY_EMAIL = 'jmonchek@libertyintegrated.com';
 // Bid/No-bid meeting. Was admin-bypass-straight-to-'new' before; Carrie
 // asked for every idea to go through the same review. Carrie only as of
 // 2026-09-16 — Connor/Dillon/Jess used to be notified too but shouldn't be.
-const IDEA_APPROVER_EMAILS = ['cyaffe@libertyintegrated.com'];
+const IDEA_APPROVER_EMAILS = require('./idea-approvers');
 
 app.post('/api/ideas', async (req, res) => {
   if (!req.session.userId) return res.status(401).json({ error: 'Not logged in' });
@@ -579,7 +579,7 @@ app.post('/api/ideas/:id/approve', async (req, res) => {
     const user = await db.getMember(req.session.userId);
     // Locked to Carrie specifically (per Joe, 2026-09-16) — being an admin
     // elsewhere in the app no longer implies idea-approval rights.
-    if (!user || !IDEA_APPROVER_EMAILS.includes(user.email)) return res.status(403).json({ error: 'Only Carrie Yaffe can approve ideas' });
+    if (!user || !IDEA_APPROVER_EMAILS.includes(user.email)) return res.status(403).json({ error: 'Only an idea approver (Carrie Yaffe) can approve ideas' });
     const idea = await db.approveIdea(req.params.id, req.session.userId);
     res.json({ ok: true });
     console.log(`[ideas] #${idea.id} approved by user ${req.session.userId} — notifying ${IDEA_ADMIN_NOTIFY_EMAIL}`);
@@ -605,7 +605,7 @@ app.put('/api/ideas/:id', async (req, res) => {
     // as /api/ideas/:id/approve applies here, or it'd be an open bypass.
     const current = await db.getIdea(req.params.id);
     if (current?.status === 'pending_approval' && !IDEA_APPROVER_EMAILS.includes(user.email)) {
-      return res.status(403).json({ error: 'Only Carrie Yaffe can approve ideas' });
+      return res.status(403).json({ error: 'Only an idea approver (Carrie Yaffe) can approve ideas' });
     }
     const result = await db.updateIdeaStatus(req.params.id, req.body.status);
     res.json({ ok: true });
