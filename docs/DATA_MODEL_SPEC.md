@@ -628,3 +628,14 @@ Job.needs_permit / rough-in / accelerated / F/A drawings / EZ stay as the *quali
 one"); a flagged job with no Permit record shows in the Permits page's Needs Filing queue.
 Editing is limited to admins and `TeamMember.permit_manager` (Pat). Backfill: `v2/import-permit-log.js`
 (idempotent; only rows NOT greyed out in the log are imported (16 of 315, 2026-10-12) — Pat greys closed-out permits; filed >1yr ago with no pickup is imported as closed, noted).
+
+
+---
+
+## Intake / turnover fields (added 2026-10-20)
+
+- `Bid.date_invited` — Date of Invitation; required on New Opportunity / Promote Lead (not on direct New Bid / JIS, which skip intake). Bid cards show days waiting (opportunity) or invite→bid-start span.
+- `Project.job_type` — building kind (Office, Warehouse, School, Pharmaceutical, Retail/Store…, `JOB_TYPE_OPTIONS` in `v2.html`); required at intake, separate from `type_of_work`.
+- `Project.square_footage` / `square_footage_na` — required at Submit Bid (number, or N/A); a blank is only accepted if the project already has an answer (`applySquareFootage()`).
+- `Job.est_turnover` — Estimating Turnover (>150hr job) Yes/No, tri-state (null = unanswered). Jobs awarded in the last 45 days with it unanswered are flagged on the Dashboard (`getDashboard().turnoverNeeded`). Set via `POST /api/v2/jobs/:id/turnover`.
+- HR-calendar "who is out" banner now includes anyone assigned as PM/APM on a job or bid, plus role `apm`.

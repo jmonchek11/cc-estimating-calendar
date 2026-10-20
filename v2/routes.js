@@ -585,6 +585,8 @@ router.post('/api/v2/jobs',                   t(req => v2db.createLegacyJob({ ..
   (req, r) => ({ action: 'job.create_legacy', summary: `Created legacy job #${r.job_id || r.id}`, entity_type: 'job', entity_id: r.job_id || r.id })));
 router.patch('/api/v2/jobs/:id',              t(req => v2db.updateJob(req.params.id, req.body, req.session.userId),
   (req) => ({ action: 'job.update', summary: `Edited job #${req.params.id} (${Object.keys(req.body).join(', ')})`, entity_type: 'job', entity_id: Number(req.params.id) })));
+router.post('/api/v2/jobs/:id/turnover',      t(req => v2db.setJobTurnover(req.params.id, req.body.est_turnover),
+  (req) => ({ action: 'job.update', summary: `Set Estimating Turnover on job #${req.params.id} to ${req.body.est_turnover === '' || req.body.est_turnover == null ? 'unanswered' : (Number(req.body.est_turnover) === 1 ? 'Yes' : 'No')}`, entity_type: 'job', entity_id: Number(req.params.id) })));
 router.patch('/api/v2/jobs/:id/permits',      t(async req => {
     const before = await v2db.loadJob(req.params.id).catch(() => null);
     const r = await v2db.updateJobPermits(req.params.id, req.body);

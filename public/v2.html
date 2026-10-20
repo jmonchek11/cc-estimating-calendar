@@ -2216,7 +2216,6 @@ function actDashAddMenu() {
         <button class="v2-btn green" style="width:100%;padding:9px 12px;text-align:left" onclick="document.getElementById('v2-form-overlay').remove();actNewBid()">+ New Bid</button>
         <button class="v2-btn outline" style="width:100%;padding:9px 12px;text-align:left" onclick="document.getElementById('v2-form-overlay').remove();actNewLegacyJob()">+ Legacy Job</button>
         <button class="v2-btn amber" style="width:100%;padding:9px 12px;text-align:left" onclick="document.getElementById('v2-form-overlay').remove();actImportJIS()">📄 Import Bid (JIS)</button>
-        <button class="v2-btn outline" style="width:100%;padding:9px 12px;text-align:left" onclick="document.getElementById('v2-form-overlay').remove();actNewChangeOrder()">+ New Change Order</button>
       </div>
     </div>`;
   document.body.appendChild(ov);
@@ -2259,9 +2258,16 @@ async function renderDashboard() {
       <button class="v2-btn blue dash-action-desktop" style="padding:8px 14px;font-size:12px" onclick="actNewOpportunity()">+ New Opportunity</button>
       <button class="v2-btn outline dash-action-desktop" style="padding:8px 14px;font-size:12px" onclick="actNewLegacyJob()">+ Legacy Job</button>
       <button class="v2-btn amber dash-action-desktop" style="padding:8px 14px;font-size:12px" onclick="actImportJIS()">📄 Import Bid (JIS)</button>
-      <button class="v2-btn outline dash-action-desktop" style="padding:8px 14px;font-size:12px" onclick="actNewChangeOrder()">+ New Change Order</button>
       <button class="v2-btn blue dash-action-mobile" style="padding:8px 14px;font-size:12px" onclick="actDashAddMenu()">+ Add ▾</button>
     </div>
+    ${(d.turnoverNeeded || []).length ? `<div style="border:1px solid #fed7aa;background:#fff7ed;border-radius:10px;padding:10px 14px;margin-bottom:14px">
+      <div style="font-weight:700;font-size:13px;color:#c2410c;margin-bottom:6px">Estimating Turnover not filled out (${d.turnoverNeeded.length}) — is it a &gt;150hr job?</div>
+      ${d.turnoverNeeded.slice(0, 8).map(t => `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:3px 0;font-size:12.5px">
+        <a href="#" onclick="event.preventDefault();renderProjectPage(${t.project_id})" style="flex:1;min-width:160px;color:var(--text);font-weight:600">${t.job_number ? esc(t.job_number) + ' — ' : ''}${esc(t.project)}</a>
+        <button class="v2-btn green" style="padding:3px 12px;font-size:11px" onclick="actSetTurnover(${t.id}, 1)">Yes</button>
+        <button class="v2-btn blue" style="padding:3px 12px;font-size:11px" onclick="actSetTurnover(${t.id}, 0)">No</button></div>`).join('')}
+      ${d.turnoverNeeded.length > 8 ? `<div style="font-size:11.5px;color:var(--text-muted)">+ ${d.turnoverNeeded.length - 8} more</div>` : ''}
+    </div>` : ''}
     <div class="stat-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px">
       ${stat('Opportunities', d.pipeline.opportunity, '', '#3b82f6', "renderBidList('opportunity')")}
       ${stat('Active Bids', d.pipeline.active_bid, '', '#f59e0b', "renderBidList('active_bid')")}
@@ -2743,6 +2749,8 @@ function projectDetailsHtml(proj) {
   const bits = [];
   if (proj.location) bits.push(`📍 ${esc(proj.location)}`);
   if (proj.type_of_work) bits.push(`🏗️ ${esc(proj.type_of_work)}`);
+  if (proj.job_type) bits.push(`🏢 ${esc(proj.job_type)}`);
+  if (proj.square_footage_na) bits.push('📏 Sq ft N/A'); else if (proj.square_footage) bits.push(`📏 ${Number(proj.square_footage).toLocaleString()} sq ft`);
   if (proj.size_bucket) bits.push(`📐 ${esc(proj.size_bucket)}`);
   if (!bits.length && !proj.description) return '';
   return `<div style="font-size:12px;padding:0 16px 12px">
@@ -2850,6 +2858,17 @@ function actUpdateGateTask(bidId, taskId) {
 // call sites that don't have it handy don't break; when given, those
 // intake fields show right on the card instead of only on the full
 // project page.
+// Invitation → decision clock: how long since we were invited (still deciding), or how
+// long it took to start the bid once we did.
+function inviteSpanHtml(b) {
+  if (!b.date_invited) return '';
+  const days = (a, z) => Math.round((new Date(z + 'T00:00:00') - new Date(a + 'T00:00:00')) / 86400000);
+  let txt;
+  if (b.stage === 'lead' || b.stage === 'opportunity') txt = `Invited ${fmtD(b.date_invited)} · ${days(b.date_invited, today)}d waiting on a decision`;
+  else if (b.date_received) txt = `Invited ${fmtD(b.date_invited)} · bid started ${days(b.date_invited, b.date_received)}d later`;
+  else txt = `Invited ${fmtD(b.date_invited)}`;
+  return `<div style="font-size:11.5px;color:var(--text-muted)">${txt}</div>`;
+}
 function bidNode(b, proj) {
   const isAwarded = b.stage === 'awarded';
   const dueOverdue = !proj?.on_hold && ['opportunity', 'active_bid'].includes(b.stage) && b.due_date && b.due_date < today;
@@ -2895,6 +2914,7 @@ function bidNode(b, proj) {
         </div>
         ${(b.estimate_amount || b.due_date) ? `<div class="bc-hd-right">
           ${b.estimate_amount ? `<div class="bc-amount">${fmt$(b.estimate_amount)}</div>` : ''}
+          ${inviteSpanHtml(b)}
           ${b.due_date ? `<div class="bc-due" style="color:${dueOverdue ? '#dc2626' : 'var(--text-muted)'}">Due ${fmtD(b.due_date)}${b.due_time ? ' · ' + fmtTimeShort(b.due_time) : ''}</div>` : ''}
         </div>` : ''}
       </div>
@@ -3117,6 +3137,17 @@ function bidActions(b) {
   return `<div class="bc-ft">${primary}${menuHtml}</div>`;
 }
 
+// Estimating Turnover (>150hr job): Yes/No, flagged on the dashboard until answered.
+function turnoverControlHtml(j) {
+  const st = j.est_turnover;
+  const btn = (v, label, on, color) => `<button class="v2-btn ${on ? color : 'outline'}" style="padding:3px 10px;font-size:11px" onclick="actSetTurnover(${j.id}, ${v})">${label}</button>`;
+  return `<span style="display:inline-flex;align-items:center;gap:4px;font-size:11.5px;color:${st == null ? '#c2410c' : 'var(--text-muted)'};font-weight:${st == null ? 700 : 400}" title="Is this a job over 150 hours that needs an estimating turnover?">
+    Estimating Turnover (&gt;150hr)? ${btn(1, 'Yes', st === true, 'green')}${btn(0, 'No', st === false, 'blue')}</span>`;
+}
+async function actSetTurnover(jobId, v) {
+  try { await api('POST', `/api/v2/jobs/${jobId}/turnover`, { est_turnover: v }); await refresh(); }
+  catch (e) { alert('Failed: ' + e.message); }
+}
 function jobNode(j, legacy = false) {
   return `
     <div class="v2-job">
@@ -3132,6 +3163,7 @@ function jobNode(j, legacy = false) {
           · ${j.change_orders.length} change order${j.change_orders.length!==1?'s':''}
         </div>
         <div class="v2-actions">
+          ${turnoverControlHtml(j)}
           ${!j.job_number ? `<button class="v2-btn amber" onclick="actSetJobNumber(${j.id})">Set Job #</button>` : ''}
           ${!j.pm ? `<button class="v2-btn outline" onclick="actSetPM(${j.id})">Assign PM</button>` : ''}
           <button class="v2-btn blue" onclick="actAddCO(${j.id})">+ Add Change Order</button>
@@ -3665,6 +3697,8 @@ const OPPORTUNITY_SOURCE_OPTIONS = ['CM Platform', 'Portal', 'Email', 'Phone Cal
 // missed and bids got assigned to the wrong department).
 const WHO_WILL_BID_OPTIONS = [{ value: 'estimating', label: 'Estimating' }, { value: 'project_management', label: 'Project Management' }];
 const WHO_WILL_BID_LABEL = { estimating: 'Estimating', project_management: 'Project Management' };
+const JOB_TYPE_OPTIONS = ['Office', 'Warehouse', 'School', 'Pharmaceutical', 'Retail/Store', 'Healthcare', 'Data Center', 'Industrial/Manufacturing', 'Laboratory', 'Hospitality', 'Multi-Family/Residential', 'Government', 'Other']
+  .map(v => ({ value: v, label: v }));
 const TYPE_OF_WORK_OPTIONS = [
   'Ground-Up Construction', 'Core & Shell', 'Fit-Out/Tenant Improvement', 'Renovation/Remodel',
   'Gut Renovation', 'Adaptive Reuse', 'Build-to-Suit', 'Spec Build', 'Phased-Occupied Renovation', 'Design-Build',
@@ -3879,10 +3913,12 @@ async function actNewOpportunity() {
     { id: 'who_will_bid', label: 'Who Will Bid?', type: 'select', required: true, options: WHO_WILL_BID_OPTIONS },
     { id: 'is_budget', label: 'Is this a Budget?', type: 'select', emptyLabel: 'No — regular bid', options: [{ value: 1, label: 'Yes — budget' }] },
     { id: 'source', label: 'Source', type: 'select', required: true, options: OPPORTUNITY_SOURCE_OPTIONS },
+    { id: 'date_invited', label: 'Date of Invitation', type: 'date', required: true, value: today, hint: 'The day we were invited to bid — tracks how long it takes us to decide.' },
     { id: 'due_date', label: 'Due Date', type: 'date', required: true },
     { id: 'due_time', label: 'Due Time (optional)', type: 'time' },
     { id: 'location', label: 'Job Location', type: 'text', required: true, placeholder: 'City, State or site address…' },
     { id: 'type_of_work', label: 'Type of Work', type: 'select', required: true, options: TYPE_OF_WORK_OPTIONS },
+    { id: 'job_type', label: 'Job Type', type: 'select', required: true, options: JOB_TYPE_OPTIONS },
     { id: 'size_bucket', label: 'Project Size', type: 'select', emptyLabel: 'Unknown / not yet known', options: PROJECT_SIZE_BUCKETS },
     { id: 'description', label: 'Project Description', type: 'textarea', required: true, placeholder: 'Brief description of the scope of work…' },
     { id: 'company_ids', label: 'Customer(s) — GC, owner, etc. (add as many as apply)', type: 'company', multi: true, required: true, newKey: 'new_companies', options: companyOpts(), placeholder: 'Type customer name…',
@@ -4038,10 +4074,12 @@ async function actPromoteLead(bidId) {
     { id: 'source', label: 'Source', type: 'select', required: true, value: sourceValue, options: OPPORTUNITY_SOURCE_OPTIONS },
     { id: 'owner_id', label: 'Opportunity Owner', type: 'select', required: true, options: teamOpts(), value: bidDetail?.owner?.id },
     { id: 'who_will_bid', label: 'Who Will Bid?', type: 'select', required: true, options: WHO_WILL_BID_OPTIONS, value: bidDetail?.who_will_bid },
+    { id: 'date_invited', label: 'Date of Invitation', type: 'date', required: true, value: bidDetail?.date_invited || today, hint: 'The day we were invited to bid.' },
     { id: 'due_date', label: 'Due Date', type: 'date', required: true, value: bidDetail?.due_date },
     { id: 'due_time', label: 'Due Time (optional)', type: 'time', value: bidDetail?.due_time },
     { id: 'location', label: 'Job Location', type: 'text', required: true, value: proj?.location, placeholder: 'City, State or site address…' },
     { id: 'type_of_work', label: 'Type of Work', type: 'select', required: true, value: proj?.type_of_work, options: TYPE_OF_WORK_OPTIONS },
+    { id: 'job_type', label: 'Job Type', type: 'select', required: true, value: proj?.job_type, options: JOB_TYPE_OPTIONS },
     { id: 'size_bucket', label: 'Project Size', type: 'select', emptyLabel: 'Unknown / not yet known', value: proj?.size_bucket, options: PROJECT_SIZE_BUCKETS },
     { id: 'description', label: 'Project Description', type: 'textarea', required: true, value: proj?.description, placeholder: 'Brief description of the scope of work…' },
     { id: 'company_ids', label: 'Customer(s) — GC, owner, etc. (add as many as apply)', type: 'company', multi: true, required: true, newKey: 'new_companies', options: companyOpts(), placeholder: 'Type customer name…',
@@ -4143,9 +4181,12 @@ function actSubmitBid(bidId) {
   const custs = bidCustomerOpts(bidId, { excludeSubmitted: true });
   if (!custs.length) { alert('Every customer on this bid already has a submission. Use "+ Add Submission" if you need to revise one.'); return; }
   const b = DETAIL_CACHE[OPEN_PROJECT]?.bids.find(x => x.id === bidId) || {};
+  const pj = DETAIL_CACHE[OPEN_PROJECT] || {};
+  const sqftValue = pj.square_footage_na ? 'N/A' : (pj.square_footage ? String(pj.square_footage) : '');
   showForm('📤 Submit Bid', [
-    { id: 'company_ids', label: 'Submit to which customer(s)?', type: 'multicheck', required: true, options: custs },
+    { id: 'company_ids', label: 'Submit to which customer(s)?', type: 'multicheck', required: true, options: custs, value: custs.map(c => c.value) },
     { id: 'amount', label: 'Estimate Amount $', type: 'currency', required: true },
+    { id: 'square_footage', label: 'Square Footage (or type N/A)', type: 'text', required: true, value: sqftValue, placeholder: 'e.g. 45000 — or N/A', hint: 'Required. Enter N/A if square footage does not apply to this job.' },
     { id: 'jurisdiction', label: 'IBEW Local Jurisdiction', type: 'text', required: true, placeholder: '98' },
     { id: 'date_submitted', label: 'Date Estimate Sent', type: 'date', required: true, value: today },
     { id: 'approved_by', label: 'Estimate Approved By', type: 'select', required: true, options: nameOpts(['estimator', 'sales']) },
@@ -4241,6 +4282,7 @@ function actEditProject(projectId) {
     { id: 'location', label: 'Location', type: 'text', value: d.location, placeholder: 'City, State or site address…' },
     { id: 'size_bucket', label: 'Project Size', type: 'select', emptyLabel: 'Unknown', value: d.size_bucket, options: PROJECT_SIZE_BUCKETS },
     { id: 'type_of_work', label: 'Type of Work', type: 'select', emptyLabel: 'Unknown', value: d.type_of_work, options: TYPE_OF_WORK_OPTIONS },
+    { id: 'job_type', label: 'Job Type', type: 'select', emptyLabel: 'Unknown', value: d.job_type, options: JOB_TYPE_OPTIONS },
     { id: 'street', label: 'Job Address — Street', type: 'text', value: d.street, placeholder: 'usually filled in by a JIS import' },
     { id: 'city', label: 'City', type: 'text', value: d.city },
     { id: 'state', label: 'State', type: 'text', value: d.state, placeholder: 'PA' },
@@ -4296,6 +4338,7 @@ function actEditBid(bidId) {
     { id: 'cm_portal_url', label: 'CM/GC Bid Portal Link (not required)', type: 'text', value: b.cm_portal_url, placeholder: 'https://…' },
   );
   if (showSubEst) fields.push({ id: 'sub_est_section', type: 'custom' });
+  fields.push({ id: 'date_invited', label: 'Date of Invitation', type: 'date', value: b.date_invited });
   if (b.stage !== 'opportunity') {
     fields.push(
       { id: 'date_received', label: 'Date Received', type: 'date', value: b.date_received },
@@ -4864,6 +4907,7 @@ function actEditOpportunityDetails(bidId) {
   const b = DETAIL_CACHE[OPEN_PROJECT]?.bids.find(x => x.id === bidId)
     || (VIEW.name === 'bidlist' ? LIST_STATE[VIEW.arg] : null)?.find(x => x.id === bidId) || {};
   showForm('📅 Opportunity Details', [
+    { id: 'date_invited', label: 'Date of Invitation', type: 'date', value: b.date_invited },
     { id: 'due_date', label: 'Due Date (decision expected)', type: 'date', value: b.due_date },
     { id: 'due_time', label: 'Due Time (optional)', type: 'time', value: b.due_time },
     { id: 'owner_id', label: 'Opportunity Owner', type: 'select', emptyLabel: 'TBD', options: teamOpts(), value: b.owner?.id },

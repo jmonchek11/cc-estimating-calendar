@@ -42,6 +42,11 @@ const ProjectSchema = new mongoose.Schema({
   // One of TYPE_OF_WORK_OPTIONS (see v2/db.js) — captured at opportunity
   // intake alongside size_bucket, same "gauge it at a glance" purpose.
   type_of_work: { type: String, default: null },
+  // Kind of building (Office, Warehouse, School…) — one of JOB_TYPES in v2/db.js.
+  job_type: { type: String, default: null },
+  // Required at Submit Bid: a number, or N/A (square_footage_na) when it doesn't apply.
+  square_footage: { type: Number, default: null },
+  square_footage_na: { type: Boolean, default: null },
   source_key: { type: String, default: null },   // stable import key: "job:<#>" or "name:<norm>" — survives re-import
   street:     { type: String, default: null },   // job site address — from the JIS title sheet
   city:       { type: String, default: null },
@@ -81,6 +86,8 @@ const BidSchema = new mongoose.Schema({
   sub_estimators: { type: [{ estimator_id: Number, scope: String }], default: [] },
 
   date_received:  { type: String, default: null },
+  // Date we were invited to bid — the start of the invite → bid/no-bid clock.
+  date_invited:   { type: String, default: null },
   due_date:       { type: String, default: null },
   due_time:       { type: String, default: null },               // "HH:MM", 24-hour — optional, independent of due_date
   start_date:     { type: String, default: null },
@@ -201,6 +208,9 @@ const JobSchema = new mongoose.Schema({
   pm_id:              { type: Number, default: null },           // FK → TeamMember — gets CO follow-up notifications
   apm_id:             { type: Number, default: null },           // FK → TeamMember — additional assignment, see Bid.apm_id
   award_date:         { type: String, default: null },
+  // Estimating Turnover: is this a >150hr job that needs a turnover from estimating?
+  // null = not answered yet (flagged on the dashboard for awarded jobs).
+  est_turnover:       { type: Boolean, default: null },
   // Snapshotted from the winning bid's folder_url at award time (same real
   // folder, just renamed) but stored independently so it can be corrected
   // later without touching the bid, and so a legacy job (no bid at all) can

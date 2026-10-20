@@ -342,6 +342,7 @@ async function getProjectDetail(projectId) {
     }).filter(Boolean),
     start_date: b.start_date,
     date_received: b.date_received,
+    date_invited: b.date_invited || null,
     due_date: b.due_date,
     due_time: b.due_time,
     rfi_due_date: b.rfi_due_date,
@@ -449,6 +450,9 @@ async function getProjectDetail(projectId) {
     location: project.location,
     size_bucket: project.size_bucket,
     type_of_work: project.type_of_work,
+    job_type: project.job_type || null,
+    square_footage: project.square_footage == null ? null : project.square_footage,
+    square_footage_na: !!project.square_footage_na,
     // Structured job-site address — from the JIS title sheet (see
     // v2/jis.js), distinct from `location` (freeform, captured at
     // opportunity intake before a JIS exists). Both can be present.
@@ -466,6 +470,7 @@ async function getProjectDetail(projectId) {
       pm: tm[j.pm_id] || null,
       apm: tm[j.apm_id] || null,
       award_date: j.award_date,
+      est_turnover: j.est_turnover == null ? null : !!j.est_turnover,
       // Job's own folder_url, snapshotted from the winning bid's at award
       // (same real folder, just renamed) — falls back to the bid's current
       // value only for older jobs awarded before Job had its own field.
@@ -822,21 +827,21 @@ async function updateSettingsV2(data) {
 // stage (real substance — a contact, plans, worth reviewing daily). Same
 // creation path for both since the fields captured are identical; only the
 // starting stage differs.
-async function createOpportunity({ project_id, project_name, notes, description, location, size_bucket, type_of_work, due_date, due_time, rfi_due_date, rfi_due_time, owner_id, source, cm_portal_url, who_will_bid, is_budget, company_ids, new_companies, contact_ids_by_company, new_contacts_by_company, created_by, stage }) {
+async function createOpportunity({ project_id, project_name, notes, description, location, size_bucket, type_of_work, job_type, date_invited, due_date, due_time, rfi_due_date, rfi_due_time, owner_id, source, cm_portal_url, who_will_bid, is_budget, company_ids, new_companies, contact_ids_by_company, new_contacts_by_company, created_by, stage, skip_intake }) {
   const M = getModels();
   const startStage = stage === 'lead' ? 'lead' : 'opportunity';
   // Required for a real opportunity (per Connor — bids were getting
   // assigned to the wrong people because this only ever lived as an
   // easily-missed note); a bare lead is still fine without it, same as
   // location/type_of_work/description below.
-  if (startStage !== 'lead') require_({ who_will_bid }, ['who_will_bid']);
+  if (startStage !== 'lead' && !skip_intake) require_({ who_will_bid, date_invited, job_type }, ['who_will_bid', 'date_invited', 'job_type']);
   let pid = project_id ? Number(project_id) : null;
   let isNewProject = false;
   if (!pid) {
     require_({ project_name }, ['project_name']);
     requireMaxLength('Project Title', project_name.trim(), 30);
     pid = await nextId('projects');
-    await M.Project.create({ _id: pid, name: project_name.trim(), description: description || null, location: location || null, size_bucket: size_bucket || null, type_of_work: type_of_work || null, created_by: created_by || null });
+    await M.Project.create({ _id: pid, name: project_name.trim(), description: description || null, location: location || null, size_bucket: size_bucket || null, type_of_work: type_of_work || null, job_type: job_type || null, created_by: created_by || null });
     isNewProject = true;
   } else {
     // Attaching to an existing project: the form still requires
@@ -850,11 +855,12 @@ async function createOpportunity({ project_id, project_name, notes, description,
     if (existing && !existing.location && location) fill.location = location;
     if (existing && !existing.size_bucket && size_bucket) fill.size_bucket = size_bucket;
     if (existing && !existing.type_of_work && type_of_work) fill.type_of_work = type_of_work;
+    if (existing && !existing.job_type && job_type) fill.job_type = job_type;
     if (Object.keys(fill).length) await M.Project.updateOne({ _id: pid }, { $set: fill });
   }
   const bidId = await nextId('bids');
   const ownerId = owner_id ? Number(owner_id) : (created_by ? Number(created_by) : null);
-  await M.Bid.create({ _id: bidId, project_id: pid, stage: startStage, notes: notes || null, due_date: due_date || null, due_time: due_time || null, rfi_due_date: rfi_due_date || null, rfi_due_time: rfi_due_time || null, owner_id: ownerId, source: source || null, cm_portal_url: cm_portal_url || null, who_will_bid: who_will_bid || null, is_budget: Number(is_budget) === 1 });
+  await M.Bid.create({ _id: bidId, project_id: pid, stage: startStage, notes: notes || null, due_date: due_date || null, due_time: due_time || null, rfi_due_date: rfi_due_date || null, rfi_due_time: rfi_due_time || null, date_invited: date_invited || null, owner_id: ownerId, source: source || null, cm_portal_url: cm_portal_url || null, who_will_bid: who_will_bid || null, is_budget: Number(is_budget) === 1 });
 
   const { newContacts } = await attachCustomersAndContacts(bidId, { company_ids, new_companies, contact_ids_by_company, new_contacts_by_company });
 
@@ -885,15 +891,15 @@ async function promoteLead(id, data, actorId) {
   const M = getModels();
   const bid = await loadBid(id);
   if (bid.stage !== 'lead') throw new Error(`Cannot promote from stage '${bid.stage}' — only leads can be promoted to an opportunity`);
-  require_(data, ['location', 'type_of_work', 'description', 'due_date', 'notes', 'source', 'owner_id', 'who_will_bid']);
+  require_(data, ['location', 'type_of_work', 'job_type', 'date_invited', 'description', 'due_date', 'notes', 'source', 'owner_id', 'who_will_bid']);
 
   await M.Project.updateOne({ _id: bid.project_id }, { $set: {
     description: data.description, location: data.location,
-    size_bucket: data.size_bucket || null, type_of_work: data.type_of_work,
+    size_bucket: data.size_bucket || null, type_of_work: data.type_of_work, job_type: data.job_type,
   } });
   await M.Bid.updateOne({ _id: bid._id }, { $set: {
     stage: 'opportunity', updated_at: ts(),
-    notes: data.notes, due_date: data.due_date, due_time: data.due_time || null,
+    notes: data.notes, due_date: data.due_date, due_time: data.due_time || null, date_invited: data.date_invited,
     rfi_due_date: data.rfi_due_date || null, rfi_due_time: data.rfi_due_time || null,
     owner_id: Number(data.owner_id), source: data.source, who_will_bid: data.who_will_bid,
   } });
@@ -1001,6 +1007,7 @@ async function createDirectBid(data) {
     project_id: data.project_id,
     project_name: data.project_name,
     created_by: data.created_by,
+    skip_intake: true,   // goes straight to an active bid — the opportunity intake fields don't apply
   });
   const started = await startBid(bid_id, data, data.created_by);
   // Adding a new bid supersedes the project's prior non-terminal bids (e.g. a
@@ -1347,6 +1354,7 @@ async function updateOpportunity(id, data) {
   const upd = { updated_at: ts() };
   if ('due_date' in data) upd.due_date = data.due_date || null;
   if ('due_time' in data) upd.due_time = data.due_time || null;
+  if ('date_invited' in data) upd.date_invited = data.date_invited || null;
   if ('owner_id' in data) upd.owner_id = data.owner_id ? Number(data.owner_id) : null;
   if ('source' in data) upd.source = data.source || null;
   if ('estimator_id' in data) upd.estimator_id = data.estimator_id ? Number(data.estimator_id) : null;
@@ -1460,6 +1468,22 @@ async function recomputeBidFollowup(bidId) {
 // can be called again for whoever's left, without losing what's already
 // been submitted. This mirrors what a real bid team needs: nothing counts
 // as "out the door" until every applicable customer actually has a number.
+// Square footage is required at Submit Bid: a positive number, or "N/A" when it
+// doesn't apply. A blank is accepted only if the project already has an answer.
+async function applySquareFootage(projectId, raw) {
+  const M = getModels();
+  const txt = String(raw == null ? '' : raw).trim();
+  if (!txt) {
+    const p = await M.Project.findById(projectId).lean();
+    if (p && (p.square_footage_na || p.square_footage)) return;
+    throw new Error('Square footage is required (enter the number, or N/A if it does not apply)');
+  }
+  if (/^n\/?a$/i.test(txt)) { await M.Project.updateOne({ _id: projectId }, { $set: { square_footage: null, square_footage_na: true, updated_at: ts() } }); return; }
+  const n = Number(txt.replace(/[,\s]/g, ''));
+  if (!Number.isFinite(n) || n <= 0) throw new Error('Square footage must be a number greater than 0, or N/A');
+  await M.Project.updateOne({ _id: projectId }, { $set: { square_footage: n, square_footage_na: false, updated_at: ts() } });
+}
+
 async function submitBid(id, data, actorId) {
   const M = getModels();
   const bid = await loadBid(id);
@@ -1478,6 +1502,7 @@ async function submitBid(id, data, actorId) {
   requireNonZeroAmount(data.amount);
   const companyIds = await resolveCompanyIds(data.company_ids, data.new_companies);
   if (!companyIds.length) throw new Error('Pick at least one customer to submit to');
+  await applySquareFootage(bid.project_id, data.square_footage);
 
   const s = await getSettings();
   const newSubmissionIds = [];
@@ -1665,13 +1690,13 @@ async function reactivateBid(id, data, actorId) {
 // Bid submission fields (estimate $, date sent, approved by) are edited on the
 // bid_submission entity, not the bid — the bid's headline is derived from them.
 const ADMIN_EDITABLE = {
-  project:        ['name', 'description', 'location', 'size_bucket', 'type_of_work', 'street', 'city', 'state', 'zip'],
+  project:        ['name', 'description', 'location', 'size_bucket', 'type_of_work', 'job_type', 'street', 'city', 'state', 'zip'],
   company:        ['name', 'street', 'city', 'state', 'zip', 'phone', 'type'],
   // Walk-throughs are NOT here — they go through the dedicated add/update/
   // remove walk-through endpoints, which need find-or-create logic for the
   // site company/contact (and array-entry targeting) this generic whitelist
   // path can't do.
-  bid:            ['bid_number', 'estimator_id', 'salesperson_id', 'apm_id', 'pm_id', 'date_received', 'due_date', 'due_time', 'start_date',
+  bid:            ['bid_number', 'estimator_id', 'salesperson_id', 'apm_id', 'pm_id', 'date_received', 'date_invited', 'due_date', 'due_time', 'start_date',
                    'drawing_stage', 'notes', 'jurisdiction', 'superseded', 'owner_id', 'source', 'rfi_due_date', 'rfi_due_time', 'folder_url', 'cm_portal_url', 'is_budget',
                    'certified_payroll', 'tax_exempt', 'prevailing_wage', 'follow_up_interval_days'],
   job:            ['job_number', 'pm_id', 'apm_id', 'awarded_company_id', 'award_date', 'folder_url'],
@@ -2862,6 +2887,16 @@ async function updateJob(id, data, actorId) {
 // the Yes/No requirements again later just as easily as it fills in a date.
 // Three-state on needs_permit (null = not yet answered), same pattern as
 // Bid.certified_payroll/tax_exempt/prevailing_wage.
+// Estimating Turnover: Yes = a >150hr job that needs a turnover from estimating.
+async function setJobTurnover(id, value) {
+  const M = getModels();
+  const job = await M.Job.findById(Number(id)).lean();
+  if (!job) throw new Error('Job not found');
+  const v = (value === '' || value == null) ? null : (Number(value) === 1 || value === true);
+  await M.Job.updateOne({ _id: job._id }, { $set: { est_turnover: v, updated_at: ts() } });
+  return { job_id: job._id, est_turnover: v };
+}
+
 async function updateJobPermits(id, data) {
   const M = getModels();
   const jobId = Number(id);
@@ -3489,7 +3524,7 @@ async function getBidList(stage) {
       owner: tm[b.owner_id] || null, source: b.source, who_will_bid: b.who_will_bid || null, is_budget: !!b.is_budget,
       sub_estimators: (b.sub_estimators || []).map(s => ({ ...(tm[s.estimator_id] || {}), scope: s.scope })),
       customers: [...new Set((custByBid[b._id] || []).filter(Boolean))],
-      date_received: b.date_received, due_date: b.due_date, due_time: b.due_time,
+      date_received: b.date_received, date_invited: b.date_invited || null, due_date: b.due_date, due_time: b.due_time,
       rfi_due_date: b.rfi_due_date, rfi_due_time: b.rfi_due_time, folder_url: b.folder_url,
       certified_payroll: b.certified_payroll == null ? null : !!b.certified_payroll,
       tax_exempt: b.tax_exempt == null ? null : !!b.tax_exempt,
@@ -4199,8 +4234,15 @@ async function getDashboard(userId, mineOnly) {
   const byMonth = Object.values(byMonthMap).sort((a, b) => b.month.localeCompare(a.month))
     .map(bucket => ({ ...bucket, bids: bucket.bids.sort((a, b) => (b.award_date || '').localeCompare(a.award_date || '')) }));
 
+  // Estimating Turnover not yet answered on recently awarded jobs (last 45 days).
+  const turnoverNeeded = jobs
+    .filter(j => j.winning_bid_id && j.est_turnover == null && (j.award_date || '') >= ago(45))
+    .filter(j => !uid || (bidById[j.winning_bid_id] && isMyBid(bidById[j.winning_bid_id])) || j.pm_id === uid || j.apm_id === uid)
+    .sort((a, b) => (b.award_date || '').localeCompare(a.award_date || ''))
+    .map(j => ({ id: j._id, project_id: j.project_id, project: pName[j.project_id] || '—', job_number: j.job_number, award_date: j.award_date }));
   return {
     mineOnly: !!uid,
+    turnoverNeeded,
     pipeline,
     activeCoCount: activeCos.length,
     submittedYTD: { count: submittedYTD.length },
@@ -4760,10 +4802,14 @@ async function getEstimatorAvailability(startDate, endDate) {
   // Only estimators belong on this banner (plus Carrie Yaffe, who has
   // estimating oversight but role:'oversight' rather than 'estimator') —
   // sales/other oversight staff being out isn't relevant to bid coverage.
-  const [events, members] = await Promise.all([
+  // Project Managers (anyone assigned as a job's / bid's PM or APM, plus the APM
+  // role) are on it too, so PM time off shows alongside the estimators'.
+  const [events, pmJobIds, pmBidIds, apmJobIds, apmBidIds] = await Promise.all([
     hrCalendar.getHrCalendarEvents(startDate, endDate),
-    M.TeamMember.find({ active: 1, $or: [{ role: 'estimator' }, { email: 'cyaffe@libertyintegrated.com' }] }).lean(),
+    M.Job.distinct('pm_id'), M.Bid.distinct('pm_id'), M.Job.distinct('apm_id'), M.Bid.distinct('apm_id'),
   ]);
+  const pmIds = [...new Set([...pmJobIds, ...pmBidIds, ...apmJobIds, ...apmBidIds].filter(x => x != null))];
+  const members = await M.TeamMember.find({ active: 1, $or: [{ role: { $in: ['estimator', 'apm'] } }, { _id: { $in: pmIds } }, { email: 'cyaffe@libertyintegrated.com' }] }).lean();
   const namedMembers = members
     .map(m => ({ id: m._id, name: m.name, initials: m.initials, first: (m.name || '').trim().split(/\s+/)[0] }))
     .filter(m => m.first);
@@ -5214,7 +5260,7 @@ module.exports = {
   getCompanyCommunications, getContactCommunications, getAllCommunications,
   addBidCustomerContact, removeBidCustomerContact, setBidCustomerPortalUrl,
   awardSubmission, notAwardSubmission, revertAward, revertNotAwarded, closeBid, approveToBid, unapproveToBid, logFollowupV2, updateFollowup,
-  createLegacyJob, updateJob, updateJobPermits, getPermitsOverview, createPermit, updatePermit, addPermitUpdate, loadJob, permitAction, getStalePermits, markPermitsNudged, deletePermit, permitJobNumber,
+  createLegacyJob, updateJob, updateJobPermits, setJobTurnover, getPermitsOverview, createPermit, updatePermit, addPermitUpdate, loadJob, permitAction, getStalePermits, markPermitsNudged, deletePermit, permitJobNumber,
   createChangeOrder, submitCO, approveCO, notApproveCO, voidCO, reopenCO, reviseCO,
   createCoRequest, approveCoRequest, unapproveCoRequest, startCoRequest,
   _norm, resolveCompanyByName, ensureBidCustomer, teamMap,
