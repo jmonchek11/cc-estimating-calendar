@@ -2222,6 +2222,7 @@ function actDashAddMenu() {
 }
 let DASH_MINE = null;   // "My View" is the default (except Admin/Oversight, who default to global); toggle switches it
 function setDashboardView(mine) { DASH_MINE = mine; renderDashboard(); }
+let AWARDED_EXPANDED = false;
 let DASH_DATA = null;   // last-rendered dashboard payload, kept around so the Awarded (YTD) card can pop its month breakout without a re-fetch
 
 async function renderDashboard() {
@@ -2293,13 +2294,25 @@ async function renderDashboard() {
           </div>`; }).join('') : '<div class="text-muted" style="font-size:13px;padding:6px 0">Nothing with a due date right now</div>'}
       </div>
       <div class="card">
-        <div class="section-title" style="color:var(--success)">✅ Awarded — YTD${d.awardedYTD.count > d.awardedYTD.list.length ? ` <span style="color:var(--text-muted);font-weight:400;font-size:11px">— latest ${d.awardedYTD.list.length} of ${d.awardedYTD.count} · <a href="#" onclick="event.preventDefault();showAwardedByMonth()">see all by month</a></span>` : ''}</div>
-        ${d.awardedYTD.list.length ? d.awardedYTD.list.map(b => `
+        <div class="section-title" style="color:var(--success)">✅ Awarded — YTD</div>
+        ${(() => {
+          // Same length as the Upcoming Due Dates card beside it (min 5); "See more" expands the rest.
+          const all = d.awardedYTD.list, n = Math.max(d.dueSoon.length, 5), shown = AWARDED_EXPANDED ? all : all.slice(0, n);
+          if (!all.length) return '<div class="text-muted" style="font-size:13px;padding:6px 0">No awards yet this year</div>';
+          // Newest first, with a header per month.
+          const monthName = (ym) => new Date(ym + '-15T12:00:00').toLocaleString('en-US', { month: 'long', year: 'numeric' });
+          let lastYm = null;
+          return shown.map(b => {
+            const ym = (b.award_date || '').slice(0, 7);
+            const head = ym !== lastYm ? `<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);padding:8px 0 2px">${ym ? monthName(ym) : 'No award date'}</div>` : '';
+            lastYm = ym;
+            return head + `
           <div class="proj-row" onclick="openBidFlyout(${b.project_id},${b.id})">
             <div style="flex:1"><strong style="font-size:13px">${esc(b.project || '—')}</strong>
               <span style="color:var(--text-muted);font-size:12px">${b.company ? '· '+esc(b.company) : ''}</span></div>
             <span class="amount" style="font-size:12px">${fmt$(b.amount)}</span>
-          </div>`).join('') : '<div class="text-muted" style="font-size:13px;padding:6px 0">No awards yet this year</div>'}
+          </div>`; }).join('') + (all.length > n ? `<div style="padding:8px 0 2px;text-align:center"><a href="#" onclick="event.preventDefault();AWARDED_EXPANDED=!AWARDED_EXPANDED;renderDashboard()" style="font-size:12px;font-weight:600">${AWARDED_EXPANDED ? 'Show less' : `See more (${all.length - n} more)`}</a></div>` : '');
+        })()}
       </div>
     </div>
     <div class="card" style="margin-top:18px;padding:16px">

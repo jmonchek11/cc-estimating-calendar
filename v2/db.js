@@ -4247,7 +4247,7 @@ async function getDashboard(userId, mineOnly) {
     activeCoCount: activeCos.length,
     submittedYTD: { count: submittedYTD.length },
     awardedYTD: { count: awardedYTD.length, value: awardedYTD.reduce((s, b) => s + (b.estimate_amount || 0), 0), missingAwardDate: awardedMissingDate,
-      list: [...awardedYTD].sort((a,b)=>(b.award_date||'').localeCompare(a.award_date||'')).slice(0, 8).map(b => ({ id: b._id, project_id: b.project_id, bid_number: b.bid_number, project: pName[b.project_id], amount: b.estimate_amount, award_date: b.award_date, company: b.awarded_company_id ? coName[b.awarded_company_id] : null })),
+      list: [...awardedYTD].sort((a,b)=>(b.award_date||'').localeCompare(a.award_date||'')).map(b => ({ id: b._id, project_id: b.project_id, bid_number: b.bid_number, project: pName[b.project_id], amount: b.estimate_amount, award_date: b.award_date, company: b.awarded_company_id ? coName[b.awarded_company_id] : null })),
       byMonth },
     overdueBidCount: overdueBids.length, overdueCoCount: overdueCos.length,
     dueSoonTotal: dueSoon.length + coDueSoon.length,
