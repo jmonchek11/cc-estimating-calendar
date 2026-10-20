@@ -2293,7 +2293,7 @@ async function renderDashboard() {
           </div>`; }).join('') : '<div class="text-muted" style="font-size:13px;padding:6px 0">Nothing with a due date right now</div>'}
       </div>
       <div class="card">
-        <div class="section-title" style="color:var(--success)">✅ Awarded — YTD</div>
+        <div class="section-title" style="color:var(--success)">✅ Awarded — YTD${d.awardedYTD.count > d.awardedYTD.list.length ? ` <span style="color:var(--text-muted);font-weight:400;font-size:11px">— latest ${d.awardedYTD.list.length} of ${d.awardedYTD.count} · <a href="#" onclick="event.preventDefault();showAwardedByMonth()">see all by month</a></span>` : ''}</div>
         ${d.awardedYTD.list.length ? d.awardedYTD.list.map(b => `
           <div class="proj-row" onclick="openBidFlyout(${b.project_id},${b.id})">
             <div style="flex:1"><strong style="font-size:13px">${esc(b.project || '—')}</strong>
