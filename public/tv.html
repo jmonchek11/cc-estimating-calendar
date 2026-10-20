@@ -105,6 +105,27 @@
     </div>
   </div>
 
+  <script>
+    // The board is designed for a 1920px-wide screen. A PC driving a big TV often
+    // reports a much smaller CSS width (Windows display scaling of 150-300%), which
+    // made everything huge and showed only ~3 jobs. Scale the whole page so it always
+    // lays out as 1920 wide, whatever the browser reports, and fills the real height.
+    (function () {
+      var DESIGN_W = 1920;
+      function fit() {
+        var s = window.innerWidth / DESIGN_W;
+        var b = document.body, h = document.documentElement.style;
+        if (Math.abs(s - 1) < 0.02) { b.style.cssText = ''; return; }
+        h.overflow = 'hidden';
+        b.style.width = DESIGN_W + 'px';
+        b.style.height = (window.innerHeight / s) + 'px';
+        b.style.transformOrigin = '0 0';
+        b.style.transform = 'scale(' + s + ')';
+      }
+      fit();
+      window.addEventListener('resize', fit);
+    })();
+  </script>
   <script src="/tv.js"></script>
 </body>
 </html>
