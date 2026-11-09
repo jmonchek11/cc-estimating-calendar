@@ -639,3 +639,10 @@ Editing is limited to admins and `TeamMember.permit_manager` (Pat). Backfill: `v
 - `Project.square_footage` / `square_footage_na` — required at Submit Bid (number, or N/A); a blank is only accepted if the project already has an answer (`applySquareFootage()`).
 - `Job.est_turnover` — Estimating Turnover (>150hr job) Yes/No, tri-state (null = unanswered). Jobs awarded in the last 45 days with it unanswered are flagged on the Dashboard (`getDashboard().turnoverNeeded`). Set via `POST /api/v2/jobs/:id/turnover`.
 - HR-calendar "who is out" banner now includes anyone assigned as PM/APM on a job or bid, plus role `apm`.
+
+- `Project.job_types[]` — Job Type checklist, filled in by the estimator at Submit Bid (at least one required); replaces the single `job_type` captured at intake (kept only for old data).
+- `Job.est_turnover_date` — date the Estimating Turnover meeting is scheduled; shown with the Yes/No in the Awarded-by-month popup (editable inline).
+
+## ActionItem (added 2026-11-09)
+
+One row per to-do on a bid (`action_items`): `bid_id`, `title`, `assigned_to`, `created_by`, `due_date`, `status` (open|done), `completed_at/by`. Page: Action Items (left nav), grouped by bid, "My List" vs "Everyone". Creating emails the assignee; completing emails the bid estimator (both honor the `assigned` notification opt-out). Completed items show for 14 days. Anyone can create; the assignee, creator, bid estimator/sub-estimators or an admin can complete; creator or admin can delete.

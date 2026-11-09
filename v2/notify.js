@@ -318,6 +318,39 @@ async function notifyCoQueued(coId, actorName) {
     await mailer.sendMail({ to, subject, html });
   } catch (e) { console.error('[v2 notify] co-queued email failed:', e.message); }
 }
+async function actionItemParts(itemId) {
+  const M = getModels();
+  const item = await M.ActionItem.findById(Number(itemId)).lean();
+  if (!item) return null;
+  const shape = await bidEmailShape(item.bid_id);
+  return shape ? { item, shape } : null;
+}
+// Assignee gets a heads-up when someone else gives them an action item.
+async function notifyActionItemAssigned(itemId, actorId) {
+  try {
+    const p = await actionItemParts(itemId); if (!p) return;
+    if (!p.item.assigned_to || p.item.assigned_to === Number(actorId)) return;
+    const recipient = await emailForV2Member(p.item.assigned_to);
+    if (!recipient?.email || !mailer.wantsNotification(recipient, 'assigned')) return;
+    const actor = actorId ? await maindb.getMember(actorId) : null;
+    const { subject, html } = mailer.emailActionItem(p.shape, p.item, recipient.name, actor?.name || 'A team member', 'assigned');
+    await mailer.sendMail({ to: recipient.email, subject, html });
+  } catch (e) { console.error('[v2 notify] action-item assigned email failed:', e.message); }
+}
+// The bid's estimator hears when someone else completes an action item on their bid.
+async function notifyActionItemDone(itemId, actorId) {
+  try {
+    const M = getModels();
+    const p = await actionItemParts(itemId); if (!p) return;
+    const bid = await M.Bid.findById(p.item.bid_id).lean();
+    if (!bid?.estimator_id || bid.estimator_id === Number(actorId)) return;
+    const recipient = await emailForV2Member(bid.estimator_id);
+    if (!recipient?.email || !mailer.wantsNotification(recipient, 'assigned')) return;
+    const actor = actorId ? await maindb.getMember(actorId) : null;
+    const { subject, html } = mailer.emailActionItem(p.shape, p.item, recipient.name, actor?.name || 'A team member', 'done');
+    await mailer.sendMail({ to: recipient.email, subject, html });
+  } catch (e) { console.error('[v2 notify] action-item done email failed:', e.message); }
+}
 async function notifyApprovedToBid(bidId, actorName) {
   try {
     const M = getModels();
@@ -470,4 +503,4 @@ async function notifyDueDateChanged(kind, id, oldDate, newDate, actorId) {
   } catch (e) { console.error('[v2 notify] due-date-changed email failed:', e.message); }
 }
 
-module.exports = { bidEmailShape, coEmailShape, emailShapeForReminder, notifyBidSubmitted, notifyPermitUpdate, notifyPermitRequired, notifyStalePermits, notifyAwarded, notifyRoleAward, notifyApprovedToBid, notifyOwnerToForwardInvite, notifyAssigned, notifyWalkthroughSet, notifyWalkthroughAssignees, notifyFollowup, notifyDueDateChanged, notifyOpportunityClosed, notifyNewOpportunity, notifyCoQueued, bidRecipients, walkthroughContactInfo, emailForV2Member };
+module.exports = { bidEmailShape, coEmailShape, emailShapeForReminder, notifyBidSubmitted, notifyPermitUpdate, notifyPermitRequired, notifyStalePermits, notifyAwarded, notifyRoleAward, notifyApprovedToBid, notifyOwnerToForwardInvite, notifyAssigned, notifyWalkthroughSet, notifyWalkthroughAssignees, notifyFollowup, notifyDueDateChanged, notifyOpportunityClosed, notifyNewOpportunity, notifyCoQueued, notifyActionItemAssigned, notifyActionItemDone, bidRecipients, walkthroughContactInfo, emailForV2Member };

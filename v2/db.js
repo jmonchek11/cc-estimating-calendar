@@ -3033,6 +3033,88 @@ function permitFields(data, existing) {
   }
   return upd;
 }
+// ── Action Items ──────────────────────────────────────────────────────────────
+// Simple per-bid to-dos. Anyone can see them; the assignee (or the creator, the bid's
+// estimator, or an admin) can mark one done, which emails the bid's estimator.
+async function fmtActionItems(items) {
+  const M = getModels();
+  if (!items.length) return [];
+  const [bids, members] = await Promise.all([
+    M.Bid.find({ _id: { $in: [...new Set(items.map(i => i.bid_id))] } }).lean(),
+    M.TeamMember.find().lean(),
+  ]);
+  const projects = await M.Project.find({ _id: { $in: [...new Set(bids.map(b => b.project_id))] } }).lean();
+  const bidBy = {}; bids.forEach(b => bidBy[b._id] = b);
+  const pName = {}; projects.forEach(p => pName[p._id] = p.name);
+  const tm = teamMap(members);
+  return items.map(i => {
+    const b = bidBy[i.bid_id] || {};
+    return {
+      id: i._id, bid_id: i.bid_id, bid_number: b.bid_number || null, project_id: b.project_id || null, project: pName[b.project_id] || '—',
+      bid_stage: b.stage || null, estimator: tm[b.estimator_id] || null,
+      title: i.title, due_date: i.due_date || null, status: i.status,
+      assignee: tm[i.assigned_to] || null, created_by: tm[i.created_by] || null,
+      completed_by: tm[i.completed_by] || null, completed_at: i.completed_at || null, created_at: i.created_at,
+    };
+  });
+}
+
+async function getActionItems() {
+  const M = getModels();
+  const since = new Date(Date.now() - 14 * 86400000).toISOString();
+  const items = await M.ActionItem.find({ $or: [{ status: 'open' }, { status: 'done', completed_at: { $gte: since } }] }).lean();
+  const [out, bids] = await Promise.all([
+    fmtActionItems(items),
+    M.Bid.find({ superseded: { $ne: 1 }, stage: { $in: ['opportunity', 'active_bid', 'submitted'] } }).lean(),
+  ]);
+  const projects = await M.Project.find({ _id: { $in: [...new Set(bids.map(b => b.project_id))] } }).lean();
+  const pName = {}; projects.forEach(p => pName[p._id] = p.name);
+  return {
+    items: out,
+    bids: bids.map(b => ({ id: b._id, bid_number: b.bid_number || null, project: pName[b.project_id] || '—', stage: b.stage, estimator_id: b.estimator_id || null,
+      sub_estimator_ids: (b.sub_estimators || []).map(s => s.estimator_id) }))
+      .sort((a, b) => (b.bid_number || '').localeCompare(a.bid_number || '') || a.project.localeCompare(b.project)),
+  };
+}
+
+async function createActionItem(data, actorId) {
+  const M = getModels();
+  const title = String(data.title || '').trim();
+  if (!title) throw new Error('Describe the action item');
+  if (title.length > 200) throw new Error('Keep the action item under 200 characters');
+  const bid = await M.Bid.findById(Number(data.bid_id)).lean();
+  if (!bid) throw new Error('Pick a bid');
+  const assigned = data.assigned_to ? Number(data.assigned_to) : (bid.estimator_id || actorId || null);
+  const id = await nextId('action_items');
+  await M.ActionItem.create({ _id: id, bid_id: bid._id, title, assigned_to: assigned, created_by: actorId || null, due_date: data.due_date || null });
+  return { id, bid_id: bid._id, assigned_to: assigned };
+}
+
+async function setActionItemDone(id, done, actorId) {
+  const M = getModels();
+  const item = await M.ActionItem.findById(Number(id)).lean();
+  if (!item) throw new Error('Action item not found');
+  const actor = actorId ? await M.TeamMember.findById(Number(actorId)).lean() : null;
+  const bid = await M.Bid.findById(item.bid_id).lean();
+  const allowed = actor?.is_admin || [item.assigned_to, item.created_by, bid?.estimator_id].includes(Number(actorId))
+    || (bid?.sub_estimators || []).some(s => s.estimator_id === Number(actorId));
+  if (!allowed) throw new Error('Only the assignee, the creator, or the bid\'s estimator can complete this');
+  await M.ActionItem.updateOne({ _id: item._id }, { $set: done
+    ? { status: 'done', completed_at: ts(), completed_by: actorId || null, updated_at: ts() }
+    : { status: 'open', completed_at: null, completed_by: null, updated_at: ts() } });
+  return { id: item._id, status: done ? 'done' : 'open', was_open: item.status === 'open' };
+}
+
+async function deleteActionItem(id, actorId) {
+  const M = getModels();
+  const item = await M.ActionItem.findById(Number(id)).lean();
+  if (!item) throw new Error('Action item not found');
+  const actor = actorId ? await M.TeamMember.findById(Number(actorId)).lean() : null;
+  if (!actor?.is_admin && item.created_by !== Number(actorId)) throw new Error('Only the creator or an admin can delete this');
+  await M.ActionItem.deleteOne({ _id: item._id });
+  return { id: item._id };
+}
+
 async function createPermit(data, actorId) {
   const M = getModels();
   const fields = permitFields(data, null);
@@ -5280,7 +5362,7 @@ module.exports = {
   getCompanyCommunications, getContactCommunications, getAllCommunications,
   addBidCustomerContact, removeBidCustomerContact, setBidCustomerPortalUrl,
   awardSubmission, notAwardSubmission, revertAward, revertNotAwarded, closeBid, approveToBid, unapproveToBid, logFollowupV2, updateFollowup,
-  createLegacyJob, updateJob, updateJobPermits, setJobTurnover, getPermitsOverview, createPermit, updatePermit, addPermitUpdate, loadJob, permitAction, getStalePermits, markPermitsNudged, deletePermit, permitJobNumber,
+  createLegacyJob, updateJob, updateJobPermits, setJobTurnover, getActionItems, createActionItem, setActionItemDone, deleteActionItem, fmtActionItems, getPermitsOverview, createPermit, updatePermit, addPermitUpdate, loadJob, permitAction, getStalePermits, markPermitsNudged, deletePermit, permitJobNumber,
   createChangeOrder, submitCO, approveCO, notApproveCO, voidCO, reopenCO, reviseCO,
   createCoRequest, approveCoRequest, unapproveCoRequest, startCoRequest,
   _norm, resolveCompanyByName, ensureBidCustomer, teamMap,

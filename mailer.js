@@ -276,6 +276,22 @@ function emailAssigned(bid, recipientName, actorName, role, scope) {
   };
 }
 
+function emailActionItem(bid, item, recipientName, actorName, kind) {
+  const label = bid.project_name || bid.bid_number || 'Unnamed';
+  const link = bid.project_id && bid.bid_id ? `${APP_URL}/#project/${bid.project_id}/bid/${bid.bid_id}` : APP_URL;
+  const done = kind === 'done';
+  return {
+    subject: done ? `Action item completed — ${label}` : `New action item for you — ${label}`,
+    html: base(`
+      ${iconHeading(`${APP_URL}/icon-active-bids.png`, done ? 'Action Item Completed' : 'New Action Item')}
+      <p>Hi <strong>${recipientName}</strong>, <strong>${actorName}</strong> ${done ? 'marked an action item complete on your bid' : 'gave you an action item on a bid'}:</p>
+      <p style="font-size:15px;font-weight:700;margin:10px 0">${item.title}${!done && item.due_date ? ` <span style="font-weight:400;color:#64748b">— due ${fmtDate(item.due_date)}</span>` : ''}</p>
+      ${bidTable(bid)}
+      ${actionButtons(bid, { href: link, label: 'Open Bid' })}
+    `),
+  };
+}
+
 function emailDueDateChanged(bid, oldDate, newDate, recipientName, actorName, kind) {
   const label = bid.project_name || bid.bid_number || 'Unnamed';
   const noun = kind === 'co' ? 'change order' : 'bid';
@@ -767,4 +783,4 @@ function emailIdeaStatusChanged(idea, newStatus) {
   };
 }
 
-module.exports = { sendMail, emailAssigned, emailFollowup, emailBidSubmitted, emailPermitUpdate, emailPermitRequired, emailPermitNudge, emailAwarded, emailRoleAwardNotice, emailApprovedToBid, emailForwardBidInvite, emailDueDateChanged, emailReminder, emailWalkthroughSet, emailWalkthroughAssigned, emailWalkthroughReminder, emailDigest, emailIdeaSubmitted, emailIdeaNeedsApproval, emailIdeaStatusChanged, wantsNotification, NOTIFICATION_CATEGORIES };
+module.exports = { sendMail, emailActionItem, emailAssigned, emailFollowup, emailBidSubmitted, emailPermitUpdate, emailPermitRequired, emailPermitNudge, emailAwarded, emailRoleAwardNotice, emailApprovedToBid, emailForwardBidInvite, emailDueDateChanged, emailReminder, emailWalkthroughSet, emailWalkthroughAssigned, emailWalkthroughReminder, emailDigest, emailIdeaSubmitted, emailIdeaNeedsApproval, emailIdeaStatusChanged, wantsNotification, NOTIFICATION_CATEGORIES };

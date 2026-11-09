@@ -507,6 +507,22 @@ OutOfOfficeSchema.index({ date: 1 });
 // one matches (by job number); job_number_raw/job_name always keep what the
 // log said. Job.needs_permit etc. stay as the "do we need one" qualifier.
 const PERMIT_STATUSES = ['not_filed', 'filed', 'corrections', 'approved', 'picked_up', 'closed', 'withdrawn'];
+// Action Items — small estimating to-dos tied to a bid ("send RFI to the GC", "pull the
+// FA quote"). Assigned to one team member; completing one notifies the bid's estimator.
+const ActionItemSchema = new mongoose.Schema({
+  _id:          Number,
+  bid_id:       { type: Number, required: true },               // FK → Bid
+  title:        { type: String, required: true },
+  assigned_to:  { type: Number, default: null },                // FK → TeamMember
+  created_by:   { type: Number, default: null },
+  due_date:     { type: String, default: null },
+  status:       { type: String, enum: ['open', 'done'], default: 'open' },
+  completed_at: { type: String, default: null },
+  completed_by: { type: Number, default: null },
+  created_at:   { type: String, default: ts },
+  updated_at:   { type: String, default: ts },
+}, opts);
+
 const PermitSchema = new mongoose.Schema({
   _id:             Number,
   job_id:          { type: Number, default: null },              // FK → Job (nullable — history/standalone)
@@ -721,6 +737,7 @@ function getModels() {
     Note:        c.model('Note', NoteSchema, 'notes'),
     OutOfOffice: c.model('OutOfOffice', OutOfOfficeSchema, 'out_of_office'),
     Permit:      c.model('Permit', PermitSchema, 'permits'),
+    ActionItem:  c.model('ActionItem', ActionItemSchema, 'action_items'),
     TeamMember:  V1TeamMember,
     Idea:        V1Idea,
     ReleaseNote: c.model('ReleaseNote', ReleaseNoteSchema, 'release_notes'),

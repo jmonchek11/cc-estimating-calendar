@@ -404,6 +404,7 @@
       <a class="nav-item" data-page="dashboard" href="#dashboard" onclick="navigate('dashboard');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span> Dashboard</a>
       <a class="nav-item" data-page="digest" href="#digest" onclick="navigate('digest');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="14"/><line x1="12" y1="20" x2="12" y2="8"/><line x1="18" y1="20" x2="18" y2="4"/></svg></span> Weekly Digest</a>
       <a class="nav-item" data-page="calendar" href="#calendar" onclick="navigate('calendar');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span> Calendar</a>
+      <a class="nav-item" data-page="action-items" href="#action-items" onclick="navigate('action-items');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span> Action Items</a>
       <div class="nav-section-label">OPPORTUNITIES</div>
       <a class="nav-item" data-page="leads" href="#leads" onclick="navigate('leads');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21V10"/><path d="M12 10C12 10 4 10 4 3c8 0 8 7 8 7z"/><path d="M12 10C12 10 20 10 20 3c-8 0-8 7-8 7z"/></svg></span> Active Leads</a>
       <a class="nav-item" data-page="opportunities" href="#opportunities" onclick="navigate('opportunities');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="0.8" fill="currentColor" stroke="none"/></svg></span> Bid Opportunities</a>
@@ -507,6 +508,7 @@ const PAGE_ICONS = {
   communications: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
   settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
   search: '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
+  'action-items': '<polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
   permits: '<path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-4"/><path d="M9 9v.01M9 12v.01M9 15v.01M9 18v.01"/>',
   'out-of-office': '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>',
 };
@@ -750,7 +752,7 @@ const NAV_PAGE_TITLES = {
   'active-cos': 'Active Change Orders', 'submitted-cos': 'Change Orders to Follow Up On',
   'approved-cos': 'Approved Change Orders', 'not-approved-cos': 'Not Approved Change Orders',
   search: 'Search', contacts: 'Contacts', vendors: 'Vendors', reports: 'Reports', digest: 'Weekly Digest',
-  calendar: 'Calendar', settings: 'Settings', permits: 'Permits', 'out-of-office': 'Out of Office',
+  calendar: 'Calendar', settings: 'Settings', permits: 'Permits', 'out-of-office': 'Out of Office', 'action-items': 'Action Items',
 };
 // Parses the current URL hash and renders whatever it points to — used on
 // initial load (bootstrap) and on browser back/forward (popstate), so both
@@ -836,6 +838,7 @@ function navigate(page) {
   if (page === 'calendar') { VIEW = { name: 'calendar' }; return renderCalendar(); }
   if (page === 'settings') { VIEW = { name: 'settings' }; return renderSettings(); }
   if (page === 'permits') { VIEW = { name: 'permits' }; return renderPermits(); }
+  if (page === 'action-items') { VIEW = { name: 'action-items' }; return renderActionItems(); }
   if (page === 'out-of-office') { VIEW = { name: 'out-of-office' }; return renderOutOfOfficePage(); }
   VIEW = { name: 'projects' }; return load();
 }
@@ -859,6 +862,7 @@ async function rerenderView() {
     case 'history':   return renderHistory();
     case 'communications': return renderCommunications();
     case 'permits':   return renderPermits();
+    case 'action-items': return renderActionItems();
     case 'out-of-office': return renderOutOfOfficePage();
   }
 }
@@ -5468,6 +5472,83 @@ function ensurePermitStyles() {
   `;
   document.head.appendChild(st);
 }
+// ── Action Items ──────────────────────────────────────────────────────────────
+// Simple estimating to-dos grouped by bid. "Mine" = assigned to me. Checking one off
+// emails the bid's estimator (server side).
+const ACTION_STATE = { data: null, mine: true, showDone: false };
+async function renderActionItems() {
+  setActiveNav('action-items');
+  const main = document.getElementById('main');
+  if (!ACTION_STATE.data) main.innerHTML = '<div style="padding:30px;color:var(--text-muted)">Loading…</div>';
+  try { await ensureMeta(); ACTION_STATE.data = await api('GET', '/api/v2/action-items'); }
+  catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
+  renderActionItemsBody();
+}
+function renderActionItemsBody() {
+  const main = document.getElementById('main'); const S = ACTION_STATE;
+  const me = CURRENT_USER?.id;
+  const all = S.data.items;
+  const scoped = S.mine ? all.filter(i => i.assignee?.id === me) : all;
+  const open = scoped.filter(i => i.status === 'open'), done = scoped.filter(i => i.status === 'done');
+  const overdue = open.filter(i => i.due_date && i.due_date <= today).length;
+  const byBid = {};
+  (S.showDone ? scoped : open).forEach(i => (byBid[i.bid_id] = byBid[i.bid_id] || []).push(i));
+  const groups = Object.values(byBid).sort((a, b) => (a[0].bid_number || 'zzz').localeCompare(b[0].bid_number || 'zzz') || a[0].project.localeCompare(b[0].project));
+  const row = (i) => {
+    const isDone = i.status === 'done';
+    const late = !isDone && i.due_date && i.due_date < today, dueToday = !isDone && i.due_date === today;
+    const canDelete = CURRENT_USER?.is_admin || i.created_by?.id === me;
+    return `<div style="display:flex;align-items:center;gap:10px;padding:8px 4px;border-top:1px solid var(--border)">
+      <input type="checkbox" ${isDone ? 'checked' : ''} style="width:18px;height:18px;flex-shrink:0;cursor:pointer" onchange="actToggleActionItem(${i.id}, this.checked)" title="${isDone ? 'Mark open again' : 'Mark complete'}">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13.5px;${isDone ? 'text-decoration:line-through;color:var(--text-muted)' : 'font-weight:600'}">${esc(i.title)}</div>
+        <div style="font-size:11.5px;color:var(--text-muted)">${i.assignee ? ini(i.assignee) + ' ' + esc(i.assignee.name) : 'Unassigned'}${i.created_by && i.created_by.id !== i.assignee?.id ? ' · from ' + esc(i.created_by.name) : ''}${isDone && i.completed_by ? ' · done by ' + esc(i.completed_by.name) : ''}</div>
+      </div>
+      ${i.due_date ? `<span style="font-size:12px;font-weight:700;color:${late ? '#dc2626' : dueToday ? '#c2410c' : 'var(--text-muted)'}">${late ? 'Overdue · ' : dueToday ? 'Today · ' : ''}${fmtD(i.due_date)}</span>` : ''}
+      ${canDelete ? `<button class="v2-btn outline" style="padding:2px 8px;font-size:11px" onclick="actDeleteActionItem(${i.id})" title="Delete">✕</button>` : ''}
+    </div>`;
+  };
+  main.innerHTML = `
+    <div class="page-header">
+      <div><div class="page-title">${pageIcon('action-items')} Action Items</div>
+        <div class="page-subtitle">${open.length} open${overdue ? ` · <span style="color:#dc2626;font-weight:700">${overdue} due today or overdue</span>` : ''}${S.mine ? ' · assigned to you' : ' · everyone'}</div></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="v2-btn ${S.mine ? 'blue' : 'outline'}" style="padding:7px 14px;font-size:12px" onclick="setActionScope(true)">My List</button>
+        <button class="v2-btn ${!S.mine ? 'blue' : 'outline'}" style="padding:7px 14px;font-size:12px" onclick="setActionScope(false)">Everyone</button>
+        <button class="v2-btn green" style="padding:7px 14px;font-size:12px" onclick="actNewActionItem()">+ Create Action Item</button>
+      </div>
+    </div>
+    ${groups.length ? groups.map(g => `<div class="card" style="margin-bottom:12px;padding:12px 16px">
+      <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:4px">
+        <a href="#" onclick="event.preventDefault();openBidFlyout(${g[0].project_id},${g[0].bid_id})" style="font-weight:800;font-size:14px;color:var(--text)">${g[0].bid_number ? esc(g[0].bid_number) + ' — ' : ''}${esc(g[0].project)}</a>
+        <span style="font-size:11.5px;color:var(--text-muted)">${g[0].estimator ? 'Estimator: ' + esc(g[0].estimator.name) : ''}</span>
+        <button class="v2-btn outline" style="margin-left:auto;padding:2px 10px;font-size:11px" onclick="actNewActionItem(${g[0].bid_id})">+ Add</button>
+      </div>
+      ${g.sort((a, b) => (a.status === b.status ? 0 : a.status === 'done' ? 1 : -1) || (a.due_date || '9999').localeCompare(b.due_date || '9999')).map(row).join('')}
+    </div>`).join('') : `<div class="card" style="padding:24px;text-align:center;color:var(--text-muted)">${S.mine ? 'Nothing on your list — nice.' : 'No open action items.'}</div>`}
+    ${done.length ? `<div style="text-align:center;margin:8px 0"><a href="#" style="font-size:12px;font-weight:600" onclick="event.preventDefault();ACTION_STATE.showDone=!ACTION_STATE.showDone;renderActionItemsBody()">${S.showDone ? 'Hide' : 'Show'} completed (${done.length}, last 14 days)</a></div>` : ''}`;
+}
+function setActionScope(mine) { ACTION_STATE.mine = mine; renderActionItemsBody(); }
+async function actToggleActionItem(id, done) {
+  try { await api('POST', `/api/v2/action-items/${id}/done`, { done }); await renderActionItems(); }
+  catch (e) { alert('Failed: ' + e.message); await renderActionItems(); }
+}
+async function actDeleteActionItem(id) {
+  if (!confirm('Delete this action item?')) return;
+  try { await api('DELETE', `/api/v2/action-items/${id}`); await renderActionItems(); }
+  catch (e) { alert('Failed: ' + e.message); }
+}
+async function actNewActionItem(bidId) {
+  if (!ACTION_STATE.data) { try { ACTION_STATE.data = await api('GET', '/api/v2/action-items'); } catch (e) { alert('Failed: ' + e.message); return; } }
+  const bids = ACTION_STATE.data.bids;
+  showForm('+ Create Action Item', [
+    { id: 'bid_id', label: 'Bid', type: 'select', required: true, value: bidId, options: bids.map(b => ({ value: b.id, label: `${b.bid_number || 'Opportunity'} — ${b.project}` })) },
+    { id: 'title', label: 'What needs to be done?', type: 'text', required: true, maxLength: 200, placeholder: 'e.g. Request quote from the FA vendor' },
+    { id: 'assigned_to', label: 'Assign to', type: 'select', required: true, value: CURRENT_USER?.id, options: teamOpts(['estimator', 'sales', 'oversight']) },
+    { id: 'due_date', label: 'Due', type: 'date', value: today },
+  ], async data => { await api('POST', '/api/v2/action-items', data); ACTION_STATE.data = null; }, 'Create');
+}
+
 async function renderPermits() {
   setActiveNav('permits');
   ensurePermitStyles();
@@ -7790,7 +7871,7 @@ const IDEA_PAGE_NAMES = {
   'active-cos': 'Active Change Orders', 'submitted-cos': 'Change Orders to Follow Up On',
   'approved-cos': 'Approved Change Orders', 'not-approved-cos': 'Not Approved Change Orders',
   projects: 'Projects', contacts: 'Contacts', vendors: 'Vendors', reports: 'Reports', health: 'Data Health', history: 'History', communications: 'Communications',
-  settings: 'Settings', ideas: 'Ideas & Issues', permits: 'Permits', 'out-of-office': 'Out of Office',
+  settings: 'Settings', ideas: 'Ideas & Issues', permits: 'Permits', 'out-of-office': 'Out of Office', 'action-items': 'Action Items',
 };
 // Visible to everyone (not just admins) — the whole point of voting is that
 // people can see what's already been suggested and back it instead of

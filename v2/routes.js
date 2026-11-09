@@ -595,6 +595,21 @@ router.patch('/api/v2/jobs/:id/permits',      t(async req => {
     return r;
   },
   (req) => ({ action: 'job.update_permits', summary: `Edited permits on job #${req.params.id} (${Object.keys(req.body).join(', ')})`, entity_type: 'job', entity_id: Number(req.params.id) })));
+// Action Items — per-bid estimating to-dos. Everyone can read/create; completing emails the bid's estimator.
+router.get('/api/v2/action-items',            async (req, res) => { try { res.json(await v2db.getActionItems()); } catch (e) { res.status(500).json({ error: e.message }); } });
+router.post('/api/v2/action-items',           t(async req => {
+    const r = await v2db.createActionItem(req.body, req.session.userId);
+    notify.notifyActionItemAssigned(r.id, req.session.userId);
+    return r;
+  },
+  (req, r) => ({ action: 'action_item.create', summary: `Created action item "${String(req.body.title || '').slice(0, 60)}"`, entity_type: 'bid', entity_id: Number(req.body.bid_id) })));
+router.post('/api/v2/action-items/:id/done',  t(async req => {
+    const done = !(req.body && (req.body.done === false || req.body.done === 0));
+    const r = await v2db.setActionItemDone(req.params.id, done, req.session.userId);
+    if (done && r.was_open) notify.notifyActionItemDone(req.params.id, req.session.userId);
+    return r;
+  }));
+router.delete('/api/v2/action-items/:id',     t(req => v2db.deleteActionItem(req.params.id, req.session.userId)));
 // Company-wide Permits view — every job needing a permit, grouped by status.
 router.get('/api/v2/permits',                 async (req, res) => { try { res.json(await v2db.getPermitsOverview()); } catch (e) { res.status(500).json({ error: e.message }); } });
 // Creating/editing permit records is limited to admins and anyone flagged
