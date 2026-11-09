@@ -43,7 +43,8 @@ const ProjectSchema = new mongoose.Schema({
   // intake alongside size_bucket, same "gauge it at a glance" purpose.
   type_of_work: { type: String, default: null },
   // Kind of building (Office, Warehouse, School…) — one of JOB_TYPES in v2/db.js.
-  job_type: { type: String, default: null },
+  job_type: { type: String, default: null },   // legacy single value; superseded by job_types
+  job_types: { type: [String], default: [] },   // checklist filled in at Submit Bid
   // Required at Submit Bid: a number, or N/A (square_footage_na) when it doesn't apply.
   square_footage: { type: Number, default: null },
   square_footage_na: { type: Boolean, default: null },
@@ -211,6 +212,7 @@ const JobSchema = new mongoose.Schema({
   // Estimating Turnover: is this a >150hr job that needs a turnover from estimating?
   // null = not answered yet (flagged on the dashboard for awarded jobs).
   est_turnover:       { type: Boolean, default: null },
+  est_turnover_date:  { type: String, default: null },   // date the Estimating Turnover meeting is scheduled
   // Snapshotted from the winning bid's folder_url at award time (same real
   // folder, just renamed) but stored independently so it can be corrected
   // later without touching the bid, and so a legacy job (no bid at all) can

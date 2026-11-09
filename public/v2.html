@@ -2222,6 +2222,48 @@ function actDashAddMenu() {
 }
 let DASH_MINE = null;   // "My View" is the default (except Admin/Oversight, who default to global); toggle switches it
 function setDashboardView(mine) { DASH_MINE = mine; renderDashboard(); }
+// ── Click-to-sort table headers (Excel-style) ─────────────────────────────────
+// One delegated handler covers every table that has a <thead> of plain headers: click a
+// header to sort that column, click again to reverse. Skips tables whose headers already
+// have their own sort handler, and tables whose body rows don't line up with the header
+// (expandable/grouped rows) so those are never scrambled.
+function _sortCellValue(td) {
+  const raw = (td.getAttribute('data-sort') ?? td.textContent ?? '').replace(/\s+/g, ' ').trim();
+  if (!raw || raw === '—' || raw === '-') return { blank: true };
+  let m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+  if (m) { const y = m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3]); return { n: new Date(y, m[1] - 1, m[2]).getTime() }; }
+  m = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return { n: new Date(m[1], m[2] - 1, m[3]).getTime() };
+  const num = raw.replace(/[$,%\s]/g, '');
+  if (/^-?\d+(\.\d+)?[kKmM]?$/.test(num)) {
+    let v = parseFloat(num); if (/[kK]$/.test(num)) v *= 1e3; if (/[mM]$/.test(num)) v *= 1e6; return { n: v };
+  }
+  return { s: raw.toLowerCase() };
+}
+document.addEventListener('click', (e) => {
+  const th = e.target.closest && e.target.closest('thead th');
+  if (!th || th.hasAttribute('onclick') || th.querySelector('input,button,select') || e.target.closest('input,button,select,a')) return;
+  const table = th.closest('table'); if (!table || table.classList.contains('no-sort')) return;
+  const headRow = th.parentElement, cols = [...headRow.children], idx = cols.indexOf(th);
+  const body = table.tBodies[0]; if (!body) return;
+  const rows = [...body.rows];
+  if (rows.length < 2 || rows.some(r => r.cells.length !== cols.length) || cols.some(c => c.children.length)) return;
+  const dir = th.getAttribute('data-sortdir') === 'asc' ? 'desc' : 'asc';
+  cols.forEach(c => { c.removeAttribute('data-sortdir'); c.textContent = c.textContent.replace(/ [▲▼]$/, ''); });
+  th.setAttribute('data-sortdir', dir); th.textContent += dir === 'asc' ? ' ▲' : ' ▼';
+  const keyed = rows.map((r, i) => ({ r, i, v: _sortCellValue(r.cells[idx]) }));
+  keyed.sort((a, b) => {
+    if (a.v.blank || b.v.blank) return a.v.blank === b.v.blank ? a.i - b.i : (a.v.blank ? 1 : -1);   // blanks always last
+    let c;
+    if (a.v.n != null && b.v.n != null) c = a.v.n - b.v.n;
+    else if (a.v.n != null) c = -1; else if (b.v.n != null) c = 1;
+    else c = a.v.s.localeCompare(b.v.s, undefined, { numeric: true });
+    return (dir === 'asc' ? c : -c) || a.i - b.i;
+  });
+  keyed.forEach(k => body.appendChild(k.r));
+});
+document.head.appendChild(Object.assign(document.createElement('style'), { textContent: 'thead th:not([onclick]){cursor:pointer;user-select:none}thead th:not([onclick]):hover{color:var(--text)}' }));
+
 let AWARDED_EXPANDED = false;
 let DASH_DATA = null;   // last-rendered dashboard payload, kept around so the Awarded (YTD) card can pop its month breakout without a re-fetch
 
@@ -2354,11 +2396,14 @@ function awardedByMonthHtml(months) {
           <span style="font-size:11px;color:var(--text-muted)">${open ? '▲' : '▼'}</span>
         </div>
       </div>
-      ${open ? (m.bids.length ? m.bids.map(b => `
-        <div class="proj-row" onclick="document.getElementById('v2-form-overlay').remove();openBidFlyout(${b.project_id},${b.id})">
-          <div style="flex:1"><strong style="font-size:13px">${esc(b.project || '—')}</strong>
+      ${open ? (m.bids.length ? `<div style="display:flex;gap:8px;padding:6px 0 2px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted)"><span style="flex:1">Job</span><span style="width:92px">Est. Turnover?</span><span style="width:118px">Meeting Scheduled</span><span style="width:84px;text-align:right">Amount</span></div>` + m.bids.map(b => `
+        <div class="proj-row" style="align-items:center;gap:8px">
+          <div style="flex:1;min-width:0;cursor:pointer" onclick="document.getElementById('v2-form-overlay').remove();openBidFlyout(${b.project_id},${b.id})"><strong style="font-size:13px">${esc(b.project || '—')}</strong>
             <span style="color:var(--text-muted);font-size:12px">${b.bid_number ? '#'+esc(b.bid_number) : ''}${b.company ? ' · '+esc(b.company) : ''}</span></div>
-          <span class="amount" style="font-size:12px">${fmt$(b.amount)}</span>
+          ${b.job_id ? `<select style="width:92px;font-size:12px;padding:3px;border:1px solid var(--border);border-radius:6px" onchange="actSetTurnoverFromModal(${b.job_id}, this.value, null)">
+              <option value="" ${b.est_turnover == null ? 'selected' : ''}>—</option><option value="1" ${b.est_turnover === true ? 'selected' : ''}>Yes</option><option value="0" ${b.est_turnover === false ? 'selected' : ''}>No</option></select>
+            <input type="date" value="${b.est_turnover_date || ''}" style="width:118px;font-size:12px;padding:3px;border:1px solid var(--border);border-radius:6px" onchange="actSetTurnoverFromModal(${b.job_id}, null, this.value)">` : '<span style="width:92px;color:var(--text-muted);font-size:12px">no job yet</span><span style="width:118px"></span>'}
+          <span class="amount" style="font-size:12px;width:84px;text-align:right">${fmt$(b.amount)}</span>
         </div>`).join('') : '<div style="font-size:12px;color:var(--text-muted);padding:6px 0">No bids with an award date this month.</div>') : ''}
     </div>`;
   }).join('');
@@ -2762,7 +2807,7 @@ function projectDetailsHtml(proj) {
   const bits = [];
   if (proj.location) bits.push(`📍 ${esc(proj.location)}`);
   if (proj.type_of_work) bits.push(`🏗️ ${esc(proj.type_of_work)}`);
-  if (proj.job_type) bits.push(`🏢 ${esc(proj.job_type)}`);
+  if ((proj.job_types || []).length) bits.push(`🏢 ${proj.job_types.map(esc).join(', ')}`);
   if (proj.square_footage_na) bits.push('📏 Sq ft N/A'); else if (proj.square_footage) bits.push(`📏 ${Number(proj.square_footage).toLocaleString()} sq ft`);
   if (proj.size_bucket) bits.push(`📐 ${esc(proj.size_bucket)}`);
   if (!bits.length && !proj.description) return '';
@@ -3156,6 +3201,17 @@ function turnoverControlHtml(j) {
   const btn = (v, label, on, color) => `<button class="v2-btn ${on ? color : 'outline'}" style="padding:3px 10px;font-size:11px" onclick="actSetTurnover(${j.id}, ${v})">${label}</button>`;
   return `<span style="display:inline-flex;align-items:center;gap:4px;font-size:11.5px;color:${st == null ? '#c2410c' : 'var(--text-muted)'};font-weight:${st == null ? 700 : 400}" title="Is this a job over 150 hours that needs an estimating turnover?">
     Estimating Turnover (&gt;150hr)? ${btn(1, 'Yes', st === true, 'green')}${btn(0, 'No', st === false, 'blue')}</span>`;
+}
+// Edits from the Awarded-by-month popup: save, update the cached dashboard data in place
+// (so the popup doesn't re-render and collapse), and leave the popup open.
+async function actSetTurnoverFromModal(jobId, yn, date) {
+  const body = {};
+  if (yn !== null) body.est_turnover = yn;
+  if (date !== null) body.est_turnover_date = date;
+  try {
+    const r = await api('POST', `/api/v2/jobs/${jobId}/turnover`, body);
+    (DASH_DATA?.awardedYTD?.byMonth || []).forEach(m => m.bids.forEach(b => { if (b.job_id === jobId) { b.est_turnover = r.est_turnover; b.est_turnover_date = r.est_turnover_date; } }));
+  } catch (e) { alert('Failed: ' + e.message); }
 }
 async function actSetTurnover(jobId, v) {
   try { await api('POST', `/api/v2/jobs/${jobId}/turnover`, { est_turnover: v }); await refresh(); }
@@ -3931,7 +3987,6 @@ async function actNewOpportunity() {
     { id: 'due_time', label: 'Due Time (optional)', type: 'time' },
     { id: 'location', label: 'Job Location', type: 'text', required: true, placeholder: 'City, State or site address…' },
     { id: 'type_of_work', label: 'Type of Work', type: 'select', required: true, options: TYPE_OF_WORK_OPTIONS },
-    { id: 'job_type', label: 'Job Type', type: 'select', required: true, options: JOB_TYPE_OPTIONS },
     { id: 'size_bucket', label: 'Project Size', type: 'select', emptyLabel: 'Unknown / not yet known', options: PROJECT_SIZE_BUCKETS },
     { id: 'description', label: 'Project Description', type: 'textarea', required: true, placeholder: 'Brief description of the scope of work…' },
     { id: 'company_ids', label: 'Customer(s) — GC, owner, etc. (add as many as apply)', type: 'company', multi: true, required: true, newKey: 'new_companies', options: companyOpts(), placeholder: 'Type customer name…',
@@ -4092,7 +4147,6 @@ async function actPromoteLead(bidId) {
     { id: 'due_time', label: 'Due Time (optional)', type: 'time', value: bidDetail?.due_time },
     { id: 'location', label: 'Job Location', type: 'text', required: true, value: proj?.location, placeholder: 'City, State or site address…' },
     { id: 'type_of_work', label: 'Type of Work', type: 'select', required: true, value: proj?.type_of_work, options: TYPE_OF_WORK_OPTIONS },
-    { id: 'job_type', label: 'Job Type', type: 'select', required: true, value: proj?.job_type, options: JOB_TYPE_OPTIONS },
     { id: 'size_bucket', label: 'Project Size', type: 'select', emptyLabel: 'Unknown / not yet known', value: proj?.size_bucket, options: PROJECT_SIZE_BUCKETS },
     { id: 'description', label: 'Project Description', type: 'textarea', required: true, value: proj?.description, placeholder: 'Brief description of the scope of work…' },
     { id: 'company_ids', label: 'Customer(s) — GC, owner, etc. (add as many as apply)', type: 'company', multi: true, required: true, newKey: 'new_companies', options: companyOpts(), placeholder: 'Type customer name…',
@@ -4199,6 +4253,7 @@ function actSubmitBid(bidId) {
   showForm('📤 Submit Bid', [
     { id: 'company_ids', label: 'Submit to which customer(s)?', type: 'multicheck', required: true, options: custs, value: custs.map(c => c.value) },
     { id: 'amount', label: 'Estimate Amount $', type: 'currency', required: true },
+    { id: 'job_types', label: 'Job Type (check all that apply)', type: 'multicheck', stringValues: true, required: true, options: JOB_TYPE_OPTIONS, value: pj.job_types || [] },
     { id: 'square_footage', label: 'Square Footage (or type N/A)', type: 'text', required: true, value: sqftValue, placeholder: 'e.g. 45000 — or N/A', hint: 'Required. Enter N/A if square footage does not apply to this job.' },
     { id: 'jurisdiction', label: 'IBEW Local Jurisdiction', type: 'text', required: true, placeholder: '98' },
     { id: 'date_submitted', label: 'Date Estimate Sent', type: 'date', required: true, value: today },
@@ -4295,7 +4350,6 @@ function actEditProject(projectId) {
     { id: 'location', label: 'Location', type: 'text', value: d.location, placeholder: 'City, State or site address…' },
     { id: 'size_bucket', label: 'Project Size', type: 'select', emptyLabel: 'Unknown', value: d.size_bucket, options: PROJECT_SIZE_BUCKETS },
     { id: 'type_of_work', label: 'Type of Work', type: 'select', emptyLabel: 'Unknown', value: d.type_of_work, options: TYPE_OF_WORK_OPTIONS },
-    { id: 'job_type', label: 'Job Type', type: 'select', emptyLabel: 'Unknown', value: d.job_type, options: JOB_TYPE_OPTIONS },
     { id: 'street', label: 'Job Address — Street', type: 'text', value: d.street, placeholder: 'usually filled in by a JIS import' },
     { id: 'city', label: 'City', type: 'text', value: d.city },
     { id: 'state', label: 'State', type: 'text', value: d.state, placeholder: 'PA' },
