@@ -3187,6 +3187,9 @@ function bidActions(b) {
     // to Follow Up On without deleting its real history.
     if (canEditBid && BID_EDITABLE_STAGES.includes(b.stage)) menu.push({ label: '⊘ Mark Superseded', fn: `actMarkSuperseded(${b.id},'${escJs(b.bid_number || 'this bid')}')`, danger: true });
   }
+  // A superseded bid used to show no actions at all, so a bid superseded by mistake (or by a
+  // double-submit) couldn't be brought back. Admins can restore it here.
+  if (b.superseded && CURRENT_USER?.is_admin) menu.push({ label: '↩ Restore (no longer superseded)', fn: `actRestoreSuperseded(${b.id},'${escJs(b.bid_number || 'this bid')}')` });
   if (!primary && !menu.length) return '';
   const menuId = `bcmenu-${++BC_MENU_SEQ}`;
   const menuHtml = menu.length ? `
@@ -4375,6 +4378,10 @@ function actToggleProjectOnHold(projectId, onHold) {
   ], data => api('POST', `/api/v2/projects/${projectId}/on-hold`, { on_hold: true, until_date: data.until_date }).then(() => renderProjectPage(projectId)), 'Put On Hold', 'amber');
 }
 
+function actRestoreSuperseded(bidId, label) {
+  if (!confirm(`Restore ${label}? It goes back to being a live bid and shows up in lists, the dashboard and reports again. (If it is a duplicate of another bid, leave it superseded instead.)`)) return;
+  api('PATCH', `/api/v2/admin/bid/${bidId}`, { superseded: 0 }).then(refresh).catch(e => alert('Failed: ' + e.message));
+}
 function actMarkSuperseded(bidId, label) {
   if (!confirm(`Mark ${label} as superseded? It'll stop showing in Bids to Follow Up On (and everywhere else active bids are tracked) but stays in the system as real history — use this for a genuinely separate second bid on a project you've already bid before, not for a revision to the same round.`)) return;
   api('PATCH', `/api/v2/admin/bid/${bidId}`, { superseded: 1 }).then(refresh).catch(e => alert('Failed: ' + e.message));

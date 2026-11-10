@@ -1003,7 +1003,28 @@ async function startBid(id, data, actorId) {
 // stage — 50% budget, then 70%, etc., each its own B26 # under the same project).
 // Attaches to an existing project (project_id) or creates a new one
 // (project_name), then runs the same validated Start Bid logic.
+const _directBidLocks = new Map();   // bid # -> in-flight promise (see createDirectBid)
 async function createDirectBid(data) {
+  // A slow/failed response made people retry the same form, and each retry made another
+  // bid (B26-0423 on UPenn Jaffe HVAC got four, and they superseded each other — leaving
+  // none live). Retries of the same bid # are now serialized, and a repeat within a few
+  // minutes returns the bid that was already created instead of making a copy.
+  const key = String(data.bid_number || '').trim().toLowerCase();
+  if (!key) return _createDirectBid(data);
+  const prev = _directBidLocks.get(key) || Promise.resolve();
+  const run = prev.catch(() => {}).then(async () => {
+    const M = getModels();
+    const recent = await M.Bid.findOne({
+      bid_number: String(data.bid_number).trim(), superseded: { $ne: 1 },
+      created_at: { $gte: new Date(Date.now() - 10 * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19) },
+    }).lean();
+    if (recent) return { project_id: recent.project_id, bid_id: recent._id, bid_number: recent.bid_number, duplicate: true };
+    return _createDirectBid(data);
+  });
+  _directBidLocks.set(key, run);
+  try { return await run; } finally { if (_directBidLocks.get(key) === run) _directBidLocks.delete(key); }
+}
+async function _createDirectBid(data) {
   const { project_id, bid_id } = await createOpportunity({
     project_id: data.project_id,
     project_name: data.project_name,
@@ -1016,7 +1037,9 @@ async function createDirectBid(data) {
   // (awarded/not_awarded/closed) are historical and left untouched.
   const M = getModels();
   await M.Bid.updateMany(
-    { project_id, _id: { $ne: bid_id }, superseded: { $ne: 1 }, stage: { $in: ['opportunity', 'active_bid', 'submitted'] } },
+    // Only OLDER bids (lower _id) — if two creations overlap, the newest survives instead of
+    // each one superseding the other and leaving the project with no live bid.
+    { project_id, _id: { $lt: bid_id }, superseded: { $ne: 1 }, stage: { $in: ['opportunity', 'active_bid', 'submitted'] } },
     { $set: { superseded: 1, updated_at: ts() } }
   );
   return { project_id, bid_id, bid_number: started.bid_number };
