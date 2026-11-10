@@ -3190,6 +3190,7 @@ function bidActions(b) {
   // A superseded bid used to show no actions at all, so a bid superseded by mistake (or by a
   // double-submit) couldn't be brought back. Admins can restore it here.
   if (b.superseded && CURRENT_USER?.is_admin) menu.push({ label: '↩ Restore (no longer superseded)', fn: `actRestoreSuperseded(${b.id},'${escJs(b.bid_number || 'this bid')}')` });
+  if (b.superseded && CURRENT_USER?.is_admin && !['awarded', 'not_awarded'].includes(b.stage)) menu.push({ label: '🗑 Delete this duplicate', fn: `actDeleteSupersededBid(${b.id},'${escJs(b.bid_number || 'this bid')}')`, danger: true });
   if (!primary && !menu.length) return '';
   const menuId = `bcmenu-${++BC_MENU_SEQ}`;
   const menuHtml = menu.length ? `
@@ -4378,6 +4379,10 @@ function actToggleProjectOnHold(projectId, onHold) {
   ], data => api('POST', `/api/v2/projects/${projectId}/on-hold`, { on_hold: true, until_date: data.until_date }).then(() => renderProjectPage(projectId)), 'Put On Hold', 'amber');
 }
 
+function actDeleteSupersededBid(bidId, label) {
+  if (!confirm(`Permanently delete this copy of ${label}? Use this only for an accidental duplicate. It cannot be undone. (The app refuses if the bid has a submission or was awarded/not awarded.)`)) return;
+  api('DELETE', `/api/v2/admin/bid/${bidId}`).then(refresh).catch(e => alert('Could not delete: ' + e.message));
+}
 function actRestoreSuperseded(bidId, label) {
   if (!confirm(`Restore ${label}? It goes back to being a live bid and shows up in lists, the dashboard and reports again. (If it is a duplicate of another bid, leave it superseded instead.)`)) return;
   api('PATCH', `/api/v2/admin/bid/${bidId}`, { superseded: 0 }).then(refresh).catch(e => alert('Failed: ' + e.message));
