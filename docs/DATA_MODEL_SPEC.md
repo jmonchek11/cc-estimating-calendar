@@ -646,3 +646,6 @@ Editing is limited to admins and `TeamMember.permit_manager` (Pat). Backfill: `v
 ## ActionItem (added 2026-11-09)
 
 One row per to-do on a bid (`action_items`): `bid_id`, `title`, `assigned_to`, `created_by`, `due_date`, `status` (open|done), `completed_at/by`. Page: Action Items (left nav), grouped by bid, "My List" vs "Everyone". Creating emails the assignee; completing emails the bid estimator (both honor the `assigned` notification opt-out). Completed items show for 14 days. Anyone can create; the assignee, creator, bid estimator/sub-estimators or an admin can complete; creator or admin can delete.
+
+- Action items can repeat (Outlook-style: daily / weekly on chosen days / monthly by date or nth weekday / yearly, with an end after N times or on a date). Completing an occurrence creates the next one (`next_id` guards against double-spawning). Items are editable (title, assignee, due, bid, repeat) and show as a collapsed chip on the bid and job cards plus a due-today banner on the Dashboard.
+- Win rate = Awarded / Submitted everywhere (Reports summary, by customer, by estimator, company profile). Reports: clicking an estimator name lists their awarded bids (`leadEstimatorId` on `/reports/bid-drilldown`).

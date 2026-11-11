@@ -519,6 +519,14 @@ const ActionItemSchema = new mongoose.Schema({
   status:       { type: String, enum: ['open', 'done'], default: 'open' },
   completed_at: { type: String, default: null },
   completed_by: { type: Number, default: null },
+  // Recurrence (Outlook-style). Completing an occurrence creates the next one.
+  //   { freq: 'daily'|'weekly'|'monthly'|'yearly', interval: N, weekdays: [0-6] (weekly),
+  //     month_mode: 'day'|'nth_weekday', day, nth, weekday (monthly),
+  //     end: 'never'|'count'|'date', count, until }
+  recur:        { type: mongoose.Schema.Types.Mixed, default: null },
+  series_id:    { type: Number, default: null },
+  occurrence:   { type: Number, default: 1 },
+  next_id:      { type: Number, default: null },   // the occurrence spawned when this one was completed
   created_at:   { type: String, default: ts },
   updated_at:   { type: String, default: ts },
 }, opts);

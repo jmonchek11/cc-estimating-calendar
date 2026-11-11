@@ -603,6 +603,11 @@ router.post('/api/v2/action-items',           t(async req => {
     return r;
   },
   (req, r) => ({ action: 'action_item.create', summary: `Created action item "${String(req.body.title || '').slice(0, 60)}"`, entity_type: 'bid', entity_id: Number(req.body.bid_id) })));
+router.patch('/api/v2/action-items/:id',      t(async req => {
+    const r = await v2db.updateActionItem(req.params.id, req.body, req.session.userId);
+    if (r.assigned_changed) notify.notifyActionItemAssigned(req.params.id, req.session.userId);
+    return r;
+  }));
 router.post('/api/v2/action-items/:id/done',  t(async req => {
     const done = !(req.body && (req.body.done === false || req.body.done === 0));
     const r = await v2db.setActionItemDone(req.params.id, done, req.session.userId);

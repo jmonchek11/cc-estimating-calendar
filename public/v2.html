@@ -2307,6 +2307,7 @@ async function renderDashboard() {
       <button class="v2-btn amber dash-action-desktop" style="padding:8px 14px;font-size:12px" onclick="actImportJIS()">📄 Import Bid (JIS)</button>
       <button class="v2-btn blue dash-action-mobile" style="padding:8px 14px;font-size:12px" onclick="actDashAddMenu()">+ Add ▾</button>
     </div>
+    ${d.myActionItemsDue ? `<div style="border:1px solid #bfdbfe;background:#eff6ff;border-radius:10px;padding:8px 14px;margin-bottom:14px;font-size:13px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">☑ <span>You have <strong>${d.myActionItemsDue}</strong> action item${d.myActionItemsDue === 1 ? '' : 's'} due today or overdue</span><a href="#" onclick="event.preventDefault();navigate('action-items')" style="font-weight:700;margin-left:auto">View →</a></div>` : ''}
     ${(d.turnoverNeeded || []).length ? `<div style="border:1px solid #fed7aa;background:#fff7ed;border-radius:10px;padding:10px 14px;margin-bottom:14px">
       <div style="font-weight:700;font-size:13px;color:#c2410c;margin-bottom:6px">Estimating Turnover not filled out (${d.turnoverNeeded.length}) — is it a &gt;150hr job?</div>
       ${d.turnoverNeeded.slice(0, 8).map(t => `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:3px 0;font-size:12.5px">
@@ -2985,6 +2986,7 @@ function bidNode(b, proj) {
       <div class="bc-divider"></div>
       ${customersSectionHtml(b)}
       ${wtHtml ? `<div style="padding:2px 16px 14px">${wtHtml}</div>` : ''}
+      ${(b.action_items || []).length ? `<div style="padding:0 16px 12px">${actionItemsChipHtml(b.action_items, b.id)}</div>` : ''}
       <div class="bc-divider"></div>
       ${activitySectionHtml(b)}
       ${bidActions(b)}
@@ -3185,6 +3187,7 @@ function bidActions(b) {
     // rather than only ever being auto-superseded by "+ Add Bid to
     // Project" — per Keegan/Connor, so the old one stops cluttering Bids
     // to Follow Up On without deleting its real history.
+    if (['opportunity', 'active_bid', 'submitted'].includes(b.stage)) menu.push({ label: '☑ Add action item', fn: `actNewActionItem(${b.id})` });
     if (canEditBid && BID_EDITABLE_STAGES.includes(b.stage)) menu.push({ label: '⊘ Mark Superseded', fn: `actMarkSuperseded(${b.id},'${escJs(b.bid_number || 'this bid')}')`, danger: true });
   }
   // A superseded bid used to show no actions at all, so a bid superseded by mistake (or by a
@@ -3249,6 +3252,7 @@ function jobNode(j, legacy = false) {
         </div>
       </div>
     </div>
+    ${(j.action_items || []).length ? `<div style="padding:0 16px 8px">${actionItemsChipHtml(j.action_items, j.winning_bid_id)}</div>` : ''}
     ${permitsSectionHtml(j)}
     ${j.change_orders.map(coNode).join('')}`;
 }
@@ -5513,10 +5517,11 @@ function renderActionItemsBody() {
     return `<div style="display:flex;align-items:center;gap:10px;padding:8px 4px;border-top:1px solid var(--border)">
       <input type="checkbox" ${isDone ? 'checked' : ''} style="width:18px;height:18px;flex-shrink:0;cursor:pointer" onchange="actToggleActionItem(${i.id}, this.checked)" title="${isDone ? 'Mark open again' : 'Mark complete'}">
       <div style="flex:1;min-width:0">
-        <div style="font-size:13.5px;${isDone ? 'text-decoration:line-through;color:var(--text-muted)' : 'font-weight:600'}">${esc(i.title)}</div>
+        <div style="font-size:13.5px;${isDone ? 'text-decoration:line-through;color:var(--text-muted)' : 'font-weight:600'}">${esc(i.title)}${i.recur ? ` <span title="${esc(recurSummary(i.recur))}" style="font-weight:400;font-size:11.5px;color:var(--text-muted)">🔁 ${esc(recurSummary(i.recur))}</span>` : ''}</div>
         <div style="font-size:11.5px;color:var(--text-muted)">${i.assignee ? ini(i.assignee) + ' ' + esc(i.assignee.name) : 'Unassigned'}${i.created_by && i.created_by.id !== i.assignee?.id ? ' · from ' + esc(i.created_by.name) : ''}${isDone && i.completed_by ? ' · done by ' + esc(i.completed_by.name) : ''}</div>
       </div>
       ${i.due_date ? `<span style="font-size:12px;font-weight:700;color:${late ? '#dc2626' : dueToday ? '#c2410c' : 'var(--text-muted)'}">${late ? 'Overdue · ' : dueToday ? 'Today · ' : ''}${fmtD(i.due_date)}</span>` : ''}
+      <button class="v2-btn outline" style="padding:2px 8px;font-size:11px" onclick="actEditActionItem(${i.id})" title="Edit">✏️</button>
       ${canDelete ? `<button class="v2-btn outline" style="padding:2px 8px;font-size:11px" onclick="actDeleteActionItem(${i.id})" title="Delete">✕</button>` : ''}
     </div>`;
   };
@@ -5550,15 +5555,155 @@ async function actDeleteActionItem(id) {
   try { await api('DELETE', `/api/v2/action-items/${id}`); await renderActionItems(); }
   catch (e) { alert('Failed: ' + e.message); }
 }
-async function actNewActionItem(bidId) {
+const DOW_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+function recurSummary(r) {
+  if (!r) return '';
+  const n = r.interval || 1, every = (u) => n === 1 ? `every ${u}` : `every ${n} ${u}s`;
+  let s = r.freq === 'daily' ? every('day')
+    : r.freq === 'weekly' ? `${every('week')} on ${(r.weekdays || []).map(d => DOW_NAMES[d].slice(0, 3)).join(', ')}`
+    : r.freq === 'monthly' ? (r.month_mode === 'nth_weekday' ? `${every('month')} on the ${r.nth === -1 ? 'last' : ['', '1st', '2nd', '3rd', '4th'][r.nth]} ${DOW_NAMES[r.weekday]}` : `${every('month')} on day ${r.day}`)
+    : every('year');
+  if (r.end === 'count') s += `, ${r.count} times`;
+  if (r.end === 'date') s += `, until ${fmtD(r.until)}`;
+  return s;
+}
+// Bid picker — type a bid # or project name and the list narrows as you type (like the RFQ picker).
+let AI_BID_PICK = null, AI_BID_LIST = [];
+function mountActionBidPicker(bids, selectedId) {
+  AI_BID_LIST = bids; AI_BID_PICK = selectedId || null;
+  const box = document.getElementById('custom-bid_pick'); if (!box) return;
+  box.innerHTML = `<div class="v2-field"><label>Bid (type a bid # or project name) <span style="color:#dc2626">*</span></label>
+    <div id="aib-chip"></div>
+    <input id="aib-input" type="text" autocomplete="off" placeholder="Start typing…" oninput="actionBidSearch()">
+    <div id="aib-results" style="display:flex;flex-direction:column;gap:4px;margin-top:6px"></div></div>`;
+  renderActionBidChip();
+}
+function renderActionBidChip() {
+  const chip = document.getElementById('aib-chip'), input = document.getElementById('aib-input'); if (!chip || !input) return;
+  const b = AI_BID_LIST.find(x => x.id === AI_BID_PICK);
+  chip.innerHTML = b ? `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:#f0fdf4;margin-bottom:4px">
+    <span style="flex:1;min-width:0;font-size:13px;font-weight:600">${esc(b.bid_number || 'Opportunity')} — ${esc(b.project)}</span>
+    <button type="button" class="v2-btn outline" style="padding:2px 8px;font-size:11px" onclick="clearActionBid()">change</button></div>` : '';
+  input.style.display = b ? 'none' : '';
+  document.getElementById('aib-results').innerHTML = '';
+}
+function actionBidSearch() {
+  const q = (document.getElementById('aib-input')?.value || '').trim();
+  const out = document.getElementById('aib-results'); if (!out) return;
+  if (!q) { out.innerHTML = ''; return; }
+  const hits = AI_BID_LIST.map(b => {
+    const scores = [_projMatchScore(q, b.project), b.bid_number ? _projMatchScore(q, b.bid_number) : null].filter(s => s !== null);
+    return scores.length ? { b, score: Math.min(...scores) } : null;
+  }).filter(Boolean).sort((a, c) => a.score - c.score || a.b.project.localeCompare(c.b.project)).slice(0, 8);
+  out.innerHTML = hits.length ? hits.map(({ b }) => `<div onclick="pickActionBid(${b.id})" style="padding:8px 10px;border:1px solid var(--border);border-radius:8px;cursor:pointer;font-size:13px"><strong>${esc(b.bid_number || 'Opportunity')}</strong> — ${esc(b.project)}</div>`).join('')
+    : '<div style="padding:6px 2px;font-size:12.5px;color:var(--text-muted)">No matching bids</div>';
+}
+function pickActionBid(id) { AI_BID_PICK = id; renderActionBidChip(); }
+function clearActionBid() { AI_BID_PICK = null; renderActionBidChip(); document.getElementById('aib-input')?.focus(); }
+
+// Repeat options modeled on Outlook's recurrence dialog.
+function mountRecurBlock(recur) {
+  const box = document.getElementById('custom-recur_block'); if (!box) return;
+  const r = recur || {};
+  const sel = (v, cur) => v === cur ? 'selected' : '';
+  box.innerHTML = `<div class="v2-field"><label>Repeat</label>
+    <select id="rc-freq" onchange="syncRecurBlock()">
+      <option value="none" ${sel('none', r.freq || 'none')}>Does not repeat</option>
+      <option value="daily" ${sel('daily', r.freq)}>Daily</option><option value="weekly" ${sel('weekly', r.freq)}>Weekly</option>
+      <option value="monthly" ${sel('monthly', r.freq)}>Monthly</option><option value="yearly" ${sel('yearly', r.freq)}>Yearly</option></select>
+    <div id="rc-detail" style="display:none;margin-top:8px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:#f8fafc">
+      <div style="display:flex;align-items:center;gap:6px;font-size:13px">Every <input id="rc-interval" type="number" min="1" max="99" value="${r.interval || 1}" style="width:60px"> <span id="rc-unit"></span></div>
+      <div id="rc-weekly" style="display:none;margin-top:8px;font-size:13px">On: ${DOW_NAMES.map((d, i) => `<label style="margin-right:8px;white-space:nowrap"><input type="checkbox" class="rc-dow" value="${i}" ${(r.weekdays || []).includes(i) ? 'checked' : ''}> ${d.slice(0, 3)}</label>`).join('')}</div>
+      <div id="rc-monthly" style="display:none;margin-top:8px;font-size:13px">
+        <label style="display:block"><input type="radio" name="rc-mm" value="day" ${r.month_mode !== 'nth_weekday' ? 'checked' : ''}> <span id="rc-mm-day"></span></label>
+        <label style="display:block"><input type="radio" name="rc-mm" value="nth_weekday" ${r.month_mode === 'nth_weekday' ? 'checked' : ''}> <span id="rc-mm-nth"></span></label></div>
+      <div style="margin-top:10px;font-size:13px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">Ends
+        <select id="rc-end" onchange="syncRecurBlock()"><option value="never" ${sel('never', r.end || 'never')}>Never</option><option value="count" ${sel('count', r.end)}>After</option><option value="date" ${sel('date', r.end)}>On</option></select>
+        <input id="rc-count" type="number" min="1" max="500" value="${r.count || 10}" style="width:70px;display:none"><span id="rc-count-lbl" style="display:none">occurrences</span>
+        <input id="rc-until" type="date" value="${r.until || ''}" style="display:none"></div>
+    </div></div>`;
+  document.getElementById('vf-due_date')?.addEventListener('change', syncRecurBlock);
+  syncRecurBlock();
+}
+function syncRecurBlock() {
+  const f = document.getElementById('rc-freq'); if (!f) return;
+  const freq = f.value, show = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? '' : 'none'; };
+  show('rc-detail', freq !== 'none'); show('rc-weekly', freq === 'weekly'); show('rc-monthly', freq === 'monthly');
+  document.getElementById('rc-unit').textContent = { daily: 'day(s)', weekly: 'week(s)', monthly: 'month(s)', yearly: 'year(s)' }[freq] || '';
+  const end = document.getElementById('rc-end').value;
+  show('rc-count', end === 'count'); show('rc-count-lbl', end === 'count'); show('rc-until', end === 'date');
+  const due = document.getElementById('vf-due_date')?.value || today, d = new Date(due + 'T12:00:00');
+  const nth = Math.ceil(d.getDate() / 7), ord = ['', '1st', '2nd', '3rd', '4th', '5th'][nth];
+  document.getElementById('rc-mm-day').textContent = `On day ${d.getDate()} of the month`;
+  document.getElementById('rc-mm-nth').textContent = `On the ${ord} ${DOW_NAMES[d.getDay()]}`;
+  if (freq === 'weekly' && !document.querySelector('.rc-dow:checked')) { const c = document.querySelector(`.rc-dow[value="${d.getDay()}"]`); if (c) c.checked = true; }
+}
+function readRecur() {
+  const freq = document.getElementById('rc-freq')?.value;
+  if (!freq || freq === 'none') return null;
+  return {
+    freq, interval: Number(document.getElementById('rc-interval').value) || 1,
+    weekdays: [...document.querySelectorAll('.rc-dow:checked')].map(c => Number(c.value)),
+    month_mode: document.querySelector('input[name="rc-mm"]:checked')?.value || 'day',
+    end: document.getElementById('rc-end').value, count: Number(document.getElementById('rc-count').value) || 1,
+    until: document.getElementById('rc-until').value || null,
+  };
+}
+
+// One form for both Create and Edit. `item` is the existing row when editing.
+async function openActionItemForm(item, presetBidId) {
   if (!ACTION_STATE.data) { try { ACTION_STATE.data = await api('GET', '/api/v2/action-items'); } catch (e) { alert('Failed: ' + e.message); return; } }
-  const bids = ACTION_STATE.data.bids;
-  showForm('+ Create Action Item', [
-    { id: 'bid_id', label: 'Bid', type: 'select', required: true, value: bidId, options: bids.map(b => ({ value: b.id, label: `${b.bid_number || 'Opportunity'} — ${b.project}` })) },
-    { id: 'title', label: 'What needs to be done?', type: 'text', required: true, maxLength: 200, placeholder: 'e.g. Request quote from the FA vendor' },
-    { id: 'assigned_to', label: 'Assign to', type: 'select', required: true, value: CURRENT_USER?.id, options: teamOpts(['estimator', 'sales', 'oversight']) },
-    { id: 'due_date', label: 'Due', type: 'date', value: today },
-  ], async data => { await api('POST', '/api/v2/action-items', data); ACTION_STATE.data = null; }, 'Create');
+  await ensureMeta();
+  const bids = [...ACTION_STATE.data.bids];
+  const bidId = item ? item.bid_id : presetBidId;
+  if (bidId && !bids.some(b => b.id === bidId)) {   // e.g. an awarded bid reached from its job card
+    const cached = Object.values(DETAIL_CACHE).flatMap(p => p.bids || []).find(b => b.id === bidId);
+    bids.push({ id: bidId, bid_number: item?.bid_number || cached?.bid_number || null, project: item?.project || (cached ? (DETAIL_CACHE[cached.project_id]?.name || 'this bid') : 'this bid') });
+  }
+  showForm(item ? '✏️ Edit Action Item' : '+ Create Action Item', [
+    { id: 'bid_pick', type: 'custom' },
+    { id: 'title', label: 'What needs to be done?', type: 'text', required: true, maxLength: 200, value: item?.title, placeholder: 'e.g. Request quote from the FA vendor' },
+    { id: 'assigned_to', label: 'Assign to', type: 'select', required: true, value: item ? item.assignee?.id : CURRENT_USER?.id, options: teamOpts(['estimator', 'sales', 'oversight']) },
+    { id: 'due_date', label: item ? 'Due' : 'Due (first occurrence, if repeating)', type: 'date', value: item ? item.due_date : today },
+    { id: 'recur_block', type: 'custom' },
+  ], async data => {
+    if (!AI_BID_PICK) throw new Error('Pick a bid');
+    const body = { title: data.title, assigned_to: data.assigned_to, due_date: data.due_date, bid_id: AI_BID_PICK, recur: readRecur() || { freq: 'none' } };
+    if (item) await api('PATCH', `/api/v2/action-items/${item.id}`, body); else await api('POST', '/api/v2/action-items', body);
+    ACTION_STATE.data = null;
+  }, item ? 'Save' : 'Create');
+  mountActionBidPicker(bids, bidId);
+  mountRecurBlock(item?.recur);
+}
+function actNewActionItem(bidId) { return openActionItemForm(null, bidId); }
+async function actEditActionItem(id) {
+  let item = ACTION_STATE.data?.items.find(i => i.id === id);
+  if (!item) { try { ACTION_STATE.data = await api('GET', '/api/v2/action-items'); } catch (e) { alert('Failed: ' + e.message); return; } item = ACTION_STATE.data.items.find(i => i.id === id); }
+  if (item) openActionItemForm(item);
+}
+
+// Small, collapsed-by-default chip on a bid / job card — only exists when there are open items.
+const AI_CHIP_OPEN = new Set();
+function actionItemsChipHtml(items, bidId) {
+  if (!items || !items.length) return '';
+  const open = AI_CHIP_OPEN.has(bidId);
+  const next = items.find(i => i.due_date) ;
+  const late = items.some(i => i.due_date && i.due_date < today);
+  return `<div style="margin-top:6px;font-size:12px">
+    <a href="#" onclick="event.preventDefault();toggleActionChip(${bidId})" style="color:${late ? '#dc2626' : '#475569'};font-weight:600;text-decoration:none">☑ ${items.length} open action item${items.length === 1 ? '' : 's'}${next ? ' · next ' + fmtD(next.due_date) : ''} ${open ? '▴' : '▾'}</a>
+    ${open ? `<div style="margin:4px 0 0 4px;padding-left:10px;border-left:2px solid var(--border)">
+      ${items.map(i => `<div style="display:flex;align-items:center;gap:8px;padding:3px 0">
+        <input type="checkbox" onchange="actToggleActionItemInPlace(${i.id}, this.checked)" style="cursor:pointer">
+        <span style="flex:1;min-width:0">${esc(i.title)}${i.recurring ? ' 🔁' : ''}</span>
+        <span style="color:${i.due_date && i.due_date < today ? '#dc2626' : 'var(--text-muted)'}">${i.assignee ? esc(i.assignee.initials) : ''}${i.due_date ? ' · ' + fmtD(i.due_date) : ''}</span>
+        <a href="#" onclick="event.preventDefault();actEditActionItem(${i.id})" title="Edit" style="text-decoration:none">✏️</a></div>`).join('')}
+      <a href="#" onclick="event.preventDefault();actNewActionItem(${bidId})" style="font-weight:600">+ Add</a></div>` : ''}
+  </div>`;
+}
+function toggleActionChip(bidId) { if (AI_CHIP_OPEN.has(bidId)) AI_CHIP_OPEN.delete(bidId); else AI_CHIP_OPEN.add(bidId); refresh(); }
+async function actToggleActionItemInPlace(id, done) {
+  try { await api('POST', `/api/v2/action-items/${id}/done`, { done }); ACTION_STATE.data = null; await refresh(); }
+  catch (e) { alert('Failed: ' + e.message); await refresh(); }
 }
 
 async function renderPermits() {
@@ -6728,7 +6873,7 @@ function estimatorWinRateHtml(data) {
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;margin-bottom:8px">
       <div>
         <div style="font-weight:700;font-size:13px">Win Rate by Estimator</div>
-        <div style="font-size:11px;color:var(--text-muted)">Awarded ÷ (Awarded + Not Awarded) on bids submitted in this range. Shown once an estimator has ${min}+ submitted bids.</div>
+        <div style="font-size:11px;color:var(--text-muted)">Win rate = Awarded ÷ Submitted, on bids submitted in this range. Click an estimator's name to see their awarded bids. Shown once an estimator has ${min}+ submitted bids.</div>
       </div>
       <select id="rp-est-pick" onchange="onReportsEstimatorChange()" style="font-size:12px">
         <option value="">All estimators</option>
@@ -6746,7 +6891,7 @@ function estimatorWinRateHtml(data) {
       </tr></thead>
       <tbody>${shown.map(r => `
         <tr style="border-bottom:1px solid #f1f5f9">
-          <td style="padding:6px 10px;font-weight:600">${esc(r.name)}</td>
+          <td style="padding:6px 10px;font-weight:600"><a href="#" onclick="event.preventDefault();openReportsEstimatorAwards(${r.estimatorId || 0}, '${escJs(r.name)}')" style="color:#1e40af" title="See awarded bids">${esc(r.name)}</a></td>
           <td style="padding:6px 10px;text-align:right">${r.submittedCount} · ${fmt$(r.submittedValue)}</td>
           <td style="padding:6px 10px;text-align:right;font-weight:600;color:#166534">${r.awardedCount} · ${fmt$(r.awardedValue)}</td>
           <td style="padding:6px 10px;text-align:right;color:#dc2626">${r.notAwardedCount}</td>
@@ -6819,6 +6964,23 @@ const REPORTS_OUTCOME_LABEL = { awarded: 'Awarded', not_awarded: 'Not Awarded', 
 // the same outcome vocabulary the customer drill-down and color/label maps
 // above already use, so both drill-downs read consistently.
 const REPORTS_STAGE_TO_OUTCOME = { awarded: 'awarded', not_awarded: 'not_awarded', submitted: 'pending', closed: 'closed' };
+// Click an estimator's name in Win Rate by Estimator: every awarded bid they led in this range.
+async function openReportsEstimatorAwards(estimatorId, name) {
+  const params = reportsFilterParams();
+  params.set('leadEstimatorId', estimatorId);
+  params.set('outcome', 'awarded');
+  let rows;
+  try { rows = await api('GET', `/api/v2/reports/bid-drilldown?${params.toString()}`); }
+  catch (e) { alert('Failed to load: ' + e.message); return; }
+  const total = rows.reduce((s, r) => s + (r.amount || 0), 0);
+  showListModal(`${name} — Awarded bids`, `${rows.length} awarded · ${fmt$(total)} (bids submitted in the selected date range)`, rows, [
+    { label: 'Bid #', render: r => esc(r.bidNumber || '—') },
+    { label: 'Project', render: r => esc(r.projectName) },
+    { label: 'Customer(s)', render: r => esc((r.companies || []).join(', ') || '—') },
+    { label: 'Submitted', render: r => r.dateSubmitted ? fmtD(r.dateSubmitted) : '—' },
+    { label: 'Amount', align: 'right', bold: true, render: r => fmt$(r.amount || 0) },
+  ]);
+}
 async function openReportsBidDrilldown(bucketKey, bucketLabel, outcome, outcomeLabel) {
   const params = reportsFilterParams();
   params.set('bucketKey', bucketKey);

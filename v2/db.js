@@ -315,9 +315,13 @@ async function getProjectDetail(projectId) {
 
   const tm = teamMap(members);
   const companyById = {}; companies.forEach(c => { companyById[c._id] = { id: c._id, name: c.name }; });
+  // Open action items on this project's bids (shown as a small chip on the bid / job card).
+  const openActionItems = await M.ActionItem.find({ bid_id: { $in: bidIds }, status: 'open' }).sort({ due_date: 1, _id: 1 }).lean();
+  const fmtAI = (i) => ({ id: i._id, bid_id: i.bid_id, title: i.title, due_date: i.due_date || null, assignee: tm[i.assigned_to] || null, recurring: !!i.recur });
 
   const fmtBid = (b) => ({
     id: b._id,
+    action_items: openActionItems.filter(i => i.bid_id === b._id).map(fmtAI),
     bid_number: b.bid_number,
     stage: b.stage,
     project_on_hold: !!project.on_hold,
@@ -467,6 +471,7 @@ async function getProjectDetail(projectId) {
       id: j._id,
       job_number: j.job_number,                       // null = "pending"
       winning_bid_id: j.winning_bid_id,               // null = legacy job
+      action_items: j.winning_bid_id ? openActionItems.filter(i => i.bid_id === j.winning_bid_id).map(fmtAI) : [],
       awarded_company: j.awarded_company_id ? companyById[j.awarded_company_id] : null,
       pm: tm[j.pm_id] || null,
       apm: tm[j.apm_id] || null,
@@ -1252,10 +1257,10 @@ function calcBidStats(bids) {
   const won = bids.filter(b => b.stage === 'awarded');
   const lost = bids.filter(b => b.stage === 'not_awarded');
   const active = bids.filter(b => ACTIVE.includes(b.stage) && !b.superseded);
-  const decided = won.length + lost.length;
+  const submittedBids = bids.filter(b => b.date_submitted);   // win rate = Awarded / Submitted
   return {
     total: bids.length, active: active.length, wins: won.length, losses: lost.length,
-    winRate: decided > 0 ? Math.round(won.length / decided * 100) : null,
+    winRate: submittedBids.length > 0 ? Math.round(won.length / submittedBids.length * 100) : null,
     wonValue: won.reduce((s, b) => s + (b.estimate_amount || 0), 0),
     totalValue: bids.reduce((s, b) => s + (b.estimate_amount || 0), 0),
   };
@@ -3075,7 +3080,7 @@ async function fmtActionItems(items) {
     return {
       id: i._id, bid_id: i.bid_id, bid_number: b.bid_number || null, project_id: b.project_id || null, project: pName[b.project_id] || '—',
       bid_stage: b.stage || null, estimator: tm[b.estimator_id] || null,
-      title: i.title, due_date: i.due_date || null, status: i.status,
+      title: i.title, due_date: i.due_date || null, status: i.status, recur: i.recur || null, occurrence: i.occurrence || 1,
       assignee: tm[i.assigned_to] || null, created_by: tm[i.created_by] || null,
       completed_by: tm[i.completed_by] || null, completed_at: i.completed_at || null, created_at: i.created_at,
     };
@@ -3100,6 +3105,66 @@ async function getActionItems() {
   };
 }
 
+// ── Recurrence (Outlook-style) ────────────────────────────────────────────────
+const _D = (s) => { const [y, m, d] = s.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d)); };
+const _S = (dt) => dt.toISOString().slice(0, 10);
+const _addDays = (dt, n) => new Date(dt.getTime() + n * 86400000);
+const _daysInMonth = (y, m) => new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+function _nthWeekdayOfMonth(y, m, weekday, nth) {   // nth: 1..4, or -1 = last
+  if (nth === -1) { const last = new Date(Date.UTC(y, m, _daysInMonth(y, m))); return _addDays(last, -((last.getUTCDay() - weekday + 7) % 7)); }
+  const first = new Date(Date.UTC(y, m, 1));
+  return _addDays(first, ((weekday - first.getUTCDay() + 7) % 7) + (nth - 1) * 7);
+}
+function normalizeRecur(r, dueDate) {
+  if (!r || !r.freq || r.freq === 'none') return null;
+  if (!['daily', 'weekly', 'monthly', 'yearly'].includes(r.freq)) throw new Error('Unknown repeat option');
+  const base = _D(dueDate);
+  const out = { freq: r.freq, interval: Math.max(1, Math.min(99, parseInt(r.interval, 10) || 1)), end: ['count', 'date'].includes(r.end) ? r.end : 'never' };
+  if (out.freq === 'weekly') {
+    const wd = [...new Set((r.weekdays || []).map(Number).filter(n => n >= 0 && n <= 6))].sort();
+    out.weekdays = wd.length ? wd : [base.getUTCDay()];
+  }
+  if (out.freq === 'monthly') {
+    out.month_mode = r.month_mode === 'nth_weekday' ? 'nth_weekday' : 'day';
+    out.day = base.getUTCDate();
+    out.weekday = base.getUTCDay();
+    const nth = Math.ceil(base.getUTCDate() / 7);
+    out.nth = (base.getUTCDate() + 7 > _daysInMonth(base.getUTCFullYear(), base.getUTCMonth()) && r.last_weekday) ? -1 : nth;
+  }
+  if (out.end === 'count') { out.count = Math.max(1, Math.min(500, parseInt(r.count, 10) || 1)); }
+  if (out.end === 'date') { if (!/^\d{4}-\d{2}-\d{2}$/.test(r.until || '')) throw new Error('Pick an end date for the repeat'); out.until = r.until; }
+  return out;
+}
+// The occurrence after `fromDate`; never lands in the past (a long-overdue item rolls forward to its next future slot).
+function nextOccurrence(recur, fromDate, todayStr) {
+  const step = (dateStr) => {
+    const d = _D(dateStr);
+    if (recur.freq === 'daily') return _S(_addDays(d, recur.interval));
+    if (recur.freq === 'weekly') {
+      const weekStart = (x) => _addDays(x, -x.getUTCDay()).getTime();
+      for (let i = 1; i <= 7 * recur.interval + 7; i++) {
+        const c = _addDays(d, i);
+        const weeks = Math.round((weekStart(c) - weekStart(d)) / (7 * 86400000));
+        if (recur.weekdays.includes(c.getUTCDay()) && weeks % recur.interval === 0) return _S(c);
+      }
+    }
+    if (recur.freq === 'monthly') {
+      const total = d.getUTCFullYear() * 12 + d.getUTCMonth() + recur.interval;
+      const y = Math.floor(total / 12), m = total % 12;
+      if (recur.month_mode === 'nth_weekday') return _S(_nthWeekdayOfMonth(y, m, recur.weekday, recur.nth));
+      return _S(new Date(Date.UTC(y, m, Math.min(recur.day, _daysInMonth(y, m)))));
+    }
+    if (recur.freq === 'yearly') {
+      const y = d.getUTCFullYear() + recur.interval, m = d.getUTCMonth();
+      return _S(new Date(Date.UTC(y, m, Math.min(d.getUTCDate(), _daysInMonth(y, m)))));
+    }
+    return null;
+  };
+  let next = step(fromDate);
+  for (let i = 0; next && next < todayStr && i < 800; i++) next = step(next);
+  return next;
+}
+
 async function createActionItem(data, actorId) {
   const M = getModels();
   const title = String(data.title || '').trim();
@@ -3109,8 +3174,46 @@ async function createActionItem(data, actorId) {
   if (!bid) throw new Error('Pick a bid');
   const assigned = data.assigned_to ? Number(data.assigned_to) : (bid.estimator_id || actorId || null);
   const id = await nextId('action_items');
-  await M.ActionItem.create({ _id: id, bid_id: bid._id, title, assigned_to: assigned, created_by: actorId || null, due_date: data.due_date || null });
+  const recur = normalizeRecur(data.recur, data.due_date || ts().slice(0, 10));
+  await M.ActionItem.create({ _id: id, bid_id: bid._id, title, assigned_to: assigned, created_by: actorId || null, due_date: data.due_date || (recur ? ts().slice(0, 10) : null), recur, series_id: recur ? id : null });
   return { id, bid_id: bid._id, assigned_to: assigned };
+}
+
+async function canTouchActionItem(item, actorId) {
+  const M = getModels();
+  const actor = actorId ? await M.TeamMember.findById(Number(actorId)).lean() : null;
+  const bid = await M.Bid.findById(item.bid_id).lean();
+  return !!(actor?.is_admin || [item.assigned_to, item.created_by, bid?.estimator_id].includes(Number(actorId))
+    || (bid?.sub_estimators || []).some(s => s.estimator_id === Number(actorId)));
+}
+
+// Edit title / due date / assignee / bid / repeat. Changes to the repeat apply to this item and the ones it creates next.
+async function updateActionItem(id, data, actorId) {
+  const M = getModels();
+  const item = await M.ActionItem.findById(Number(id)).lean();
+  if (!item) throw new Error('Action item not found');
+  if (!(await canTouchActionItem(item, actorId))) throw new Error('Only the assignee, the creator, or the bid\'s estimator can edit this');
+  const upd = { updated_at: ts() };
+  if ('title' in data) {
+    const title = String(data.title || '').trim();
+    if (!title) throw new Error('Describe the action item');
+    if (title.length > 200) throw new Error('Keep the action item under 200 characters');
+    upd.title = title;
+  }
+  if ('due_date' in data) upd.due_date = data.due_date || null;
+  if ('assigned_to' in data) upd.assigned_to = data.assigned_to ? Number(data.assigned_to) : null;
+  if ('bid_id' in data && data.bid_id) {
+    const bid = await M.Bid.findById(Number(data.bid_id)).lean();
+    if (!bid) throw new Error('Pick a bid');
+    upd.bid_id = bid._id;
+  }
+  if ('recur' in data) {
+    const recur = normalizeRecur(data.recur, (upd.due_date !== undefined ? upd.due_date : item.due_date) || ts().slice(0, 10));
+    upd.recur = recur;
+    upd.series_id = recur ? (item.series_id || item._id) : null;
+  }
+  await M.ActionItem.updateOne({ _id: item._id }, { $set: upd });
+  return { id: item._id, assigned_changed: upd.assigned_to !== undefined && upd.assigned_to !== item.assigned_to ? upd.assigned_to : null };
 }
 
 async function setActionItemDone(id, done, actorId) {
@@ -3125,7 +3228,20 @@ async function setActionItemDone(id, done, actorId) {
   await M.ActionItem.updateOne({ _id: item._id }, { $set: done
     ? { status: 'done', completed_at: ts(), completed_by: actorId || null, updated_at: ts() }
     : { status: 'open', completed_at: null, completed_by: null, updated_at: ts() } });
-  return { id: item._id, status: done ? 'done' : 'open', was_open: item.status === 'open' };
+  let next_id = null;
+  if (done && item.status === 'open' && item.recur) {
+    const r = item.recur, today = ts().slice(0, 10);
+    const nextDue = nextOccurrence(r, item.due_date || today, today);
+    const occ = (item.occurrence || 1) + 1;
+    const ended = !nextDue || (r.end === 'count' && occ > r.count) || (r.end === 'date' && nextDue > r.until);
+    const existing = item.next_id ? await M.ActionItem.findById(item.next_id).lean() : null;   // already spawned once (even if since completed) — don't spawn again
+    if (!ended && !existing) {
+      next_id = await nextId('action_items');
+      await M.ActionItem.create({ _id: next_id, bid_id: item.bid_id, title: item.title, assigned_to: item.assigned_to, created_by: item.created_by, due_date: nextDue, recur: r, series_id: item.series_id || item._id, occurrence: occ });
+      await M.ActionItem.updateOne({ _id: item._id }, { $set: { next_id } });
+    }
+  }
+  return { id: item._id, status: done ? 'done' : 'open', was_open: item.status === 'open', next_id };
 }
 
 async function deleteActionItem(id, actorId) {
@@ -4131,7 +4247,6 @@ async function getReports(filters = {}) {
     coName, pName, tm, subsByBid, opportunitiesIn, activeBidsIn, pid,
   } = await getReportsCohort(filters);
   const { from, to } = filters;
-  const decided = awardedIn.length + notAwardedIn.length;
   const approvedCosIn = submittedCosIn.filter(c => c.stage === 'approved');
 
   const summary = {
@@ -4142,7 +4257,8 @@ async function getReports(filters = {}) {
     notAwarded:    { count: notAwardedIn.length, value: sumAmt(notAwardedIn) },
     pending:       { count: pendingIn.length, value: sumAmt(pendingIn) },
     closed:        { count: closedIn.length, value: sumAmt(closedIn) },
-    winRate:       decided ? Math.round((awardedIn.length / decided) * 1000) / 10 : null,
+    // Win rate = Awarded / Submitted (bids submitted in the range).
+    winRate:       submittedIn.length ? Math.round((awardedIn.length / submittedIn.length) * 1000) / 10 : null,
     submittedCOs:  { count: submittedCosIn.length, value: sumAmt(submittedCosIn) },
     approvedCOs:   { count: approvedCosIn.length, value: sumAmt(approvedCosIn) },
   };
@@ -4191,7 +4307,7 @@ async function getReports(filters = {}) {
   // A win rate off one or two bids is noise (a customer we bid once and won
   // shows 100% and tops the win-rate sort — per Keegan), so it's only
   // reported once at least WIN_RATE_MIN_SUBMITTED bids are in the cohort.
-  const rate = (won, lost, submitted) => (submitted >= WIN_RATE_MIN_SUBMITTED && (won + lost)) ? Math.round((won / (won + lost)) * 1000) / 10 : null;
+  const rate = (won, lost, submitted) => (submitted >= WIN_RATE_MIN_SUBMITTED) ? Math.round((won / submitted) * 1000) / 10 : null;   // Awarded / Submitted
   const byCustomer = Object.values(custStats)
     .map(s => ({ ...s, winRate: rate(s.awardedCount, s.notAwardedCount, s.submittedCount) }))
     .sort((a, b) => b.awardedValue - a.awardedValue || b.submittedValue - a.submittedValue);
@@ -4236,6 +4352,8 @@ async function getReportsBidDrilldown(filters = {}) {
   const { bucketKey, outcome } = filters;
   const { gran, submittedIn, pName, coName, tm, subsByBid } = await getReportsCohort(filters);
   let rows = submittedIn;
+  // Click-through from Win Rate by Estimator: that lead estimator's bids only (0 = Unassigned).
+  if (filters.leadEstimatorId !== undefined && filters.leadEstimatorId !== '') rows = rows.filter(b => (b.estimator_id || 0) === Number(filters.leadEstimatorId));
   if (bucketKey) rows = rows.filter(b => bucketKeyFor(b.date_submitted, gran) === bucketKey);
   if (outcome) {
     const stageFor = { awarded: 'awarded', notAwarded: 'not_awarded', pending: 'submitted', closed: 'closed' }[outcome];
@@ -4360,6 +4478,7 @@ async function getDashboard(userId, mineOnly) {
     .map(bucket => ({ ...bucket, bids: bucket.bids.sort((a, b) => (b.award_date || '').localeCompare(a.award_date || '')) }));
 
   // Estimating Turnover not yet answered on recently awarded jobs (last 45 days).
+  const myActionItemsDue = userId ? await M.ActionItem.countDocuments({ assigned_to: Number(userId), status: 'open', due_date: { $ne: null, $lte: today } }) : 0;
   const turnoverNeeded = jobs
     .filter(j => j.winning_bid_id && j.est_turnover == null && (j.award_date || '') >= ago(45))
     .filter(j => !uid || (bidById[j.winning_bid_id] && isMyBid(bidById[j.winning_bid_id])) || j.pm_id === uid || j.apm_id === uid)
@@ -4367,6 +4486,7 @@ async function getDashboard(userId, mineOnly) {
     .map(j => ({ id: j._id, project_id: j.project_id, project: pName[j.project_id] || '—', job_number: j.job_number, award_date: j.award_date }));
   return {
     mineOnly: !!uid,
+    myActionItemsDue,
     turnoverNeeded,
     pipeline,
     activeCoCount: activeCos.length,
@@ -5385,7 +5505,7 @@ module.exports = {
   getCompanyCommunications, getContactCommunications, getAllCommunications,
   addBidCustomerContact, removeBidCustomerContact, setBidCustomerPortalUrl,
   awardSubmission, notAwardSubmission, revertAward, revertNotAwarded, closeBid, approveToBid, unapproveToBid, logFollowupV2, updateFollowup,
-  createLegacyJob, updateJob, updateJobPermits, setJobTurnover, getActionItems, createActionItem, setActionItemDone, deleteActionItem, fmtActionItems, getPermitsOverview, createPermit, updatePermit, addPermitUpdate, loadJob, permitAction, getStalePermits, markPermitsNudged, deletePermit, permitJobNumber,
+  createLegacyJob, updateJob, updateJobPermits, setJobTurnover, getActionItems, createActionItem, updateActionItem, setActionItemDone, deleteActionItem, fmtActionItems, getPermitsOverview, createPermit, updatePermit, addPermitUpdate, loadJob, permitAction, getStalePermits, markPermitsNudged, deletePermit, permitJobNumber,
   createChangeOrder, submitCO, approveCO, notApproveCO, voidCO, reopenCO, reviseCO,
   createCoRequest, approveCoRequest, unapproveCoRequest, startCoRequest,
   _norm, resolveCompanyByName, ensureBidCustomer, teamMap,
