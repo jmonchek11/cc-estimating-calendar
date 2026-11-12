@@ -783,4 +783,4 @@ function emailIdeaStatusChanged(idea, newStatus) {
   };
 }
 
-module.exports = { sendMail, emailActionItem, emailAssigned, emailFollowup, emailBidSubmitted, emailPermitUpdate, emailPermitRequired, emailPermitNudge, emailAwarded, emailRoleAwardNotice, emailApprovedToBid, emailForwardBidInvite, emailDueDateChanged, emailReminder, emailWalkthroughSet, emailWalkthroughAssigned, emailWalkthroughReminder, emailDigest, emailIdeaSubmitted, emailIdeaNeedsApproval, emailIdeaStatusChanged, wantsNotification, NOTIFICATION_CATEGORIES };
+module.exports = { sendMail, emailOpportunityClosed, emailNewOpportunity, emailCoQueued, emailActionItem, emailAssigned, emailFollowup, emailBidSubmitted, emailPermitUpdate, emailPermitRequired, emailPermitNudge, emailAwarded, emailRoleAwardNotice, emailApprovedToBid, emailForwardBidInvite, emailDueDateChanged, emailReminder, emailWalkthroughSet, emailWalkthroughAssigned, emailWalkthroughReminder, emailDigest, emailIdeaSubmitted, emailIdeaNeedsApproval, emailIdeaStatusChanged, wantsNotification, NOTIFICATION_CATEGORIES };
