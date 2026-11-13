@@ -317,7 +317,7 @@ async function getProjectDetail(projectId) {
   const companyById = {}; companies.forEach(c => { companyById[c._id] = { id: c._id, name: c.name }; });
   // Open action items on this project's bids (shown as a small chip on the bid / job card).
   const openActionItems = await M.ActionItem.find({ bid_id: { $in: bidIds }, status: 'open' }).sort({ due_date: 1, _id: 1 }).lean();
-  const fmtAI = (i) => ({ id: i._id, bid_id: i.bid_id, title: i.title, due_date: i.due_date || null, assignee: tm[i.assigned_to] || null, recurring: !!i.recur });
+  const fmtAI = (i) => ({ id: i._id, bid_id: i.bid_id, title: i.title, due_date: i.due_date || null, assignee: tm[i.assigned_to] || null, recurring: !!i.recur, recur: i.recur || null, general: false });
 
   const fmtBid = (b) => ({
     id: b._id,

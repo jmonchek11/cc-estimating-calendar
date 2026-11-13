@@ -126,6 +126,61 @@
   .bc-dropdown a:hover { background: #f1f5f9; }
   .bc-dropdown a.bc-danger { color: #dc2626; }
 
+
+  /* Action Items */
+  .ai-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 18px; }
+  .ai-stat { background: #fff; border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; }
+  .ai-stat b { display: block; font-size: 24px; font-weight: 700; line-height: 1.1; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+  .ai-stat span { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); font-weight: 600; }
+  .ai-stat.late b { color: #dc2626; } .ai-stat.today b { color: #b45309; }
+  .ai-seg { display: inline-flex; background: #e2e8f0; border-radius: 9px; padding: 3px; }
+  .ai-seg button { border: 0; background: transparent; padding: 6px 14px; font: 600 12px/1 inherit; font-family: inherit; border-radius: 7px; color: #475569; cursor: pointer; }
+  .ai-seg button.on { background: #fff; color: var(--text); box-shadow: 0 1px 2px rgba(15,23,42,.14); }
+  .ai-primary { display: inline-flex; align-items: center; gap: 6px; border: 0; background: var(--primary); color: #fff; border-radius: 9px; padding: 8px 14px; font: 600 13px/1 inherit; font-family: inherit; cursor: pointer; box-shadow: 0 1px 2px rgba(37,99,235,.35); }
+  .ai-primary:hover { background: var(--primary-dark); }
+  .ai-ghost { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border); background: #fff; color: #334155; border-radius: 8px; padding: 5px 10px; font: 600 12px/1 inherit; font-family: inherit; cursor: pointer; }
+  .ai-ghost:hover { background: #f1f5f9; }
+  .ai-group { background: #fff; border: 1px solid var(--border); border-radius: 12px; margin-bottom: 14px; overflow: hidden; box-shadow: var(--shadow); }
+  .ai-group-hd { display: flex; align-items: center; gap: 10px; padding: 11px 16px; background: #f8fafc; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .ai-bidnum { font: 700 12px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: #e0e7ff; color: #3730a3; padding: 4px 8px; border-radius: 6px; letter-spacing: .02em; }
+  .ai-bidnum.general { background: #ede9fe; color: #5b21b6; font-family: inherit; letter-spacing: 0; }
+  .ai-project { font-weight: 700; font-size: 14px; color: var(--text); text-decoration: none; }
+  a.ai-project:hover { color: var(--primary); }
+  .ai-sub { font-size: 12px; color: var(--text-muted); }
+  .ai-count { font-size: 11px; font-weight: 700; background: #e2e8f0; color: #475569; border-radius: 999px; padding: 2px 8px; font-variant-numeric: tabular-nums; }
+  .ai-row { display: flex; align-items: center; gap: 12px; padding: 11px 16px; border-top: 1px solid #f1f5f9; transition: background .12s; }
+  .ai-group-hd + .ai-row, .ai-row:first-child { border-top: 0; }
+  .ai-row:hover { background: #f8fafc; }
+  .ai-check { appearance: none; -webkit-appearance: none; width: 21px; height: 21px; border: 2px solid #cbd5e1; border-radius: 50%; cursor: pointer; display: grid; place-content: center; flex-shrink: 0; transition: border-color .12s, background .12s; background: #fff; margin: 0; }
+  .ai-check:hover { border-color: var(--primary); }
+  .ai-check:checked { background: #16a34a; border-color: #16a34a; }
+  .ai-check:checked::after { content: ''; width: 5px; height: 10px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg) translate(-1px, -1px); }
+  .ai-check:focus-visible, .ai-icon-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+  .ai-body { flex: 1; min-width: 0; }
+  .ai-title { font-size: 14px; font-weight: 600; color: var(--text); line-height: 1.35; overflow-wrap: anywhere; }
+  .ai-meta { display: flex; align-items: center; gap: 4px 10px; margin-top: 3px; font-size: 12px; color: var(--text-muted); flex-wrap: wrap; }
+  .ai-who { display: inline-flex; align-items: center; gap: 5px; }
+  .ai-avatar { width: 20px; height: 20px; border-radius: 50%; background: #dbeafe; color: #1d4ed8; font-size: 9px; font-weight: 700; display: inline-grid; place-items: center; }
+  .ai-repeat { display: inline-flex; align-items: center; gap: 4px; color: #64748b; }
+  .ai-due { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px; background: #f1f5f9; color: #475569; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .ai-due.late { background: #fee2e2; color: #b91c1c; } .ai-due.today { background: #fef3c7; color: #92400e; }
+  .ai-actions { display: flex; gap: 2px; opacity: 0; transition: opacity .12s; }
+  .ai-row:hover .ai-actions, .ai-row:focus-within .ai-actions { opacity: 1; }
+  @media (hover: none) { .ai-actions { opacity: 1; } }
+  .ai-icon-btn { border: 0; background: transparent; width: 30px; height: 30px; border-radius: 7px; display: grid; place-items: center; color: #94a3b8; cursor: pointer; }
+  .ai-icon-btn:hover { background: #e2e8f0; color: #334155; }
+  .ai-icon-btn.danger:hover { background: #fee2e2; color: #b91c1c; }
+  .ai-done .ai-title { text-decoration: line-through; color: #94a3b8; font-weight: 500; }
+  .ai-empty { text-align: center; padding: 44px 20px; color: var(--text-muted); background: #fff; border: 1px dashed #cbd5e1; border-radius: 12px; }
+  .ai-empty b { display: block; color: var(--text); font-size: 15px; margin-bottom: 4px; }
+  .ai-chip { display: inline-flex; align-items: center; gap: 6px; font: 600 12px/1 inherit; font-family: inherit; color: #334155; background: #f1f5f9; border: 1px solid var(--border); border-radius: 999px; padding: 5px 11px; cursor: pointer; text-decoration: none; }
+  .ai-chip:hover { background: #e2e8f0; }
+  .ai-chip.late { background: #fee2e2; border-color: #fecaca; color: #b91c1c; }
+  .ai-chip-list { margin-top: 8px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: #fff; }
+  .ai-chip-list .ai-row { padding: 8px 12px; }
+  .ai-chip-list .ai-title { font-size: 13px; }
+  @media (max-width: 640px) { .ai-row { flex-wrap: wrap; } .ai-body { flex-basis: calc(100% - 40px); } .ai-due { margin-left: 33px; } }
+
   /* Action buttons + modal */
   .v2-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
   .v2-btn {
@@ -2278,24 +2333,22 @@ function dashActionItemsCardHtml(d) {
   const items = d.myActionItems || [];
   if (!items.length) return '';
   const total = d.myActionItemsTotal || items.length;
-  return `<div class="card" style="padding:12px 16px;margin-bottom:14px">
-    <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:4px">
-      <div style="font-weight:800;font-size:14px">☑ My Action Items <span style="font-weight:600;color:var(--text-muted);font-size:12px">(${total}${d.myActionItemsDue ? ' · <span style="color:#dc2626">' + d.myActionItemsDue + ' due or overdue</span>' : ''})</span></div>
-      <a href="#" onclick="event.preventDefault();actNewActionItem()" style="margin-left:auto;font-size:12px;font-weight:600">+ Add</a>
-      <a href="#" onclick="event.preventDefault();navigate('action-items')" style="font-size:12px;font-weight:600">View all →</a>
+  return `<section class="ai-group" style="margin-bottom:16px">
+    <div class="ai-group-hd">
+      <span style="display:inline-flex;color:#2563eb">${AI_ICON.check}</span>
+      <span class="ai-project">My Action Items</span>
+      <span class="ai-count">${total}</span>
+      ${d.myActionItemsDue ? `<span class="ai-due late">${d.myActionItemsDue} due or overdue</span>` : ''}
+      <span style="margin-left:auto;display:flex;gap:8px">
+        <button class="ai-ghost" onclick="actNewActionItem()">${AI_ICON.plus} Add</button>
+        <button class="ai-ghost" onclick="navigate('action-items')">View all</button>
+      </span>
     </div>
-    ${items.map(i => {
-      const late = i.due_date && i.due_date < today, dueToday = i.due_date === today;
-      return `<div style="display:flex;align-items:center;gap:10px;padding:6px 2px;border-top:1px solid var(--border)">
-        <input type="checkbox" style="width:17px;height:17px;flex-shrink:0;cursor:pointer" onchange="actToggleActionItemInPlace(${i.id}, this.checked)" title="Mark complete">
-        <div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600">${esc(i.title)}${i.recur ? ' 🔁' : ''}</div>
-          <div style="font-size:11.5px;color:var(--text-muted)">${i.general ? 'General' : esc((i.bid_number ? i.bid_number + ' — ' : '') + i.project)}</div></div>
-        ${i.due_date ? `<span style="font-size:12px;font-weight:700;color:${late ? '#dc2626' : dueToday ? '#c2410c' : 'var(--text-muted)'}">${late ? 'Overdue · ' : dueToday ? 'Today · ' : ''}${fmtD(i.due_date)}</span>` : ''}
-        <a href="#" onclick="event.preventDefault();actEditActionItem(${i.id})" title="Edit" style="text-decoration:none">✏️</a></div>`;
-    }).join('')}
-    ${total > items.length ? `<div style="font-size:11.5px;color:var(--text-muted);padding-top:4px">+ ${total - items.length} more — <a href="#" onclick="event.preventDefault();navigate('action-items')">view all</a></div>` : ''}
-  </div>`;
+    ${items.map(i => aiRowHtml(i, { context: true, compact: true, inPlace: true })).join('')}
+    ${total > items.length ? `<div class="ai-row" style="justify-content:center;font-size:12px;color:var(--text-muted)">+ ${total - items.length} more · <a href="#" onclick="event.preventDefault();navigate('action-items')">view all</a></div>` : ''}
+  </section>`;
 }
+
 let DASH_DATA = null;   // last-rendered dashboard payload, kept around so the Awarded (YTD) card can pop its month breakout without a re-fetch
 
 async function renderDashboard() {
@@ -5518,6 +5571,39 @@ function ensurePermitStyles() {
 // ── Action Items ──────────────────────────────────────────────────────────────
 // Simple estimating to-dos grouped by bid. "Mine" = assigned to me. Checking one off
 // emails the bid's estimator (server side).
+const AI_ICON = {
+  edit: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
+  del: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>',
+  repeat: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/></svg>',
+  plus: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+  check: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.7 2.7L16 9.5"/></svg>',
+};
+function aiDueHtml(i) {
+  if (!i.due_date || i.status === 'done') return '';
+  const cls = i.due_date < today ? 'late' : i.due_date === today ? 'today' : '';
+  const lead = i.due_date < today ? 'Overdue · ' : i.due_date === today ? 'Today · ' : '';
+  return `<span class="ai-due ${cls}">${lead}${fmtD(i.due_date)}</span>`;
+}
+// One action-item row — used on the Action Items page, the Dashboard card and the bid/job card list.
+// opts.context: show which bid it belongs to (Dashboard); opts.canDelete: show delete.
+function aiRowHtml(i, opts = {}) {
+  const isDone = i.status === 'done';
+  const who = i.assignee ? `<span class="ai-who"><span class="ai-avatar">${esc(i.assignee.initials || '')}</span>${esc(i.assignee.name || '')}</span>` : '<span class="ai-who">Unassigned</span>';
+  const from = i.created_by && i.created_by.id !== i.assignee?.id ? `<span>from ${esc(i.created_by.name)}</span>` : '';
+  const doneBy = isDone && i.completed_by ? `<span>done by ${esc(i.completed_by.name)}</span>` : '';
+  const ctx = opts.context ? `<span>${i.general ? 'General' : esc((i.bid_number ? i.bid_number + ' · ' : '') + i.project)}</span>` : '';
+  const rep = i.recur ? `<span class="ai-repeat" title="${esc(recurSummary(i.recur))}">${AI_ICON.repeat}${esc(recurSummary(i.recur))}</span>` : '';
+  const meta = opts.compact ? [ctx, rep].filter(Boolean).join('') : [who, ctx, from, doneBy, rep].filter(Boolean).join('');
+  return `<div class="ai-row ${isDone ? 'ai-done' : ''}">
+    <input type="checkbox" class="ai-check" ${isDone ? 'checked' : ''} onchange="${opts.inPlace ? 'actToggleActionItemInPlace' : 'actToggleActionItem'}(${i.id}, this.checked)" title="${isDone ? 'Mark open again' : 'Mark complete'}" aria-label="${isDone ? 'Mark open again' : 'Mark complete'}: ${esc(i.title)}">
+    <div class="ai-body"><div class="ai-title">${esc(i.title)}</div>${meta ? `<div class="ai-meta">${meta}</div>` : ''}</div>
+    ${aiDueHtml(i)}
+    <div class="ai-actions">
+      <button class="ai-icon-btn" onclick="actEditActionItem(${i.id})" title="Edit" aria-label="Edit">${AI_ICON.edit}</button>
+      ${opts.canDelete ? `<button class="ai-icon-btn danger" onclick="actDeleteActionItem(${i.id})" title="Delete" aria-label="Delete">${AI_ICON.del}</button>` : ''}
+    </div>
+  </div>`;
+}
 const ACTION_STATE = { data: null, mine: true, showDone: false };
 async function renderActionItems() {
   setActiveNav('action-items');
@@ -5533,46 +5619,46 @@ function renderActionItemsBody() {
   const all = S.data.items;
   const scoped = S.mine ? all.filter(i => i.assignee?.id === me) : all;
   const open = scoped.filter(i => i.status === 'open'), done = scoped.filter(i => i.status === 'done');
-  const overdue = open.filter(i => i.due_date && i.due_date <= today).length;
+  const overdue = open.filter(i => i.due_date && i.due_date < today).length;
+  const dueToday = open.filter(i => i.due_date === today).length;
   const byBid = {};
   (S.showDone ? scoped : open).forEach(i => (byBid[i.bid_id || 'general'] = byBid[i.bid_id || 'general'] || []).push(i));
   // General items (not tied to a bid) first, then bids by number.
   const groups = Object.values(byBid).sort((a, b) => (b[0].general ? 1 : 0) - (a[0].general ? 1 : 0) || (a[0].bid_number || 'zzz').localeCompare(b[0].bid_number || 'zzz') || a[0].project.localeCompare(b[0].project));
-  const row = (i) => {
-    const isDone = i.status === 'done';
-    const late = !isDone && i.due_date && i.due_date < today, dueToday = !isDone && i.due_date === today;
-    const canDelete = CURRENT_USER?.is_admin || i.created_by?.id === me;
-    return `<div style="display:flex;align-items:center;gap:10px;padding:8px 4px;border-top:1px solid var(--border)">
-      <input type="checkbox" ${isDone ? 'checked' : ''} style="width:18px;height:18px;flex-shrink:0;cursor:pointer" onchange="actToggleActionItem(${i.id}, this.checked)" title="${isDone ? 'Mark open again' : 'Mark complete'}">
-      <div style="flex:1;min-width:0">
-        <div style="font-size:13.5px;${isDone ? 'text-decoration:line-through;color:var(--text-muted)' : 'font-weight:600'}">${esc(i.title)}${i.recur ? ` <span title="${esc(recurSummary(i.recur))}" style="font-weight:400;font-size:11.5px;color:var(--text-muted)">🔁 ${esc(recurSummary(i.recur))}</span>` : ''}</div>
-        <div style="font-size:11.5px;color:var(--text-muted)">${i.assignee ? ini(i.assignee) + ' ' + esc(i.assignee.name) : 'Unassigned'}${i.created_by && i.created_by.id !== i.assignee?.id ? ' · from ' + esc(i.created_by.name) : ''}${isDone && i.completed_by ? ' · done by ' + esc(i.completed_by.name) : ''}</div>
-      </div>
-      ${i.due_date ? `<span style="font-size:12px;font-weight:700;color:${late ? '#dc2626' : dueToday ? '#c2410c' : 'var(--text-muted)'}">${late ? 'Overdue · ' : dueToday ? 'Today · ' : ''}${fmtD(i.due_date)}</span>` : ''}
-      <button class="v2-btn outline" style="padding:2px 8px;font-size:11px" onclick="actEditActionItem(${i.id})" title="Edit">✏️</button>
-      ${canDelete ? `<button class="v2-btn outline" style="padding:2px 8px;font-size:11px" onclick="actDeleteActionItem(${i.id})" title="Delete">✕</button>` : ''}
-    </div>`;
-  };
+  const canDel = i => CURRENT_USER?.is_admin || i.created_by?.id === me;
   main.innerHTML = `
     <div class="page-header">
       <div><div class="page-title">${pageIcon('action-items')} Action Items</div>
-        <div class="page-subtitle">${open.length} open${overdue ? ` · <span style="color:#dc2626;font-weight:700">${overdue} due today or overdue</span>` : ''}${S.mine ? ' · assigned to you' : ' · everyone'}</div></div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap">
-        <button class="v2-btn ${S.mine ? 'blue' : 'outline'}" style="padding:7px 14px;font-size:12px" onclick="setActionScope(true)">My List</button>
-        <button class="v2-btn ${!S.mine ? 'blue' : 'outline'}" style="padding:7px 14px;font-size:12px" onclick="setActionScope(false)">Everyone</button>
-        <button class="v2-btn green" style="padding:7px 14px;font-size:12px" onclick="actNewActionItem()">+ Create Action Item</button>
+        <div class="page-subtitle">${S.mine ? 'Your to-dos across every bid' : 'Everyone\'s to-dos across every bid'}</div></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <div class="ai-seg" role="group" aria-label="Whose list">
+          <button class="${S.mine ? 'on' : ''}" onclick="setActionScope(true)">My List</button>
+          <button class="${!S.mine ? 'on' : ''}" onclick="setActionScope(false)">Everyone</button>
+        </div>
+        <button class="ai-primary" onclick="actNewActionItem()">${AI_ICON.plus} Create Action Item</button>
       </div>
     </div>
-    ${groups.length ? groups.map(g => `<div class="card" style="margin-bottom:12px;padding:12px 16px">
-      <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:4px">
-        ${g[0].general ? '<span style="font-weight:800;font-size:14px">General</span><span style="font-size:11.5px;color:var(--text-muted)">not tied to a bid</span>'
-          : `<a href="#" onclick="event.preventDefault();openBidFlyout(${g[0].project_id},${g[0].bid_id})" style="font-weight:800;font-size:14px;color:var(--text)">${g[0].bid_number ? esc(g[0].bid_number) + ' — ' : ''}${esc(g[0].project)}</a>
-        <span style="font-size:11.5px;color:var(--text-muted)">${g[0].estimator ? 'Estimator: ' + esc(g[0].estimator.name) : ''}</span>`}
-        <button class="v2-btn outline" style="margin-left:auto;padding:2px 10px;font-size:11px" onclick="actNewActionItem(${g[0].general ? "'general'" : g[0].bid_id})">+ Add</button>
-      </div>
-      ${g.sort((a, b) => (a.status === b.status ? 0 : a.status === 'done' ? 1 : -1) || (a.due_date || '9999').localeCompare(b.due_date || '9999')).map(row).join('')}
-    </div>`).join('') : `<div class="card" style="padding:24px;text-align:center;color:var(--text-muted)">${S.mine ? 'Nothing on your list — nice.' : 'No open action items.'}</div>`}
-    ${done.length ? `<div style="text-align:center;margin:8px 0"><a href="#" style="font-size:12px;font-weight:600" onclick="event.preventDefault();ACTION_STATE.showDone=!ACTION_STATE.showDone;renderActionItemsBody()">${S.showDone ? 'Hide' : 'Show'} completed (${done.length}, last 14 days)</a></div>` : ''}`;
+    <div class="ai-summary">
+      <div class="ai-stat"><b>${open.length}</b><span>Open</span></div>
+      <div class="ai-stat today"><b>${dueToday}</b><span>Due today</span></div>
+      <div class="ai-stat late"><b>${overdue}</b><span>Overdue</span></div>
+      <div class="ai-stat"><b>${done.length}</b><span>Done · 14 days</span></div>
+    </div>
+    ${groups.length ? groups.map(g => {
+      const rows = g.slice().sort((a, b) => (a.status === b.status ? 0 : a.status === 'done' ? 1 : -1) || (a.due_date || '9999').localeCompare(b.due_date || '9999'));
+      return `<section class="ai-group">
+        <div class="ai-group-hd">
+          ${g[0].general
+            ? `<span class="ai-bidnum general">General</span><span class="ai-sub">Not tied to a bid</span>`
+            : `${g[0].bid_number ? `<span class="ai-bidnum">${esc(g[0].bid_number)}</span>` : ''}<a href="#" class="ai-project" onclick="event.preventDefault();openBidFlyout(${g[0].project_id},${g[0].bid_id})">${esc(g[0].project)}</a>
+               ${g[0].estimator ? `<span class="ai-sub">Estimator · ${esc(g[0].estimator.name)}</span>` : ''}`}
+          <span class="ai-count">${g.length}</span>
+          <button class="ai-ghost" style="margin-left:auto" onclick="actNewActionItem(${g[0].general ? "'general'" : g[0].bid_id})">${AI_ICON.plus} Add</button>
+        </div>
+        ${rows.map(i => aiRowHtml(i, { canDelete: canDel(i) })).join('')}
+      </section>`;
+    }).join('') : `<div class="ai-empty"><b>${S.mine ? 'You\'re all caught up' : 'No open action items'}</b>${S.mine ? 'Nothing on your list right now.' : 'Create one to get started.'}</div>`}
+    ${done.length ? `<div style="text-align:center;margin:10px 0 4px"><button class="ai-ghost" onclick="ACTION_STATE.showDone=!ACTION_STATE.showDone;renderActionItemsBody()">${S.showDone ? 'Hide' : 'Show'} completed (${done.length})</button></div>` : ''}`;
 }
 function setActionScope(mine) { ACTION_STATE.mine = mine; renderActionItemsBody(); }
 async function actToggleActionItem(id, done) {
@@ -5718,17 +5804,14 @@ const AI_CHIP_OPEN = new Set();
 function actionItemsChipHtml(items, bidId) {
   if (!items || !items.length) return '';
   const open = AI_CHIP_OPEN.has(bidId);
-  const next = items.find(i => i.due_date) ;
+  const next = items.find(i => i.due_date);
   const late = items.some(i => i.due_date && i.due_date < today);
-  return `<div style="margin-top:6px;font-size:12px">
-    <a href="#" onclick="event.preventDefault();toggleActionChip(${bidId})" style="color:${late ? '#dc2626' : '#475569'};font-weight:600;text-decoration:none">☑ ${items.length} open action item${items.length === 1 ? '' : 's'}${next ? ' · next ' + fmtD(next.due_date) : ''} ${open ? '▴' : '▾'}</a>
-    ${open ? `<div style="margin:4px 0 0 4px;padding-left:10px;border-left:2px solid var(--border)">
-      ${items.map(i => `<div style="display:flex;align-items:center;gap:8px;padding:3px 0">
-        <input type="checkbox" onchange="actToggleActionItemInPlace(${i.id}, this.checked)" style="cursor:pointer">
-        <span style="flex:1;min-width:0">${esc(i.title)}${i.recurring ? ' 🔁' : ''}</span>
-        <span style="color:${i.due_date && i.due_date < today ? '#dc2626' : 'var(--text-muted)'}">${i.assignee ? esc(i.assignee.initials) : ''}${i.due_date ? ' · ' + fmtD(i.due_date) : ''}</span>
-        <a href="#" onclick="event.preventDefault();actEditActionItem(${i.id})" title="Edit" style="text-decoration:none">✏️</a></div>`).join('')}
-      <a href="#" onclick="event.preventDefault();actNewActionItem(${bidId})" style="font-weight:600">+ Add</a></div>` : ''}
+  return `<div style="margin-top:8px">
+    <button type="button" class="ai-chip ${late ? 'late' : ''}" onclick="toggleActionChip(${bidId})" aria-expanded="${open}">
+      ${AI_ICON.check}<span>${items.length} action item${items.length === 1 ? '' : 's'}${next ? ' · next ' + fmtD(next.due_date) : ''}</span><span style="opacity:.6">${open ? '▴' : '▾'}</span>
+    </button>
+    ${open ? `<div class="ai-chip-list">${items.map(i => aiRowHtml({ ...i, status: 'open' }, { inPlace: true })).join('')}
+      <div class="ai-row" style="padding:6px 12px"><button class="ai-ghost" onclick="actNewActionItem(${bidId})">${AI_ICON.plus} Add action item</button></div></div>` : ''}
   </div>`;
 }
 function toggleActionChip(bidId) { if (AI_CHIP_OPEN.has(bidId)) AI_CHIP_OPEN.delete(bidId); else AI_CHIP_OPEN.add(bidId); refresh(); }
