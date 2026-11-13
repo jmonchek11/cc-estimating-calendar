@@ -649,3 +649,7 @@ One row per to-do on a bid (`action_items`): `bid_id`, `title`, `assigned_to`, `
 
 - Action items can repeat (Outlook-style: daily / weekly on chosen days / monthly by date or nth weekday / yearly, with an end after N times or on a date). Completing an occurrence creates the next one (`next_id` guards against double-spawning). Items are editable (title, assignee, due, bid, repeat) and show as a collapsed chip on the bid and job cards plus a due-today banner on the Dashboard.
 - Win rate = Awarded / Submitted everywhere (Reports summary, by customer, by estimator, company profile). Reports: clicking an estimator name lists their awarded bids (`leadEstimatorId` on `/reports/bid-drilldown`).
+
+- Action items: `bid_id` null = General (not tied to a bid). Assigning one emails the assignee AND the bid's estimator. Adding a sub-estimator auto-creates "Complete your scope: <scope>" for them (`auto_key`), removed if the assignment is removed. Dashboard shows a My Action Items card.
+- `Job.foreman` (free text) + Estimating Turnover page (left nav under Projects): one row per job awarded in the last 12 months with Required Y/N, Date Scheduled, PM, Foreman, all editable inline.
+- Admin bid delete: `DELETE /admin/bid/:id?force=1` may delete a duplicate bid that has only pending submissions (cascades submissions, follow-ups, notes, action items); refused if any customer decision exists or a job came from it.

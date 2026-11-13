@@ -212,6 +212,7 @@ const JobSchema = new mongoose.Schema({
   // Estimating Turnover: is this a >150hr job that needs a turnover from estimating?
   // null = not answered yet (flagged on the dashboard for awarded jobs).
   est_turnover:       { type: Boolean, default: null },
+  foreman:            { type: String, default: null },   // foreman assigned to the job (free text) — shown on the Estimating Turnover page
   est_turnover_date:  { type: String, default: null },   // date the Estimating Turnover meeting is scheduled
   // Snapshotted from the winning bid's folder_url at award time (same real
   // folder, just renamed) but stored independently so it can be corrected
@@ -511,7 +512,8 @@ const PERMIT_STATUSES = ['not_filed', 'filed', 'corrections', 'approved', 'picke
 // FA quote"). Assigned to one team member; completing one notifies the bid's estimator.
 const ActionItemSchema = new mongoose.Schema({
   _id:          Number,
-  bid_id:       { type: Number, required: true },               // FK → Bid
+  bid_id:       { type: Number, default: null },                // FK → Bid; null = a General item (not tied to a bid)
+  auto_key:     { type: String, default: null },                // set on items created automatically (e.g. 'sub:<estimator>:<scope>')
   title:        { type: String, required: true },
   assigned_to:  { type: Number, default: null },                // FK → TeamMember
   created_by:   { type: Number, default: null },

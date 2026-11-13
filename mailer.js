@@ -276,18 +276,20 @@ function emailAssigned(bid, recipientName, actorName, role, scope) {
   };
 }
 
-function emailActionItem(bid, item, recipientName, actorName, kind) {
+function emailActionItem(bid, item, recipientName, actorName, kind, assigneeName) {
   const label = bid.project_name || bid.bid_number || 'Unnamed';
+  const hasBid = !!bid.bid_id;
   const link = bid.project_id && bid.bid_id ? `${APP_URL}/#project/${bid.project_id}/bid/${bid.bid_id}` : APP_URL;
   const done = kind === 'done';
+  const fyi = kind === 'assigned_fyi';
   return {
-    subject: done ? `Action item completed — ${label}` : `New action item for you — ${label}`,
+    subject: done ? `Action item completed — ${label}` : fyi ? `Action item assigned on your bid — ${label}` : `New action item for you — ${label}`,
     html: base(`
-      ${iconHeading(`${APP_URL}/icon-active-bids.png`, done ? 'Action Item Completed' : 'New Action Item')}
-      <p>Hi <strong>${recipientName}</strong>, <strong>${actorName}</strong> ${done ? 'marked an action item complete on your bid' : 'gave you an action item on a bid'}:</p>
+      ${iconHeading(`${APP_URL}/icon-active-bids.png`, done ? 'Action Item Completed' : fyi ? 'Action Item Assigned' : 'New Action Item')}
+      <p>Hi <strong>${recipientName}</strong>, <strong>${actorName}</strong> ${done ? 'marked an action item complete on your bid' : fyi ? `assigned ${assigneeName || 'a team member'} an action item on your bid` : (hasBid ? 'gave you an action item on a bid' : 'gave you an action item')}:</p>
       <p style="font-size:15px;font-weight:700;margin:10px 0">${item.title}${!done && item.due_date ? ` <span style="font-weight:400;color:#64748b">— due ${fmtDate(item.due_date)}</span>` : ''}</p>
-      ${bidTable(bid)}
-      ${actionButtons(bid, { href: link, label: 'Open Bid' })}
+      ${hasBid ? bidTable(bid) : ''}
+      ${hasBid ? actionButtons(bid, { href: link, label: 'Open Bid' }) : buttonRow({ href: `${APP_URL}/#action-items`, label: 'Open Action Items' })}
     `),
   };
 }

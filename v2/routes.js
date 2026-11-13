@@ -331,7 +331,7 @@ router.post('/api/v2/admin/merge-jobs',       requireAdmin, t(req => v2db.mergeJ
 router.post('/api/v2/admin/dismiss-duplicate', requireAdmin, t(req => v2db.dismissDuplicates(req.body.kind, req.body.ids)));
 router.delete('/api/v2/admin/project/:id',     requireAdmin, t(req => v2db.deleteEmptyProject(req.params.id),
   (req) => ({ action: 'admin.delete_project', summary: `Deleted empty project #${req.params.id}`, entity_type: 'project', entity_id: Number(req.params.id) })));
-router.delete('/api/v2/admin/bid/:id',         requireAdmin, t(req => v2db.deleteBid(req.params.id),
+router.delete('/api/v2/admin/bid/:id',         requireAdmin, t(req => v2db.deleteBid(req.params.id, { force: req.query.force === '1' }),
   (req, r) => ({ action: 'admin.delete_bid', summary: `Deleted bid ${r.label}`, entity_type: 'bid', entity_id: Number(req.params.id) })));
 router.post('/api/v2/admin/merge-contacts',    requireAdmin, t(req => v2db.mergeContacts(req.body.survivor_id, req.body.merge_ids),
   (req) => ({ action: 'admin.merge_contacts', summary: `Merged ${(req.body.merge_ids||[]).length} contact(s) into #${req.body.survivor_id}`, entity_type: 'contact', entity_id: Number(req.body.survivor_id) })));
@@ -585,7 +585,8 @@ router.post('/api/v2/jobs',                   t(req => v2db.createLegacyJob({ ..
   (req, r) => ({ action: 'job.create_legacy', summary: `Created legacy job #${r.job_id || r.id}`, entity_type: 'job', entity_id: r.job_id || r.id })));
 router.patch('/api/v2/jobs/:id',              t(req => v2db.updateJob(req.params.id, req.body, req.session.userId),
   (req) => ({ action: 'job.update', summary: `Edited job #${req.params.id} (${Object.keys(req.body).join(', ')})`, entity_type: 'job', entity_id: Number(req.params.id) })));
-router.post('/api/v2/jobs/:id/turnover',      t(req => v2db.setJobTurnover(req.params.id, 'est_turnover' in req.body ? req.body.est_turnover : undefined, 'est_turnover_date' in req.body ? req.body.est_turnover_date : undefined),
+router.get('/api/v2/turnovers',               async (req, res) => { try { res.json(await v2db.getTurnovers()); } catch (e) { res.status(500).json({ error: e.message }); } });
+router.post('/api/v2/jobs/:id/turnover',      t(req => v2db.setJobTurnover(req.params.id, 'est_turnover' in req.body ? req.body.est_turnover : undefined, 'est_turnover_date' in req.body ? req.body.est_turnover_date : undefined, 'foreman' in req.body ? req.body.foreman : undefined),
   (req) => ({ action: 'job.update', summary: `Set Estimating Turnover on job #${req.params.id} to ${req.body.est_turnover === '' || req.body.est_turnover == null ? 'unanswered' : (Number(req.body.est_turnover) === 1 ? 'Yes' : 'No')}`, entity_type: 'job', entity_id: Number(req.params.id) })));
 router.patch('/api/v2/jobs/:id/permits',      t(async req => {
     const before = await v2db.loadJob(req.params.id).catch(() => null);

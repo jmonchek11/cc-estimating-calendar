@@ -1436,6 +1436,11 @@ async function addSubEstimator(bidId, { estimator_id, scope }, actor) {
   if (!eid || !sys) throw new Error('Estimator and system/scope are both required');
   if ((bid.sub_estimators || []).some(s => s.estimator_id === eid && s.scope === sys)) throw new Error('That estimator is already assigned to this system');
   await M.Bid.updateOne({ _id: bid._id }, { $push: { sub_estimators: { estimator_id: eid, scope: sys } }, $set: { updated_at: ts() } });
+  // Give the sub-estimator an action item to complete their scope (completing it notifies the bid's estimator).
+  const autoKey = `sub:${eid}:${sys}`;
+  if (!(await M.ActionItem.exists({ bid_id: bid._id, auto_key: autoKey, status: 'open' }))) {
+    await M.ActionItem.create({ _id: await nextId('action_items'), bid_id: bid._id, title: `Complete your scope: ${sys}`, assigned_to: eid, created_by: actor?.id || null, due_date: bid.due_date || null, auto_key: autoKey });
+  }
   await logActivity({ actor_id: actor?.id, actor_name: actor?.name, action: 'bid.sub_estimator_add',
     summary: `Added sub-estimator (${sys}) to bid #${bid._id}${bid.bid_number ? ' (' + bid.bid_number + ')' : ''}`,
     entity_type: 'bid', entity_id: bid._id, undo: { bid_id: bid._id, estimator_id: eid, scope: sys } });
@@ -1444,6 +1449,7 @@ async function addSubEstimator(bidId, { estimator_id, scope }, actor) {
 async function removeSubEstimator(bidId, estimatorId, scope, actor) {
   const M = getModels();
   await M.Bid.updateOne({ _id: Number(bidId) }, { $pull: { sub_estimators: { estimator_id: Number(estimatorId), scope } }, $set: { updated_at: ts() } });
+  await M.ActionItem.deleteMany({ bid_id: Number(bidId), auto_key: `sub:${Number(estimatorId)}:${scope}`, status: 'open' });   // the auto-created to-do goes away with the assignment
   await logActivity({ actor_id: actor?.id, actor_name: actor?.name, action: 'bid.sub_estimator_remove',
     summary: `Removed sub-estimator (${scope}) from bid #${bidId}`,
     entity_type: 'bid', entity_id: Number(bidId), undo: { bid_id: Number(bidId), estimator_id: Number(estimatorId), scope } });
@@ -2931,7 +2937,7 @@ async function updateJob(id, data, actorId) {
 // Three-state on needs_permit (null = not yet answered), same pattern as
 // Bid.certified_payroll/tax_exempt/prevailing_wage.
 // Estimating Turnover: Yes = a >150hr job that needs a turnover from estimating.
-async function setJobTurnover(id, value, meetingDate) {
+async function setJobTurnover(id, value, meetingDate, foreman) {
   const M = getModels();
   const job = await M.Job.findById(Number(id)).lean();
   if (!job) throw new Error('Job not found');
@@ -2939,6 +2945,7 @@ async function setJobTurnover(id, value, meetingDate) {
   const upd = { updated_at: ts() };
   if (value !== undefined) upd.est_turnover = v;
   if (meetingDate !== undefined) upd.est_turnover_date = meetingDate || null;
+  if (foreman !== undefined) upd.foreman = String(foreman || '').trim() || null;
   await M.Job.updateOne({ _id: job._id }, { $set: upd });
   return { job_id: job._id, est_turnover: value !== undefined ? v : (job.est_turnover == null ? null : !!job.est_turnover), est_turnover_date: meetingDate !== undefined ? (meetingDate || null) : (job.est_turnover_date || null) };
 }
@@ -3068,7 +3075,7 @@ async function fmtActionItems(items) {
   const M = getModels();
   if (!items.length) return [];
   const [bids, members] = await Promise.all([
-    M.Bid.find({ _id: { $in: [...new Set(items.map(i => i.bid_id))] } }).lean(),
+    M.Bid.find({ _id: { $in: [...new Set(items.map(i => i.bid_id).filter(Boolean))] } }).lean(),
     M.TeamMember.find().lean(),
   ]);
   const projects = await M.Project.find({ _id: { $in: [...new Set(bids.map(b => b.project_id))] } }).lean();
@@ -3078,13 +3085,37 @@ async function fmtActionItems(items) {
   return items.map(i => {
     const b = bidBy[i.bid_id] || {};
     return {
-      id: i._id, bid_id: i.bid_id, bid_number: b.bid_number || null, project_id: b.project_id || null, project: pName[b.project_id] || '—',
+      id: i._id, bid_id: i.bid_id || null, general: !i.bid_id, bid_number: b.bid_number || null, project_id: b.project_id || null, project: i.bid_id ? (pName[b.project_id] || '—') : 'General',
       bid_stage: b.stage || null, estimator: tm[b.estimator_id] || null,
       title: i.title, due_date: i.due_date || null, status: i.status, recur: i.recur || null, occurrence: i.occurrence || 1,
       assignee: tm[i.assigned_to] || null, created_by: tm[i.created_by] || null,
       completed_by: tm[i.completed_by] || null, completed_at: i.completed_at || null, created_at: i.created_at,
     };
   });
+}
+
+// Estimating Turnover tracker: every job awarded in the last 12 months (plus any marked Yes), one row per job.
+async function getTurnovers() {
+  const M = getModels();
+  const since = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
+  const [jobs, members] = await Promise.all([
+    M.Job.find({ winning_bid_id: { $ne: null }, $or: [{ award_date: { $gte: since } }, { est_turnover: true }] }).lean(),
+    M.TeamMember.find().lean(),
+  ]);
+  const bids = await M.Bid.find({ _id: { $in: jobs.map(j => j.winning_bid_id) } }).lean();
+  const projects = await M.Project.find({ _id: { $in: jobs.map(j => j.project_id) } }).lean();
+  const bidBy = {}; bids.forEach(b => bidBy[b._id] = b);
+  const pName = {}; projects.forEach(p => pName[p._id] = p.name);
+  const tm = teamMap(members);
+  return {
+    rows: jobs.map(j => ({
+      job_id: j._id, project_id: j.project_id, project: pName[j.project_id] || '—', bid_id: j.winning_bid_id,
+      bid_number: bidBy[j.winning_bid_id]?.bid_number || null, job_number: j.job_number || null, award_date: j.award_date || null,
+      est_turnover: j.est_turnover == null ? null : !!j.est_turnover, est_turnover_date: j.est_turnover_date || null,
+      pm: tm[j.pm_id] || null, foreman: j.foreman || null,
+    })).sort((a, b) => (b.award_date || '').localeCompare(a.award_date || '')),
+    foremen: members.filter(m => m.role === 'foreman' && m.active).map(m => m.name),
+  };
 }
 
 async function getActionItems() {
@@ -3170,13 +3201,14 @@ async function createActionItem(data, actorId) {
   const title = String(data.title || '').trim();
   if (!title) throw new Error('Describe the action item');
   if (title.length > 200) throw new Error('Keep the action item under 200 characters');
-  const bid = await M.Bid.findById(Number(data.bid_id)).lean();
-  if (!bid) throw new Error('Pick a bid');
-  const assigned = data.assigned_to ? Number(data.assigned_to) : (bid.estimator_id || actorId || null);
+  // bid_id empty = a General action item (not tied to a bid).
+  const bid = data.bid_id ? await M.Bid.findById(Number(data.bid_id)).lean() : null;
+  if (data.bid_id && !bid) throw new Error('Pick a bid');
+  const assigned = data.assigned_to ? Number(data.assigned_to) : (bid?.estimator_id || actorId || null);
   const id = await nextId('action_items');
   const recur = normalizeRecur(data.recur, data.due_date || ts().slice(0, 10));
-  await M.ActionItem.create({ _id: id, bid_id: bid._id, title, assigned_to: assigned, created_by: actorId || null, due_date: data.due_date || (recur ? ts().slice(0, 10) : null), recur, series_id: recur ? id : null });
-  return { id, bid_id: bid._id, assigned_to: assigned };
+  await M.ActionItem.create({ _id: id, bid_id: bid ? bid._id : null, title, assigned_to: assigned, created_by: actorId || null, due_date: data.due_date || (recur ? ts().slice(0, 10) : null), recur, series_id: recur ? id : null });
+  return { id, bid_id: bid ? bid._id : null, assigned_to: assigned };
 }
 
 async function canTouchActionItem(item, actorId) {
@@ -3202,10 +3234,13 @@ async function updateActionItem(id, data, actorId) {
   }
   if ('due_date' in data) upd.due_date = data.due_date || null;
   if ('assigned_to' in data) upd.assigned_to = data.assigned_to ? Number(data.assigned_to) : null;
-  if ('bid_id' in data && data.bid_id) {
-    const bid = await M.Bid.findById(Number(data.bid_id)).lean();
-    if (!bid) throw new Error('Pick a bid');
-    upd.bid_id = bid._id;
+  if ('bid_id' in data) {
+    if (!data.bid_id) upd.bid_id = null;   // switched to General
+    else {
+      const bid = await M.Bid.findById(Number(data.bid_id)).lean();
+      if (!bid) throw new Error('Pick a bid');
+      upd.bid_id = bid._id;
+    }
   }
   if ('recur' in data) {
     const recur = normalizeRecur(data.recur, (upd.due_date !== undefined ? upd.due_date : item.due_date) || ts().slice(0, 10));
@@ -4478,7 +4513,10 @@ async function getDashboard(userId, mineOnly) {
     .map(bucket => ({ ...bucket, bids: bucket.bids.sort((a, b) => (b.award_date || '').localeCompare(a.award_date || '')) }));
 
   // Estimating Turnover not yet answered on recently awarded jobs (last 45 days).
-  const myActionItemsDue = userId ? await M.ActionItem.countDocuments({ assigned_to: Number(userId), status: 'open', due_date: { $ne: null, $lte: today } }) : 0;
+  const myActionRows = userId ? await M.ActionItem.find({ assigned_to: Number(userId), status: 'open' }).lean() : [];
+  const myActionItemsDue = myActionRows.filter(i => i.due_date && i.due_date <= today).length;
+  const myActionItems = (await fmtActionItems(myActionRows)).sort((a, b) => (a.due_date || '9999').localeCompare(b.due_date || '9999')).slice(0, 10);
+  const myActionItemsTotal = myActionRows.length;
   const turnoverNeeded = jobs
     .filter(j => j.winning_bid_id && j.est_turnover == null && (j.award_date || '') >= ago(45))
     .filter(j => !uid || (bidById[j.winning_bid_id] && isMyBid(bidById[j.winning_bid_id])) || j.pm_id === uid || j.apm_id === uid)
@@ -4486,7 +4524,7 @@ async function getDashboard(userId, mineOnly) {
     .map(j => ({ id: j._id, project_id: j.project_id, project: pName[j.project_id] || '—', job_number: j.job_number, award_date: j.award_date }));
   return {
     mineOnly: !!uid,
-    myActionItemsDue,
+    myActionItemsDue, myActionItems, myActionItemsTotal,
     turnoverNeeded,
     pipeline,
     activeCoCount: activeCos.length,
@@ -4927,13 +4965,25 @@ async function deleteEmptyProject(id) {
 // from opportunity/active_bid with no submission ever happening (e.g. bids
 // manually closed as "not pursuing" before the Excel import), so a closed
 // duplicate with no submission is still a clean accident, not real history.
-async function deleteBid(id) {
+async function deleteBid(id, opts = {}) {
   const M = getModels();
   const bid = await M.Bid.findById(Number(id)).lean();
   if (!bid) throw new Error('Bid not found');
   const DECIDED = ['awarded', 'not_awarded'];
   if (DECIDED.includes(bid.stage)) throw new Error(`Can't delete — this bid is already ${bid.stage}, that's real history.`);
-  if (await M.BidSubmission.exists({ bid_id: bid._id })) throw new Error("Can't delete — this bid already has a submission. Close it instead if it's no longer needed.");
+  const subs = await M.BidSubmission.find({ bid_id: bid._id }).lean();
+  if (subs.length) {
+    // An admin can force-delete an accidental duplicate even though it was submitted — but only while
+    // nothing has been decided on it and no job came from it.
+    if (!opts.force) throw new Error("Can't delete — this bid already has a submission. An admin can delete it as a duplicate from Data Health, or close it instead.");
+    if (subs.some(s => s.outcome && s.outcome !== 'pending')) throw new Error("Can't delete — a customer on this bid already has an award/not-awarded decision, that's real history.");
+    if (await M.Job.exists({ winning_bid_id: bid._id })) throw new Error("Can't delete — a job was created from this bid.");
+    const subIds = subs.map(s => s._id);
+    await M.Followup.deleteMany({ $or: [{ parent_type: 'bid', parent_id: bid._id }, { parent_type: 'bid_submission', parent_id: { $in: subIds } }] });
+    await M.BidSubmission.deleteMany({ bid_id: bid._id });
+  }
+  await M.Note.deleteMany({ parent_type: 'bid', parent_id: bid._id });
+  await M.ActionItem.deleteMany({ bid_id: bid._id });
   const label = [bid.bid_number, bid.project_name].filter(Boolean).join(' ') || `bid #${bid._id}`;
   await M.BidCustomer.deleteMany({ bid_id: bid._id });
   await M.Reminder.deleteMany({ parent_type: 'bid', parent_id: bid._id });
@@ -5505,7 +5555,7 @@ module.exports = {
   getCompanyCommunications, getContactCommunications, getAllCommunications,
   addBidCustomerContact, removeBidCustomerContact, setBidCustomerPortalUrl,
   awardSubmission, notAwardSubmission, revertAward, revertNotAwarded, closeBid, approveToBid, unapproveToBid, logFollowupV2, updateFollowup,
-  createLegacyJob, updateJob, updateJobPermits, setJobTurnover, getActionItems, createActionItem, updateActionItem, setActionItemDone, deleteActionItem, fmtActionItems, getPermitsOverview, createPermit, updatePermit, addPermitUpdate, loadJob, permitAction, getStalePermits, markPermitsNudged, deletePermit, permitJobNumber,
+  createLegacyJob, updateJob, updateJobPermits, setJobTurnover, getTurnovers, getActionItems, createActionItem, updateActionItem, setActionItemDone, deleteActionItem, fmtActionItems, getPermitsOverview, createPermit, updatePermit, addPermitUpdate, loadJob, permitAction, getStalePermits, markPermitsNudged, deletePermit, permitJobNumber,
   createChangeOrder, submitCO, approveCO, notApproveCO, voidCO, reopenCO, reviseCO,
   createCoRequest, approveCoRequest, unapproveCoRequest, startCoRequest,
   _norm, resolveCompanyByName, ensureBidCustomer, teamMap,

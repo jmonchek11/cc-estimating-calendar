@@ -322,19 +322,33 @@ async function actionItemParts(itemId) {
   const M = getModels();
   const item = await M.ActionItem.findById(Number(itemId)).lean();
   if (!item) return null;
+  if (!item.bid_id) return { item, shape: { project_name: 'General (no bid)' } };   // a General item has no bid to describe
   const shape = await bidEmailShape(item.bid_id);
   return shape ? { item, shape } : null;
 }
 // Assignee gets a heads-up when someone else gives them an action item.
 async function notifyActionItemAssigned(itemId, actorId) {
   try {
+    const M = getModels();
     const p = await actionItemParts(itemId); if (!p) return;
-    if (!p.item.assigned_to || p.item.assigned_to === Number(actorId)) return;
-    const recipient = await emailForV2Member(p.item.assigned_to);
-    if (!recipient?.email || !mailer.wantsNotification(recipient, 'assigned')) return;
     const actor = actorId ? await maindb.getMember(actorId) : null;
-    const { subject, html } = mailer.emailActionItem(p.shape, p.item, recipient.name, actor?.name || 'A team member', 'assigned');
-    await mailer.sendMail({ to: recipient.email, subject, html });
+    const actorName = actor?.name || 'A team member';
+    const assignee = p.item.assigned_to ? await emailForV2Member(p.item.assigned_to) : null;
+    // 1) the person it's assigned to
+    if (assignee?.email && p.item.assigned_to !== Number(actorId) && mailer.wantsNotification(assignee, 'assigned')) {
+      const { subject, html } = mailer.emailActionItem(p.shape, p.item, assignee.name, actorName, 'assigned');
+      await mailer.sendMail({ to: assignee.email, subject, html });
+    }
+    // 2) the estimator in charge of the bid, so they know who was given what on their bid
+    const bid = p.item.bid_id ? await M.Bid.findById(p.item.bid_id).lean() : null;
+    const estId = bid?.estimator_id;
+    if (estId && estId !== Number(actorId) && estId !== p.item.assigned_to) {
+      const est = await emailForV2Member(estId);
+      if (est?.email && mailer.wantsNotification(est, 'assigned')) {
+        const { subject, html } = mailer.emailActionItem(p.shape, p.item, est.name, actorName, 'assigned_fyi', assignee?.name);
+        await mailer.sendMail({ to: est.email, subject, html });
+      }
+    }
   } catch (e) { console.error('[v2 notify] action-item assigned email failed:', e.message); }
 }
 // The bid's estimator hears when someone else completes an action item on their bid.

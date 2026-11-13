@@ -425,6 +425,7 @@
       <div class="nav-section-label">PROJECTS</div>
       <a class="nav-item" data-page="projects" href="#projects" onclick="navigate('projects');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg></span> Projects</a>
       <a class="nav-item" data-page="permits" href="#permits" onclick="navigate('permits');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-4"/><path d="M9 9v.01M9 12v.01M9 15v.01M9 18v.01"/></svg></span> Permits</a>
+      <a class="nav-item" data-page="turnover" href="#turnover" onclick="navigate('turnover');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span> Estimating Turnover</a>
       <div class="nav-section-label">REPORTS</div>
       <a class="nav-item" data-page="reports" href="#reports" onclick="navigate('reports');return false"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></span> Reports</a>
       <div class="nav-section-label">PEOPLE</div>
@@ -508,6 +509,7 @@ const PAGE_ICONS = {
   communications: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
   settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
   search: '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
+  turnover: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
   'action-items': '<polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
   permits: '<path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-4"/><path d="M9 9v.01M9 12v.01M9 15v.01M9 18v.01"/>',
   'out-of-office': '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>',
@@ -752,7 +754,7 @@ const NAV_PAGE_TITLES = {
   'active-cos': 'Active Change Orders', 'submitted-cos': 'Change Orders to Follow Up On',
   'approved-cos': 'Approved Change Orders', 'not-approved-cos': 'Not Approved Change Orders',
   search: 'Search', contacts: 'Contacts', vendors: 'Vendors', reports: 'Reports', digest: 'Weekly Digest',
-  calendar: 'Calendar', settings: 'Settings', permits: 'Permits', 'out-of-office': 'Out of Office', 'action-items': 'Action Items',
+  calendar: 'Calendar', settings: 'Settings', permits: 'Permits', 'out-of-office': 'Out of Office', 'action-items': 'Action Items', turnover: 'Estimating Turnover',
 };
 // Parses the current URL hash and renders whatever it points to — used on
 // initial load (bootstrap) and on browser back/forward (popstate), so both
@@ -839,6 +841,7 @@ function navigate(page) {
   if (page === 'settings') { VIEW = { name: 'settings' }; return renderSettings(); }
   if (page === 'permits') { VIEW = { name: 'permits' }; return renderPermits(); }
   if (page === 'action-items') { VIEW = { name: 'action-items' }; return renderActionItems(); }
+  if (page === 'turnover') { VIEW = { name: 'turnover' }; return renderTurnover(); }
   if (page === 'out-of-office') { VIEW = { name: 'out-of-office' }; return renderOutOfOfficePage(); }
   VIEW = { name: 'projects' }; return load();
 }
@@ -863,6 +866,7 @@ async function rerenderView() {
     case 'communications': return renderCommunications();
     case 'permits':   return renderPermits();
     case 'action-items': return renderActionItems();
+    case 'turnover': return renderTurnover();
     case 'out-of-office': return renderOutOfOfficePage();
   }
 }
@@ -2269,6 +2273,29 @@ document.addEventListener('click', (e) => {
 document.head.appendChild(Object.assign(document.createElement('style'), { textContent: 'thead th:not([onclick]){cursor:pointer;user-select:none}thead th:not([onclick]):hover{color:var(--text)}' }));
 
 let AWARDED_EXPANDED = false;
+// "My Action Items" on the Dashboard: what's on my list, due soonest first, checkable in place.
+function dashActionItemsCardHtml(d) {
+  const items = d.myActionItems || [];
+  if (!items.length) return '';
+  const total = d.myActionItemsTotal || items.length;
+  return `<div class="card" style="padding:12px 16px;margin-bottom:14px">
+    <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:4px">
+      <div style="font-weight:800;font-size:14px">☑ My Action Items <span style="font-weight:600;color:var(--text-muted);font-size:12px">(${total}${d.myActionItemsDue ? ' · <span style="color:#dc2626">' + d.myActionItemsDue + ' due or overdue</span>' : ''})</span></div>
+      <a href="#" onclick="event.preventDefault();actNewActionItem()" style="margin-left:auto;font-size:12px;font-weight:600">+ Add</a>
+      <a href="#" onclick="event.preventDefault();navigate('action-items')" style="font-size:12px;font-weight:600">View all →</a>
+    </div>
+    ${items.map(i => {
+      const late = i.due_date && i.due_date < today, dueToday = i.due_date === today;
+      return `<div style="display:flex;align-items:center;gap:10px;padding:6px 2px;border-top:1px solid var(--border)">
+        <input type="checkbox" style="width:17px;height:17px;flex-shrink:0;cursor:pointer" onchange="actToggleActionItemInPlace(${i.id}, this.checked)" title="Mark complete">
+        <div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600">${esc(i.title)}${i.recur ? ' 🔁' : ''}</div>
+          <div style="font-size:11.5px;color:var(--text-muted)">${i.general ? 'General' : esc((i.bid_number ? i.bid_number + ' — ' : '') + i.project)}</div></div>
+        ${i.due_date ? `<span style="font-size:12px;font-weight:700;color:${late ? '#dc2626' : dueToday ? '#c2410c' : 'var(--text-muted)'}">${late ? 'Overdue · ' : dueToday ? 'Today · ' : ''}${fmtD(i.due_date)}</span>` : ''}
+        <a href="#" onclick="event.preventDefault();actEditActionItem(${i.id})" title="Edit" style="text-decoration:none">✏️</a></div>`;
+    }).join('')}
+    ${total > items.length ? `<div style="font-size:11.5px;color:var(--text-muted);padding-top:4px">+ ${total - items.length} more — <a href="#" onclick="event.preventDefault();navigate('action-items')">view all</a></div>` : ''}
+  </div>`;
+}
 let DASH_DATA = null;   // last-rendered dashboard payload, kept around so the Awarded (YTD) card can pop its month breakout without a re-fetch
 
 async function renderDashboard() {
@@ -2307,7 +2334,7 @@ async function renderDashboard() {
       <button class="v2-btn amber dash-action-desktop" style="padding:8px 14px;font-size:12px" onclick="actImportJIS()">📄 Import Bid (JIS)</button>
       <button class="v2-btn blue dash-action-mobile" style="padding:8px 14px;font-size:12px" onclick="actDashAddMenu()">+ Add ▾</button>
     </div>
-    ${d.myActionItemsDue ? `<div style="border:1px solid #bfdbfe;background:#eff6ff;border-radius:10px;padding:8px 14px;margin-bottom:14px;font-size:13px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">☑ <span>You have <strong>${d.myActionItemsDue}</strong> action item${d.myActionItemsDue === 1 ? '' : 's'} due today or overdue</span><a href="#" onclick="event.preventDefault();navigate('action-items')" style="font-weight:700;margin-left:auto">View →</a></div>` : ''}
+    ${dashActionItemsCardHtml(d)}
     ${(d.turnoverNeeded || []).length ? `<div style="border:1px solid #fed7aa;background:#fff7ed;border-radius:10px;padding:10px 14px;margin-bottom:14px">
       <div style="font-weight:700;font-size:13px;color:#c2410c;margin-bottom:6px">Estimating Turnover not filled out (${d.turnoverNeeded.length}) — is it a &gt;150hr job?</div>
       ${d.turnoverNeeded.slice(0, 8).map(t => `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:3px 0;font-size:12.5px">
@@ -4384,8 +4411,8 @@ function actToggleProjectOnHold(projectId, onHold) {
 }
 
 function actDeleteSupersededBid(bidId, label) {
-  if (!confirm(`Permanently delete this copy of ${label}? Use this only for an accidental duplicate. It cannot be undone. (The app refuses if the bid has a submission or was awarded/not awarded.)`)) return;
-  api('DELETE', `/api/v2/admin/bid/${bidId}`).then(refresh).catch(e => alert('Could not delete: ' + e.message));
+  if (!confirm(`Permanently delete this copy of ${label}? Use this only for an accidental duplicate. Any submissions on it are deleted too. It cannot be undone. (The app refuses if a customer already has an award/not-awarded decision on it, or a job came from it.)`)) return;
+  api('DELETE', `/api/v2/admin/bid/${bidId}?force=1`).then(refresh).catch(e => alert('Could not delete: ' + e.message));
 }
 function actRestoreSuperseded(bidId, label) {
   if (!confirm(`Restore ${label}? It goes back to being a live bid and shows up in lists, the dashboard and reports again. (If it is a duplicate of another bid, leave it superseded instead.)`)) return;
@@ -5508,8 +5535,9 @@ function renderActionItemsBody() {
   const open = scoped.filter(i => i.status === 'open'), done = scoped.filter(i => i.status === 'done');
   const overdue = open.filter(i => i.due_date && i.due_date <= today).length;
   const byBid = {};
-  (S.showDone ? scoped : open).forEach(i => (byBid[i.bid_id] = byBid[i.bid_id] || []).push(i));
-  const groups = Object.values(byBid).sort((a, b) => (a[0].bid_number || 'zzz').localeCompare(b[0].bid_number || 'zzz') || a[0].project.localeCompare(b[0].project));
+  (S.showDone ? scoped : open).forEach(i => (byBid[i.bid_id || 'general'] = byBid[i.bid_id || 'general'] || []).push(i));
+  // General items (not tied to a bid) first, then bids by number.
+  const groups = Object.values(byBid).sort((a, b) => (b[0].general ? 1 : 0) - (a[0].general ? 1 : 0) || (a[0].bid_number || 'zzz').localeCompare(b[0].bid_number || 'zzz') || a[0].project.localeCompare(b[0].project));
   const row = (i) => {
     const isDone = i.status === 'done';
     const late = !isDone && i.due_date && i.due_date < today, dueToday = !isDone && i.due_date === today;
@@ -5537,9 +5565,10 @@ function renderActionItemsBody() {
     </div>
     ${groups.length ? groups.map(g => `<div class="card" style="margin-bottom:12px;padding:12px 16px">
       <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:4px">
-        <a href="#" onclick="event.preventDefault();openBidFlyout(${g[0].project_id},${g[0].bid_id})" style="font-weight:800;font-size:14px;color:var(--text)">${g[0].bid_number ? esc(g[0].bid_number) + ' — ' : ''}${esc(g[0].project)}</a>
-        <span style="font-size:11.5px;color:var(--text-muted)">${g[0].estimator ? 'Estimator: ' + esc(g[0].estimator.name) : ''}</span>
-        <button class="v2-btn outline" style="margin-left:auto;padding:2px 10px;font-size:11px" onclick="actNewActionItem(${g[0].bid_id})">+ Add</button>
+        ${g[0].general ? '<span style="font-weight:800;font-size:14px">General</span><span style="font-size:11.5px;color:var(--text-muted)">not tied to a bid</span>'
+          : `<a href="#" onclick="event.preventDefault();openBidFlyout(${g[0].project_id},${g[0].bid_id})" style="font-weight:800;font-size:14px;color:var(--text)">${g[0].bid_number ? esc(g[0].bid_number) + ' — ' : ''}${esc(g[0].project)}</a>
+        <span style="font-size:11.5px;color:var(--text-muted)">${g[0].estimator ? 'Estimator: ' + esc(g[0].estimator.name) : ''}</span>`}
+        <button class="v2-btn outline" style="margin-left:auto;padding:2px 10px;font-size:11px" onclick="actNewActionItem(${g[0].general ? "'general'" : g[0].bid_id})">+ Add</button>
       </div>
       ${g.sort((a, b) => (a.status === b.status ? 0 : a.status === 'done' ? 1 : -1) || (a.due_date || '9999').localeCompare(b.due_date || '9999')).map(row).join('')}
     </div>`).join('') : `<div class="card" style="padding:24px;text-align:center;color:var(--text-muted)">${S.mine ? 'Nothing on your list — nice.' : 'No open action items.'}</div>`}
@@ -5575,16 +5604,18 @@ function mountActionBidPicker(bids, selectedId) {
   box.innerHTML = `<div class="v2-field"><label>Bid (type a bid # or project name) <span style="color:#dc2626">*</span></label>
     <div id="aib-chip"></div>
     <input id="aib-input" type="text" autocomplete="off" placeholder="Start typing…" oninput="actionBidSearch()">
+    <div id="aib-general" style="margin-top:6px"><button type="button" class="v2-btn outline" style="padding:3px 10px;font-size:11.5px" onclick="pickActionBid('general')">General — not tied to a bid</button></div>
     <div id="aib-results" style="display:flex;flex-direction:column;gap:4px;margin-top:6px"></div></div>`;
   renderActionBidChip();
 }
 function renderActionBidChip() {
   const chip = document.getElementById('aib-chip'), input = document.getElementById('aib-input'); if (!chip || !input) return;
-  const b = AI_BID_LIST.find(x => x.id === AI_BID_PICK);
+  const b = AI_BID_PICK === 'general' ? { bid_number: 'General', project: 'not tied to a bid' } : AI_BID_LIST.find(x => x.id === AI_BID_PICK);
   chip.innerHTML = b ? `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:#f0fdf4;margin-bottom:4px">
     <span style="flex:1;min-width:0;font-size:13px;font-weight:600">${esc(b.bid_number || 'Opportunity')} — ${esc(b.project)}</span>
     <button type="button" class="v2-btn outline" style="padding:2px 8px;font-size:11px" onclick="clearActionBid()">change</button></div>` : '';
   input.style.display = b ? 'none' : '';
+  const gen = document.getElementById('aib-general'); if (gen) gen.style.display = b ? 'none' : '';
   document.getElementById('aib-results').innerHTML = '';
 }
 function actionBidSearch() {
@@ -5655,8 +5686,8 @@ async function openActionItemForm(item, presetBidId) {
   if (!ACTION_STATE.data) { try { ACTION_STATE.data = await api('GET', '/api/v2/action-items'); } catch (e) { alert('Failed: ' + e.message); return; } }
   await ensureMeta();
   const bids = [...ACTION_STATE.data.bids];
-  const bidId = item ? item.bid_id : presetBidId;
-  if (bidId && !bids.some(b => b.id === bidId)) {   // e.g. an awarded bid reached from its job card
+  const bidId = item ? (item.general ? 'general' : item.bid_id) : presetBidId;
+  if (bidId && bidId !== 'general' && !bids.some(b => b.id === bidId)) {   // e.g. an awarded bid reached from its job card
     const cached = Object.values(DETAIL_CACHE).flatMap(p => p.bids || []).find(b => b.id === bidId);
     bids.push({ id: bidId, bid_number: item?.bid_number || cached?.bid_number || null, project: item?.project || (cached ? (DETAIL_CACHE[cached.project_id]?.name || 'this bid') : 'this bid') });
   }
@@ -5667,8 +5698,8 @@ async function openActionItemForm(item, presetBidId) {
     { id: 'due_date', label: item ? 'Due' : 'Due (first occurrence, if repeating)', type: 'date', value: item ? item.due_date : today },
     { id: 'recur_block', type: 'custom' },
   ], async data => {
-    if (!AI_BID_PICK) throw new Error('Pick a bid');
-    const body = { title: data.title, assigned_to: data.assigned_to, due_date: data.due_date, bid_id: AI_BID_PICK, recur: readRecur() || { freq: 'none' } };
+    if (!AI_BID_PICK) throw new Error('Pick a bid, or choose General');
+    const body = { title: data.title, assigned_to: data.assigned_to, due_date: data.due_date, bid_id: AI_BID_PICK === 'general' ? null : AI_BID_PICK, recur: readRecur() || { freq: 'none' } };
     if (item) await api('PATCH', `/api/v2/action-items/${item.id}`, body); else await api('POST', '/api/v2/action-items', body);
     ACTION_STATE.data = null;
   }, item ? 'Save' : 'Create');
@@ -5704,6 +5735,57 @@ function toggleActionChip(bidId) { if (AI_CHIP_OPEN.has(bidId)) AI_CHIP_OPEN.del
 async function actToggleActionItemInPlace(id, done) {
   try { await api('POST', `/api/v2/action-items/${id}/done`, { done }); ACTION_STATE.data = null; await refresh(); }
   catch (e) { alert('Failed: ' + e.message); await refresh(); }
+}
+
+// ── Estimating Turnover tracker ───────────────────────────────────────────────
+// One row per recently awarded job so the lead estimator and PC can see which jobs need a turnover
+// (>150hr), when it's scheduled, and who the PM / foreman are. Everything edits in place.
+const TURN_STATE = { data: null, tab: 'attention' };
+async function renderTurnover() {
+  setActiveNav('turnover');
+  const main = document.getElementById('main');
+  if (!TURN_STATE.data) main.innerHTML = '<div style="padding:30px;color:var(--text-muted)">Loading…</div>';
+  try { TURN_STATE.data = await api('GET', '/api/v2/turnovers'); }
+  catch (e) { main.innerHTML = `<div class="err-card" style="margin:20px">${esc(e.message)}</div>`; return; }
+  renderTurnoverBody();
+}
+function setTurnTab(t) { TURN_STATE.tab = t; renderTurnoverBody(); }
+function renderTurnoverBody() {
+  const main = document.getElementById('main'), S = TURN_STATE, rows = S.data.rows;
+  const needs = r => r.est_turnover == null || (r.est_turnover === true && !r.est_turnover_date);
+  const counts = { attention: rows.filter(needs).length, required: rows.filter(r => r.est_turnover === true).length, all: rows.length };
+  const shown = S.tab === 'attention' ? rows.filter(needs) : S.tab === 'required' ? rows.filter(r => r.est_turnover === true) : rows;
+  const tab = (k, label) => `<button class="v2-btn ${S.tab === k ? 'blue' : 'outline'}" style="padding:7px 14px;font-size:12px" onclick="setTurnTab('${k}')">${label} (${counts[k]})</button>`;
+  const inp = 'font-size:12px;padding:3px 6px;border:1px solid var(--border);border-radius:6px';
+  const th = (l, extra) => `<th style="text-align:left;padding:6px 10px;color:var(--text-muted);font-weight:600;font-size:11px${extra || ''}">${l}</th>`;
+  main.innerHTML = `
+    <div class="page-header">
+      <div><div class="page-title">${pageIcon('turnover')} Estimating Turnover</div>
+        <div class="page-subtitle">Jobs awarded in the last 12 months · ${counts.required} need a turnover · ${counts.attention} still need an answer or a date</div></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">${tab('attention', 'Needs attention')}${tab('required', 'Turnover required')}${tab('all', 'All')}</div>
+    </div>
+    <datalist id="turn-foremen">${(S.data.foremen || []).map(f => `<option value="${esc(f)}">`).join('')}</datalist>
+    <div class="card" style="padding:0;overflow-x:auto">
+      ${shown.length ? `<table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead><tr style="border-bottom:1px solid var(--border)">${th('Bid Number')}${th('Job')}${th('Turnover Required?')}${th('Date Scheduled')}${th('PM Assigned')}${th('Foreman Assigned')}</tr></thead>
+        <tbody>${shown.map(r => `<tr style="border-bottom:1px solid #f1f5f9">
+          <td style="padding:7px 10px;font-weight:700" data-sort="${esc(r.bid_number || '')}">${esc(r.bid_number || '—')}</td>
+          <td style="padding:7px 10px"><a href="#" onclick="event.preventDefault();renderProjectPage(${r.project_id})" style="color:var(--text);font-weight:600">${esc(r.project)}</a>${r.job_number ? ` <span style="color:var(--text-muted);font-size:12px">· Job ${esc(r.job_number)}</span>` : ''}</td>
+          <td style="padding:7px 10px" data-sort="${r.est_turnover === true ? 'yes' : r.est_turnover === false ? 'no' : ''}"><select style="${inp}${r.est_turnover == null ? ';border-color:#fdba74;background:#fff7ed' : ''}" onchange="actTurnRow(${r.job_id}, 'est_turnover', this.value)">
+            <option value="" ${r.est_turnover == null ? 'selected' : ''}>— answer —</option><option value="1" ${r.est_turnover === true ? 'selected' : ''}>Yes</option><option value="0" ${r.est_turnover === false ? 'selected' : ''}>No</option></select></td>
+          <td style="padding:7px 10px" data-sort="${r.est_turnover_date || ''}"><input type="date" value="${r.est_turnover_date || ''}" style="${inp}${r.est_turnover === true && !r.est_turnover_date ? ';border-color:#fdba74;background:#fff7ed' : ''}" onchange="actTurnRow(${r.job_id}, 'est_turnover_date', this.value)"></td>
+          <td style="padding:7px 10px" data-sort="${esc(r.pm?.name || '')}">${r.pm ? ini(r.pm) + ' ' + esc(r.pm.name) : '<span style="color:var(--text-muted)">—</span>'}</td>
+          <td style="padding:7px 10px" data-sort="${esc(r.foreman || '')}"><input type="text" list="turn-foremen" value="${esc(r.foreman || '')}" placeholder="Foreman…" style="${inp};width:150px" onchange="actTurnRow(${r.job_id}, 'foreman', this.value)"></td>
+        </tr>`).join('')}</tbody></table>` : '<div style="padding:24px;text-align:center;color:var(--text-muted)">Nothing here.</div>'}
+    </div>`;
+}
+async function actTurnRow(jobId, field, value) {
+  try {
+    await api('POST', `/api/v2/jobs/${jobId}/turnover`, { [field]: value });
+    const r = TURN_STATE.data.rows.find(x => x.job_id === jobId);
+    if (r) { if (field === 'est_turnover') r.est_turnover = value === '' ? null : value === '1'; else if (field === 'est_turnover_date') r.est_turnover_date = value || null; else r.foreman = value.trim() || null; }
+    renderTurnoverBody();
+  } catch (e) { alert('Failed: ' + e.message); }
 }
 
 async function renderPermits() {
@@ -6194,10 +6276,10 @@ async function doDeleteDupBids(gi) {
   const keepId = Number(document.getElementById(`dupbid-keep-${gi}`).value);
   const toDelete = group.bids.map(b => b.id).filter(id => id !== keepId);
   if (!toDelete.length) return;
-  if (!confirm(`Delete ${toDelete.length} duplicate bid(s) (#${toDelete.join(', #')}), keeping #${keepId}?\n\nThis cannot be undone.`)) return;
+  if (!confirm(`Delete ${toDelete.length} duplicate bid(s) (#${toDelete.join(', #')}), keeping #${keepId}?\n\nAny submissions, follow-ups and action items on the deleted copies go with them. This cannot be undone.`)) return;
   const errors = [];
   for (const id of toDelete) {
-    try { await api('DELETE', `/api/v2/admin/bid/${id}`); }
+    try { await api('DELETE', `/api/v2/admin/bid/${id}?force=1`); }
     catch (e) { errors.push(`#${id}: ${e.message}`); }
   }
   if (errors.length) alert('Some deletions failed:\n' + errors.join('\n'));
@@ -8045,7 +8127,7 @@ const IDEA_PAGE_NAMES = {
   'active-cos': 'Active Change Orders', 'submitted-cos': 'Change Orders to Follow Up On',
   'approved-cos': 'Approved Change Orders', 'not-approved-cos': 'Not Approved Change Orders',
   projects: 'Projects', contacts: 'Contacts', vendors: 'Vendors', reports: 'Reports', health: 'Data Health', history: 'History', communications: 'Communications',
-  settings: 'Settings', ideas: 'Ideas & Issues', permits: 'Permits', 'out-of-office': 'Out of Office', 'action-items': 'Action Items',
+  settings: 'Settings', ideas: 'Ideas & Issues', permits: 'Permits', 'out-of-office': 'Out of Office', 'action-items': 'Action Items', turnover: 'Estimating Turnover',
 };
 // Visible to everyone (not just admins) — the whole point of voting is that
 // people can see what's already been suggested and back it instead of
